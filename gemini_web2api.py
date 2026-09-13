@@ -119,6 +119,43 @@ MODELS = {
         "mode": 6, "think": 4,
         "desc": "Lightweight ultra-fast model",
     },
+    # ─── Nano Banana Family (Image & Multimodal Synthesis) ───────────────
+    "nano-banana-2": {
+        "mode": 1, "think": 4,
+        "desc": "Nano Banana 2 (Gemini 3.1 Flash Image - State-of-the-art fast image generation & editing)",
+    },
+    "nano-banana-pro": {
+        "mode": 3, "think": 4,
+        "desc": "Nano Banana Pro (Gemini 3 Pro Image - High-fidelity reasoning & photorealistic generation)",
+    },
+    "nano-banana": {
+        "mode": 1, "think": 4,
+        "desc": "Nano Banana (Gemini 2.5 Flash Image - Original viral image generator & editor)",
+    },
+    "nano-banana-2-lite": {
+        "mode": 6, "think": 4,
+        "desc": "Nano Banana 2 Lite (Gemini 3.1 Flash-Lite Image - Rapid lightweight image model)",
+    },
+    "gemini-3.1-flash-image": {
+        "mode": 1, "think": 4,
+        "desc": "Gemini 3.1 Flash Image (Nano Banana 2)",
+    },
+    "gemini-3-pro-image": {
+        "mode": 3, "think": 4,
+        "desc": "Gemini 3 Pro Image (Nano Banana Pro)",
+    },
+    "gemini-2.5-flash-image": {
+        "mode": 1, "think": 4,
+        "desc": "Gemini 2.5 Flash Image (Nano Banana)",
+    },
+    "gemini-3.1-flash-lite-image": {
+        "mode": 6, "think": 4,
+        "desc": "Gemini 3.1 Flash-Lite Image (Nano Banana 2 Lite)",
+    },
+    "imagen-3": {
+        "mode": 3, "think": 4,
+        "desc": "Imagen 3 / Nano Banana Pro Image Model",
+    },
 }
 
 # ─── Utilities ───────────────────────────────────────────────────────────────
@@ -133,7 +170,12 @@ def load_cookie() -> tuple:
     """Load cookie from file. Returns (cookie_str, sapisid)."""
     cookie_file = CONFIG.get("cookie_file")
     if not cookie_file or not os.path.exists(cookie_file):
-        return "", None
+        for candidate in ("cookie-safe.txt", "cookie.txt"):
+            if os.path.exists(candidate):
+                cookie_file = candidate
+                break
+        else:
+            return "", None
     try:
         with open(cookie_file, "r", encoding="utf-8") as f:
             content = f.read().strip()
@@ -289,13 +331,20 @@ def detect_image_mime(image_bytes: bytes, fallback: str = "image/png") -> str:
 
 
 def fetch_image_bytes(url: str) -> bytes:
-    """Fetch image from remote HTTP/HTTPS URL."""
+    """Fetch image from remote HTTP/HTTPS URL with auth headers if Google."""
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in ("http", "https"):
         log(f"Image fetch skipped for unsupported URL scheme: {parsed.scheme or 'none'}")
         return b""
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+        }
+        if "googleusercontent.com" in url or "google.com" in url:
+            cookie_str, _ = load_cookie()
+            if cookie_str:
+                headers["Cookie"] = cookie_str
+        req = urllib.request.Request(url, headers=headers)
         proxy = CONFIG.get("proxy")
         ctx = ssl.create_default_context()
         if proxy:
@@ -310,6 +359,57 @@ def fetch_image_bytes(url: str) -> bytes:
     except Exception as e:
         log(f"Image fetch failed: {e}")
         return b""
+
+
+def upload_to_catbox(image_bytes: bytes, filename: str = "image.png") -> str:
+    """Upload image bytes to catbox.moe and return public direct URL."""
+    if not image_bytes:
+        return ""
+    boundary = f"----WebKitFormBoundary{uuid.uuid4().hex}"
+    body = bytearray()
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(b'Content-Disposition: form-data; name="reqtype"\r\n\r\n')
+    body.extend(b"fileupload\r\n")
+
+    mime = detect_image_mime(image_bytes, "image/png")
+    ext = mime.split("/")[-1] if "/" in mime else "png"
+    if not filename.endswith(f".{ext}"):
+        filename = f"image.{ext}"
+
+    body.extend(f"--{boundary}\r\n".encode("utf-8"))
+    body.extend(f'Content-Disposition: form-data; name="fileToUpload"; filename="{filename}"\r\n'.encode("utf-8"))
+    body.extend(f"Content-Type: {mime}\r\n\r\n".encode("utf-8"))
+    body.extend(image_bytes)
+    body.extend(b"\r\n")
+    body.extend(f"--{boundary}--\r\n".encode("utf-8"))
+
+    req = urllib.request.Request(
+        "https://catbox.moe/user/api.php",
+        data=body,
+        headers={
+            "Content-Type": f"multipart/form-data; boundary={boundary}",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        },
+        method="POST"
+    )
+    try:
+        ctx = ssl.create_default_context()
+        proxy = CONFIG.get("proxy")
+        if proxy:
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({"http": proxy, "https": proxy}),
+                urllib.request.HTTPSHandler(context=ctx),
+            )
+            resp = opener.open(req, timeout=30)
+        else:
+            resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+        url = resp.read().decode("utf-8").strip()
+        if url.startswith("http"):
+            log(f"Image hosted on Catbox: {url}")
+            return url
+    except Exception as e:
+        log(f"Catbox upload failed: {e}")
+    return ""
 
 
 def upload_image(image_bytes: bytes, filename: str = "image.png", mime_type: str = "image/png") -> str:
@@ -648,6 +748,9 @@ def clean_gemini_text(text: str, strip: bool = True) -> str:
     # 6. Refusal preambles and postambles
     text = re.sub(r'^(?:I cannot (?:fulfill|generate|participate)[^\n]+\n+)+(?:\*{3,}\n+)?', '', text, flags=re.IGNORECASE)
     text = re.sub(r'\n*(?:I(?:\'m| am) (?:just )?a language model[^\n]*|As an AI[^\n]*)$', '', text, flags=re.IGNORECASE)
+
+    # 7. Internal image placeholders
+    text = re.sub(r'https?://[^\s\"\'<>]*googleusercontent\.com/image_generation_content[^\s\"\'<>]*', '', text)
     return text.strip() if strip else text
 
 
@@ -679,6 +782,47 @@ def extract_response_text(raw: str) -> str:
         return ""
     text = texts[-1]
     return clean_gemini_text(text)
+
+
+def extract_response_images(raw: str) -> list:
+    """Extract generated image URLs from Gemini StreamGenerate response."""
+    images = []
+    seen = set()
+
+    def add_url(u: str):
+        if u and u not in seen:
+            seen.add(u)
+            images.append(u)
+
+    # 1. Parse markdown image tags in response text
+    text = extract_response_text(raw)
+    if text:
+        for u in re.findall(r'!\[.*?\]\((https?://[^\s\)]+)\)', text):
+            if "image_generation_content" not in u:
+                add_url(u)
+
+    # 2. Parse inner JSON lines for Google image CDN urls
+    for line in raw.split("\n"):
+        if '"wrb.fr"' not in line or len(line) < 200:
+            continue
+        try:
+            arr = json.loads(line)
+            inner_str = arr[0][2]
+            if not inner_str or len(inner_str) < 50:
+                continue
+            found = re.findall(
+                r'https?://(?:[a-zA-Z0-9_\-]+\.)*(?:googleusercontent\.com|ggpht\.com|generativeai\.google\.com)/[^\s"\'<>\\]+',
+                inner_str
+            )
+            for u in found:
+                u = u.replace("\\u003d", "=").replace("\\u0026", "&")
+                if any(skip in u.lower() for skip in ("googlelogo", "avatar", "photo.jpg", "profile", "image_generation_content")):
+                    continue
+                add_url(u)
+        except Exception:
+            pass
+
+    return images
 
 # ─── Universal Message / Prompt Formatting ───────────────────────────────────
 
@@ -904,13 +1048,16 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
 
     def _send_json(self, data: dict, status: int = 200):
         body = json.dumps(data).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        for k, v in self._cors_headers().items():
-            self.send_header(k, v)
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            for k, v in self._cors_headers().items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _send_error(self, message: str, status: int = 400, err_type: str = "invalid_request_error"):
         self._send_json({"error": {"message": message, "type": err_type, "code": status}}, status)
@@ -953,6 +1100,7 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
                 "default_model": CONFIG.get("default_model", "gemini-3.8-flash"),
                 "endpoints": [
                     "/v1/chat/completions",
+                    "/v1/images/generations",
                     "/v1/models",
                     "/v1beta/models"
                 ]
@@ -1005,6 +1153,21 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
             if ("gemini-" + norm) in MODELS:
                 model_name = "gemini-" + norm
                 cfg = MODELS[model_name]
+            elif norm in ("nano-banana-2", "nanobanana-2", "banana-2", "nano-banana2", "banana2"):
+                model_name = "nano-banana-2"
+                cfg = MODELS[model_name]
+            elif norm in ("nano-banana-pro", "nanobanana-pro", "banana-pro", "nanobananapro", "bananapro"):
+                model_name = "nano-banana-pro"
+                cfg = MODELS[model_name]
+            elif norm in ("nano-banana", "nanobanana", "banana", "nano-banana-1", "banana-1"):
+                model_name = "nano-banana"
+                cfg = MODELS[model_name]
+            elif norm in ("nano-banana-2-lite", "nanobanana-2-lite", "banana-2-lite", "banana-lite"):
+                model_name = "nano-banana-2-lite"
+                cfg = MODELS[model_name]
+            elif norm in ("imagen-3", "imagen-3.0-generate-002", "imagen", "imagen3"):
+                model_name = "imagen-3"
+                cfg = MODELS[model_name]
             elif norm in ("3.1-pro", "pro"):
                 model_name = "gemini-3.1-pro"
                 cfg = MODELS[model_name]
@@ -1032,6 +1195,14 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
     def _call_gemini(self, prompt, model_id, think_mode, tools, file_refs=None):
         raw = gemini_stream_generate(prompt, model_id, think_mode, file_refs)
         text = extract_response_text(raw)
+        images = extract_response_images(raw)
+        if images:
+            for img_url in images:
+                img_bytes = fetch_image_bytes(img_url)
+                catbox_url = upload_to_catbox(img_bytes) if img_bytes else ""
+                final_url = catbox_url or img_url
+                if final_url not in text:
+                    text = (text + "\n\n" if text else "") + f"![Generated Image]({final_url})\n\n[Direct Image Link]({final_url})"
         tool_calls = None
         if tools and text:
             text, tool_calls = parse_tool_calls(text)
@@ -1174,6 +1345,63 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
             log(f"Google generate error: {e}")
             self._send_error(str(e), 500, "upstream_error")
 
+    def handle_images(self, body: bytes):
+        try:
+            req = json.loads(body)
+        except Exception as e:
+            return self._send_error(f"Invalid JSON body: {e}")
+
+        prompt = req.get("prompt")
+        if not prompt or not isinstance(prompt, str):
+            return self._send_error("Field 'prompt' is required and must be a string", 400)
+
+        raw_model = req.get("model", "nano-banana-2")
+        model_name, model_id, think_mode, err = self._resolve_model(raw_model)
+        if err:
+            return self._send_error(err)
+
+        n = min(max(int(req.get("n", 1)), 1), 4)
+        response_format = req.get("response_format", "url")
+        size = req.get("size", "1024x1024")
+
+        image_prompt = prompt.strip()
+        if not any(image_prompt.lower().startswith(p) for p in ("generate an image", "create an image", "draw ", "render ")):
+            image_prompt = f"Generate an image: {image_prompt}"
+
+        try:
+            raw = gemini_stream_generate(image_prompt, model_id, think_mode)
+            image_urls = extract_response_images(raw)
+            text = extract_response_text(raw)
+            created = int(time.time())
+
+            data = []
+            if image_urls:
+                for img_url in image_urls[:n]:
+                    img_bytes = fetch_image_bytes(img_url)
+                    catbox_url = ""
+                    if img_bytes:
+                        catbox_url = upload_to_catbox(img_bytes)
+                    final_url = catbox_url or img_url
+
+                    if response_format == "b64_json":
+                        if img_bytes:
+                            b64 = base64.b64encode(img_bytes).decode("utf-8")
+                            data.append({"b64_json": b64, "url": final_url, "revised_prompt": prompt})
+                        else:
+                            data.append({"url": final_url, "revised_prompt": prompt})
+                    else:
+                        data.append({"url": final_url, "revised_prompt": prompt})
+            else:
+                data.append({"url": "", "revised_prompt": text or prompt})
+
+            self._send_json({
+                "created": created,
+                "data": data
+            })
+        except Exception as e:
+            log(f"Image generation error: {e}")
+            self._send_error(str(e), 500, "upstream_error")
+
     def _extract_model_from_path(self) -> str:
         m = re.search(r"/v1beta/models/([^:]+)", self.path)
         return m.group(1) if m else CONFIG["default_model"]
@@ -1189,6 +1417,8 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
         path = self.path.split("?")[0]
         if path in ("/v1/chat/completions", "/chat/completions"):
             self.handle_chat(body)
+        elif path in ("/v1/images/generations", "/images/generations"):
+            self.handle_images(body)
         elif ":streamGenerateContent" in path:
             self.handle_google_generate(body, stream=True)
         elif ":generateContent" in path:
@@ -1231,9 +1461,11 @@ def run_server():
     print("═════════════════════════════════════════════════════════════════════════")
     print(f"  • Local API Base:       http://{display_host}:{CONFIG['port']}/v1")
     print(f"  • Chat Completions:     http://{display_host}:{CONFIG['port']}/v1/chat/completions")
+    print(f"  • Image Generations:    http://{display_host}:{CONFIG['port']}/v1/images/generations")
     print(f"  • Models Endpoint:      http://{display_host}:{CONFIG['port']}/v1/models")
     print(f"  • Default Model:        {CONFIG['default_model']}")
     print(f"  • Pro Reasoning:        gemini-3.1-pro-extended (or gemini-3.1-pro)")
+    print(f"  • Nano Banana:          nano-banana-2, nano-banana-pro, nano-banana")
     print(f"  • Guest Mode:           Active (Zero cookies required, 100% Free)")
     print(f"  • Streaming (HTTP/2):   {'httpx enabled' if HAS_HTTPX else 'fallback (urllib)'}")
     print("═════════════════════════════════════════════════════════════════════════")

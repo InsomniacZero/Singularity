@@ -7,10 +7,10 @@
 ### 🌟 Key Highlights
 
 * **100% Free & Unlimited**: Runs via Google's web engine in anonymous Guest Mode. No credit card, no API key billing, and no Google account login required.
-* **OpenAI & Google Compatible**: Exposes standard `/v1/chat/completions`, `/v1/models`, and `/v1beta/models` endpoints.
+* **OpenAI & Google Compatible**: Exposes standard `/v1/chat/completions`, `/v1/images/generations`, `/v1/models`, and `/v1beta/models` endpoints.
 * **Connect Anywhere**: Ready to drop into **Cursor**, **VS Code (Continue / Cline / Roo / Aider)**, **Open WebUI**, **LibreChat**, **LangChain**, **Python `openai` SDK**, **SillyTavern**, and more.
-* **All Modern Gemini Models**: Access `gemini-3.8-flash`, `gemini-3.1-pro`, and `gemini-3.1-pro-extended` (Deep Reasoning / Thinking mode).
-* **Full Streaming & Vision**: Real-time server-sent events (SSE) streaming, multimodal image input, and function/tool calling.
+* **All Modern Gemini Models**: Access `gemini-3.8-flash`, `gemini-3.1-pro`, `gemini-3.1-pro-extended` (Deep Reasoning), and the **Nano Banana** image models (`nano-banana-2`, `nano-banana-pro`, `nano-banana`).
+* **Full Streaming, Vision & Image Gen**: Real-time SSE streaming, multimodal image input, tool calling, and standard `/v1/images/generations` support.
 * **Auto-Healing Engine**: Automatically auto-recovers XSRF tokens and build labels without requiring restarts.
 
 ---
@@ -96,10 +96,21 @@ for chunk in stream:
         print(chunk.choices[0].delta.content, end="", flush=True)
 ```
 
+# Image Generation (Nano Banana)
+image_resp = client.images.generate(
+    model="nano-banana-2",
+    prompt="A photorealistic 3D figurine of a cybernetic cat sitting on neon streets, octane render 8k",
+    n=1,
+    size="1024x1024"
+)
+print(image_resp.data[0].url)
+```
+
 ---
 
 ### 4. cURL / Terminal
 ```bash
+# Chat Completion
 curl http://localhost:8045/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -109,6 +120,15 @@ curl http://localhost:8045/v1/chat/completions \
       {"role": "user", "content": "Hello! What can you do?"}
     ]
   }'
+
+# Image Generation (Nano Banana)
+curl http://localhost:8045/v1/images/generations \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "nano-banana-2",
+    "prompt": "An astronaut riding a green horse on Mars, cinematic lighting",
+    "n": 1
+  }'
 ```
 
 ---
@@ -116,7 +136,7 @@ curl http://localhost:8045/v1/chat/completions \
 ### 5. Chatbots & Roleplay (SillyTavern, Janitor AI, etc.)
 * **API Type:** OpenAI Compatible (or Custom)
 * **Proxy / Endpoint URL:** `http://localhost:8045/v1/chat/completions`
-* **Model ID:** `gemini-3.1-pro-extended` or `gemini-3.8-flash`
+* **Model ID:** `gemini-3.1-pro-extended`, `gemini-3.8-flash`, or `nano-banana-2`
 * **API Key:** `gift`
 
 ---
@@ -130,12 +150,17 @@ curl http://localhost:8045/v1/chat/completions \
 | **`gemini-3.1-pro`** | Flagship Pro | Advanced Google Pro model | Heavy programming, architecture, complex refactoring |
 | **`gemini-3.1-pro-extended`** | Pro Reasoning | Gemini 3.1 Pro with Extended Thinking enabled | Maximum intelligence, hard coding problems, deep stories |
 | **`gemini-3.1-pro-thinking`** | Pro Reasoning | Alias for `gemini-3.1-pro-extended` | Reasoning tokens before generation |
+| **`nano-banana-2`** | Image Gen | Next-gen image synthesis (Gemini 3.1 Flash Image) | High-speed photorealistic image gen & consistent subject editing |
+| **`nano-banana-pro`** | Flagship Image | Flagship high-res visual model (Gemini 3 Pro Image) | Complex prompts, legible typography, ultra-high fidelity art |
+| **`nano-banana`** | Image Gen | Original viral image generator (Gemini 2.5 Flash Image) | Creative styling, 3D figurines, natural language photo manipulation |
+| **`nano-banana-2-lite`** | Rapid Image | Lightweight quick generation (Gemini 3.1 Flash-Lite Image) | Ultra-fast image previews, batch concept generation |
+| **`imagen-3`** | Image Gen | Alias for `nano-banana-pro` image model | Drop-in standard for Imagen / OpenAI image workflows |
 | **`gemini-3.7-flash`** | Fast | Gemini 3.7 Flash | Fallback / alternative generation |
 | **`gemini-3.6-flash`** | Fast | Stable 3.6 Flash | Previous stable generation |
 | **`gemini-flash-lite`** | Ultra Fast | Lightweight, high-throughput model | Simple classification, extraction, summaries |
 | **`gemini-auto`** | Auto | Automatic dynamic model routing | Adaptive workload handling |
 
-> **Smart Alias Matching:** You can also pass common short names like `3.1-pro`, `pro`, `flash`, `3.1-pro-extended`, or even standard aliases like `gpt-4o` and the proxy will map them cleanly.
+> **Smart Alias Matching:** You can pass short names like `banana-2`, `banana-pro`, `nano-banana`, `imagen-3`, `3.1-pro`, `pro`, `flash`, `3.1-pro-extended`, or even standard aliases like `gpt-4o` and the proxy maps them automatically.
 
 ---
 
