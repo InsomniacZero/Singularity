@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+cookie.txt
+cookie-safe.txt
+config.json
+.env
+*.log
