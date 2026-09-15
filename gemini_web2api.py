@@ -11,7 +11,7 @@ as a standard OpenAI-compatible API (/v1/chat/completions) and Google API
 - Developers: Python openai SDK, Node.js, cURL
 - Chatbots & Roleplay: SillyTavern, Janitor AI, etc.
 
-Author: InsomniacZero
+Author: InsomniacZero & ZeroNine1
 Repository: https://github.com/InsomniacZero/Universal-Gift
 License: MIT
 """
@@ -20,17 +20,26 @@ import argparse
 import base64
 import hashlib
 import http.server
+import io
 import json
 import os
 import re
+import socket
 import socketserver
 import ssl
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+
+# Force IPv4 resolution to eliminate 40s IPv6 connection timeouts on Linux
+_orig_getaddrinfo = socket.getaddrinfo
+def _getaddrinfo_ipv4(host, port, family=0, *args):
+    return _orig_getaddrinfo(host, port, socket.AF_INET, *args)
+socket.getaddrinfo = _getaddrinfo_ipv4
 
 # Optional httpx for high-performance HTTP/2 streaming
 try:
@@ -412,8 +421,241 @@ def upload_to_catbox(image_bytes: bytes, filename: str = "image.png") -> str:
     return ""
 
 
+def make_1080p_widescreen(image_bytes: bytes) -> bytes:
+    """Ensure image is true 1080p (1920x1080) high-resolution widescreen with Lanczos resampling."""
+    if not image_bytes:
+        return image_bytes
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(image_bytes))
+        target_w, target_h = 1920, 1080
+
+        if img.size == (target_w, target_h):
+            return image_bytes
+
+        cur_w, cur_h = img.size
+        target_ratio = 16.0 / 9.0
+        cur_ratio = float(cur_w) / float(cur_h)
+
+        # Center-crop cleanly to 16:9 widescreen before scaling to prevent distortion
+        if cur_ratio > target_ratio + 0.01:
+            crop_w = int(cur_h * target_ratio)
+            crop_h = cur_h
+            left = (cur_w - crop_w) // 2
+            top = 0
+            img = img.crop((left, top, left + crop_w, top + crop_h))
+        elif cur_ratio < target_ratio - 0.01:
+            crop_w = cur_w
+            crop_h = int(cur_w / target_ratio)
+            left = 0
+            top = (cur_h - crop_h) // 2
+            img = img.crop((left, top, left + crop_w, top + crop_h))
+
+        # Lanczos high-fidelity scaling to exact 1920x1080
+        img = img.resize((target_w, target_h), Image.Resampling.LANCZOS)
+
+        if img.mode not in ("RGB", "RGBA"):
+            img = img.convert("RGB")
+
+        out = io.BytesIO()
+        img.save(out, format="PNG", optimize=True)
+        return out.getvalue()
+    except Exception as e:
+        log(f"1080p widescreen processing failed: {e}")
+        return image_bytes
+
+
+def remove_chroma_background(image_bytes: bytes) -> bytes:
+    """
+    Produce a transparent PNG character sprite from an image with a solid studio / chroma-key screen.
+    Uses rembg if installed; otherwise uses Boundary-Constrained Chroma Matting with NumPy & SciPy
+    to strictly flood from image borders inward, preserving interior white hair, dresses, and ornaments.
+    """
+    if not image_bytes:
+        return image_bytes
+
+    try:
+        import rembg
+        return rembg.remove(image_bytes)
+    except ImportError:
+        pass
+    except Exception as e:
+        log(f"[rembg] Neural matting error: {e}")
+
+    try:
+        from PIL import Image, ImageFilter
+        import numpy as np
+        import scipy.ndimage as ndi
+
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        arr = np.array(img, dtype=np.float32)
+        h, w, _ = arr.shape
+        r, g, b = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2]
+
+        # Sample the 4 perimeter corners to detect the background screen color
+        corners = np.array([arr[0, 0], arr[0, w - 1], arr[h - 1, 0], arr[h - 1, w - 1]])
+        corner_color = np.median(corners, axis=0)
+
+        # Detect if green screen or general solid backdrop
+        is_green = (corner_color[1] > corner_color[0] + 25) and (corner_color[1] > corner_color[2] + 25)
+
+        if is_green:
+            dist = np.linalg.norm(arr - corner_color, axis=2)
+            bg_candidate = (dist < 110) | ((g - np.maximum(r, b)) > 25)
+        else:
+            dist = np.linalg.norm(arr - corner_color, axis=2)
+            bg_candidate = dist < 75
+
+        # Strictly flood from outer image borders so internal white/light areas are never erased
+        labeled, num_features = ndi.label(bg_candidate)
+        border_labels = set(np.unique(np.concatenate([
+            labeled[0, :], labeled[-1, :], labeled[:, 0], labeled[:, -1]
+        ])))
+        border_labels.discard(0)
+
+        if border_labels:
+            is_exterior_bg = np.isin(labeled, list(border_labels))
+        else:
+            is_exterior_bg = bg_candidate
+
+        # Also clear pure green interior pockets (e.g. between hair strands and neck)
+        if is_green:
+            pure_green = (g > 130) & (g > r + 30) & (g > b + 30) & (dist < 95)
+            is_exterior_bg = is_exterior_bg | pure_green
+
+        alpha = np.where(is_exterior_bg, 0, 255).astype(np.uint8)
+        alpha_img = Image.fromarray(alpha).filter(ImageFilter.GaussianBlur(1.2))
+
+        # Green de-spill on semi-transparent silhouette edges
+        if is_green:
+            alpha_arr = np.array(alpha_img, dtype=np.float32) / 255.0
+            edge_mask = (alpha_arr > 0.05) & (alpha_arr < 0.95)
+            g[edge_mask] = np.minimum(g[edge_mask], np.maximum(r[edge_mask], b[edge_mask]))
+            arr[:, :, 1] = g
+
+        res = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGB").convert("RGBA")
+        res.putalpha(alpha_img)
+
+        out = io.BytesIO()
+        res.save(out, format="PNG", optimize=True)
+        return out.getvalue()
+    except Exception as e:
+        log(f"Transparent sprite cutout failed: {e}")
+        return image_bytes
+
+
+# ─── Visual Novel Location Memory Engine ─────────────────────────────────────
+
+SCENE_MEMORY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".scene_location_memory.json")
+_SCENE_MEMORY_LOCK = threading.Lock()
+SCENE_MEMORY: dict = {}
+
+
+def load_location_memory():
+    global SCENE_MEMORY
+    try:
+        if os.path.exists(SCENE_MEMORY_FILE):
+            with open(SCENE_MEMORY_FILE, "r", encoding="utf-8") as f:
+                SCENE_MEMORY = json.load(f)
+        else:
+            SCENE_MEMORY = {}
+    except Exception as e:
+        log(f"Failed to load scene location memory: {e}")
+        SCENE_MEMORY = {}
+
+
+def save_location_memory():
+    try:
+        with _SCENE_MEMORY_LOCK:
+            with open(SCENE_MEMORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(SCENE_MEMORY, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        log(f"Failed to save scene location memory: {e}")
+
+
+def normalize_location_key(location: str) -> str:
+    if not location:
+        return "default"
+    loc = location.lower().strip()
+    loc = re.sub(r'[^a-z0-9\s]', '', loc)
+    loc = re.sub(r'\s+', ' ', loc).strip()
+    return loc or "default"
+
+
+def get_remembered_location(chat_id: str, location: str, time_phase: str = "") -> dict:
+    norm_loc = normalize_location_key(location)
+    chat_key = str(chat_id or "default")
+
+    if time_phase:
+        exact_key = f"{chat_key}:{norm_loc}:{time_phase.lower().strip()}"
+        if exact_key in SCENE_MEMORY:
+            return SCENE_MEMORY[exact_key]
+
+    base_key = f"{chat_key}:{norm_loc}"
+    if base_key in SCENE_MEMORY:
+        return SCENE_MEMORY[base_key]
+
+    global_key = f"global:{norm_loc}"
+    if global_key in SCENE_MEMORY:
+        return SCENE_MEMORY[global_key]
+
+    return {}
+
+
+def store_remembered_location(chat_id: str, location: str, url: str, time_phase: str = "", prompt: str = ""):
+    if not location or not url:
+        return
+    norm_loc = normalize_location_key(location)
+    chat_key = str(chat_id or "default")
+    entry = {
+        "url": url,
+        "location": location,
+        "norm_location": norm_loc,
+        "time_phase": time_phase,
+        "chat_id": chat_key,
+        "prompt": prompt,
+        "timestamp": int(time.time()),
+        "width": 1920,
+        "height": 1080
+    }
+    with _SCENE_MEMORY_LOCK:
+        base_key = f"{chat_key}:{norm_loc}"
+        SCENE_MEMORY[base_key] = entry
+        if time_phase:
+            SCENE_MEMORY[f"{chat_key}:{norm_loc}:{time_phase.lower().strip()}"] = entry
+        SCENE_MEMORY[f"global:{norm_loc}"] = entry
+    save_location_memory()
+
+
+def clear_remembered_location(chat_id: str = "", location: str = ""):
+    with _SCENE_MEMORY_LOCK:
+        if not chat_id and not location:
+            SCENE_MEMORY.clear()
+        else:
+            to_del = []
+            for k in list(SCENE_MEMORY.keys()):
+                if chat_id and k.startswith(f"{chat_id}:"):
+                    to_del.append(k)
+                elif location and normalize_location_key(location) in k:
+                    to_del.append(k)
+            for k in to_del:
+                SCENE_MEMORY.pop(k, None)
+    save_location_memory()
+
+
+load_location_memory()
+
+
+
+_UPLOAD_CACHE = {}
+
+
 def upload_image(image_bytes: bytes, filename: str = "image.png", mime_type: str = "image/png") -> str:
     """Upload image via Scotty resumable upload. Returns file reference path."""
+    digest = hashlib.sha256(image_bytes).hexdigest()
+    if digest in _UPLOAD_CACHE:
+        return _UPLOAD_CACHE[digest]
+
     tokens = _cached_page_tokens()
     push_id = tokens.get("push_id", "feeds/mcudyrk2a4khkz")
     pctx = tokens.get("pctx", "CgcSBWjK7pYx")
@@ -471,6 +713,7 @@ def upload_image(image_bytes: bytes, filename: str = "image.png", mime_type: str
     if not file_ref or not file_ref.startswith("/"):
         raise RuntimeError(f"Invalid file reference: {file_ref[:100]}")
 
+    _UPLOAD_CACHE[digest] = file_ref
     return file_ref
 
 
@@ -502,7 +745,7 @@ def gemini_stream_generate(prompt: str, model_id: int, think_mode: int, file_ref
     """Send prompt to Gemini StreamGenerate with retry."""
     inner = [None] * 80
     if file_refs:
-        refs = [[None, None, ref] for ref in file_refs]
+        refs = [[[ref, 1]] for ref in file_refs]
         inner[0] = [prompt, 0, None, refs, None, None, 0]
     else:
         inner[0] = [prompt, 0, None, None, None, None, 0]
@@ -608,7 +851,7 @@ def gemini_stream_generate_iter(prompt: str, model_id: int, think_mode: int, fil
     """Send prompt and yield incremental text deltas using httpx streaming."""
     inner = [None] * 80
     if file_refs:
-        refs = [[None, None, ref] for ref in file_refs]
+        refs = [[[ref, 1]] for ref in file_refs]
         inner[0] = [prompt, 0, None, refs, None, None, 0]
     else:
         inner[0] = [prompt, 0, None, None, None, None, 0]
@@ -665,53 +908,82 @@ def gemini_stream_generate_iter(prompt: str, model_id: int, think_mode: int, fil
             yield text
         return
 
-    prev_text = ""
-    transport = httpx.HTTPTransport(proxy=proxy) if proxy else None
-    with httpx.Client(transport=transport, timeout=CONFIG["request_timeout_sec"], verify=True) as client:
+    for attempt in range(CONFIG["retry_attempts"]):
+        if CONFIG.get("xsrf_token"):
+            params["at"] = CONFIG["xsrf_token"]
+        body = urllib.parse.urlencode(params)
+        prev_text = ""
+        transport = httpx.HTTPTransport(proxy=proxy) if proxy else None
+        yielded_any = False
         try:
-            with client.stream("POST", url, content=body, headers=headers) as resp:
-                resp.raise_for_status()
-                buf = ""
-                for chunk in resp.iter_text():
-                    buf += chunk
-                    if "BardErrorInfo" in buf:
-                        m = re.search(r'BardErrorInfo\s*\[(\d+)\]', buf)
+            with httpx.Client(transport=transport, timeout=CONFIG["request_timeout_sec"], verify=True) as client:
+                with client.stream("POST", url, content=body.encode("utf-8"), headers=headers) as resp:
+                    if resp.status_code == 400:
+                        err_text = resp.read().decode("utf-8", errors="replace")
+                        m = re.search(r'["\']?xsrf["\']?\s*,\s*["\']([^"\'\s]+)["\']', err_text)
                         if m:
-                            raise RuntimeError(f"Gemini upstream rejected request: BardErrorInfo [{m.group(1)}]")
-                    while "\n" in buf:
-                        line, buf = buf.split("\n", 1)
-                        if '"wrb.fr"' not in line or len(line) < 200:
+                            CONFIG["xsrf_token"] = m.group(1)
+                            log(f"Auto-recovered XSRF token from 400 in stream: {m.group(1)[:12]}...")
+                            params["at"] = m.group(1)
                             continue
-                        try:
-                            arr = json.loads(line)
-                            inner_str = arr[0][2]
-                            if not inner_str or len(inner_str) < 50:
+                        resp.raise_for_status()
+                    elif resp.status_code == 405:
+                        if update_bl_if_needed():
+                            url = (
+                                f"https://gemini.google.com{prefix}/_/BardChatUi/data/"
+                                "assistant.lamda.BardFrontendService/StreamGenerate"
+                                f"?bl={CONFIG['gemini_bl']}&hl=en&_reqid={reqid}&rt=c"
+                            )
+                            continue
+                        resp.raise_for_status()
+                    resp.raise_for_status()
+
+                    buf = ""
+                    for chunk in resp.iter_text():
+                        buf += chunk
+                        if "BardErrorInfo" in buf:
+                            m = re.search(r'BardErrorInfo\s*\[(\d+)\]', buf)
+                            if m:
+                                raise RuntimeError(f"Gemini upstream rejected request: BardErrorInfo [{m.group(1)}]")
+                        while "\n" in buf:
+                            line, buf = buf.split("\n", 1)
+                            if '"wrb.fr"' not in line or len(line) < 200:
                                 continue
-                            inner2 = json.loads(inner_str)
-                            if isinstance(inner2, list) and len(inner2) > 4 and inner2[4]:
-                                for part in inner2[4]:
-                                    if isinstance(part, list) and len(part) > 1 and part[1] and isinstance(part[1], list):
-                                        for t in part[1]:
-                                            if isinstance(t, str):
-                                                clean_full = clean_gemini_text(t, strip=False)
-                                                clean_prev = clean_gemini_text(prev_text, strip=False)
-                                                if len(clean_full) > len(clean_prev):
-                                                    delta = clean_full[len(clean_prev):]
-                                                    if delta:
-                                                        yield delta
-                                                prev_text = t
-                        except (json.JSONDecodeError, IndexError, TypeError):
-                            pass
+                            try:
+                                arr = json.loads(line)
+                                inner_str = arr[0][2]
+                                if not inner_str or len(inner_str) < 50:
+                                    continue
+                                inner2 = json.loads(inner_str)
+                                if isinstance(inner2, list) and len(inner2) > 4 and inner2[4]:
+                                    for part in inner2[4]:
+                                        if isinstance(part, list) and len(part) > 1 and part[1] and isinstance(part[1], list):
+                                            for t in part[1]:
+                                                if isinstance(t, str):
+                                                    clean_full = clean_gemini_text(t, strip=False)
+                                                    clean_prev = clean_gemini_text(prev_text, strip=False)
+                                                    if len(clean_full) > len(clean_prev):
+                                                        delta = clean_full[len(clean_prev):]
+                                                        if delta:
+                                                            yield delta
+                                                            yielded_any = True
+                                                    prev_text = t
+                            except (json.JSONDecodeError, IndexError, TypeError):
+                                pass
+            if yielded_any:
+                return
         except Exception as e:
-            if HAS_HTTPX and hasattr(e, 'response') and getattr(e.response, 'status_code', 0) == 405:
-                if update_bl_if_needed():
-                    log("BL updated, falling back to non-streaming for this request")
-                    raw = gemini_stream_generate(prompt, model_id, think_mode, file_refs)
-                    text = extract_response_text(raw)
-                    if text:
-                        yield text
-                    return
-            raise
+            log(f"Stream generation attempt {attempt+1} error: {e}")
+            if attempt < CONFIG["retry_attempts"] - 1:
+                time.sleep(CONFIG["retry_delay_sec"])
+                continue
+
+    # Fall back to non-streaming if stream yielded nothing
+    log("Falling back to non-streaming gemini_stream_generate...")
+    raw = gemini_stream_generate(prompt, model_id, think_mode, file_refs)
+    text = extract_response_text(raw)
+    if text:
+        yield text
 
 
 def clean_gemini_text(text: str, strip: bool = True) -> str:
@@ -790,6 +1062,10 @@ def extract_response_images(raw: str) -> list:
     seen = set()
 
     def add_url(u: str):
+        if not u:
+            return
+        if any(h in u for h in ("googleusercontent.com", "ggpht.com", "work.fife.usercontent.google.com")):
+            u = re.sub(r'=[swhd0-9\-]+$', '', u) + "=s0"
         if u and u not in seen:
             seen.add(u)
             images.append(u)
@@ -818,6 +1094,7 @@ def extract_response_images(raw: str) -> list:
                 u = u.replace("\\u003d", "=").replace("\\u0026", "&")
                 if any(skip in u.lower() for skip in ("googlelogo", "avatar", "photo.jpg", "profile", "image_generation_content")):
                     continue
+                log(f"Extracted Google image candidate URL: {u}")
                 add_url(u)
         except Exception:
             pass
@@ -1078,10 +1355,11 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_GET(self):
-        if (self.path.startswith("/v1") or self.path.startswith("/chat") or self.path == "/models") and not self._authorized():
+        path = self.path.split("?")[0]
+        if (path.startswith("/v1") or path.startswith("/chat") or path == "/models") and not self._authorized():
             return self._send_error("Unauthorized", 401, "auth_error")
 
-        if self.path in ("/v1/models", "/models"):
+        if path in ("/v1/models", "/models"):
             data = {
                 "object": "list",
                 "data": [
@@ -1092,7 +1370,17 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(data)
         elif self.path.startswith("/v1beta/models"):
             self._handle_google_models_list()
-        elif self.path in ("/", "/health", "/status"):
+        elif path in ("/v1/scene/memory", "/scene/memory"):
+            chat_id = ""
+            if "?" in self.path:
+                qs = urllib.parse.parse_qs(self.path.split("?", 1)[1])
+                chat_id = qs.get("chatId", [""])[0] or qs.get("chat_id", [""])[0]
+            if chat_id:
+                filtered = {k: v for k, v in SCENE_MEMORY.items() if k.startswith(f"{chat_id}:")}
+                self._send_json({"chatId": chat_id, "locations": filtered})
+            else:
+                self._send_json({"locations": SCENE_MEMORY})
+        elif path in ("/", "/health", "/status"):
             self._send_json({
                 "service": "Universal-Gift",
                 "status": "online",
@@ -1101,6 +1389,8 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
                 "endpoints": [
                     "/v1/chat/completions",
                     "/v1/images/generations",
+                    "/v1/scene/illustrate",
+                    "/v1/scene/memory",
                     "/v1/models",
                     "/v1beta/models"
                 ]
@@ -1234,7 +1524,7 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
+            self.send_header("Connection", "close")
             for k, v in self._cors_headers().items():
                 self.send_header(k, v)
             self.end_headers()
@@ -1256,6 +1546,7 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
                     "model": model_name, "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}))
                 self.wfile.write(b"data: [DONE]\n\n")
                 self.wfile.flush()
+                self.close_connection = True
             except (BrokenPipeError, ConnectionResetError):
                 pass
             return
@@ -1363,13 +1654,108 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
         n = min(max(int(req.get("n", 1)), 1), 4)
         response_format = req.get("response_format", "url")
         size = req.get("size", "1024x1024")
+        transparent = bool(req.get("transparent", False))
+
+        # 1. Handle Reference Image (Character portrait conditioning)
+        ref_img = req.get("reference_image") or req.get("image") or req.get("portrait_image")
+        file_refs = None
+        if ref_img:
+            log(f"[Image Reference] Incoming request contains reference image: type={type(ref_img).__name__}")
+            images_to_upload = []
+
+            def parse_single_ref(r):
+                if not r or not isinstance(r, (str, bytes)):
+                    return None
+                if isinstance(r, bytes):
+                    return (r, "image/png")
+                r_str = r.strip()
+                if r_str.startswith("data:"):
+                    try:
+                        mime = r_str.split(";", 1)[0].replace("data:", "")
+                        b64 = r_str.split(",", 1)[1]
+                        return (base64.b64decode(b64), mime)
+                    except Exception as e:
+                        log(f"[Image Reference] Failed decoding data URI: {e}")
+                        return None
+                elif r_str.startswith("http://") or r_str.startswith("https://"):
+                    return (r_str, None)
+                elif r_str.startswith("/") or r_str.startswith("./"):
+                    # Local path or relative endpoint
+                    base_dir = os.path.dirname(os.path.abspath(__file__))
+                    search_paths = [
+                        r_str,
+                        os.path.join(base_dir, "TAVERN", "data", r_str.lstrip("/")),
+                        os.path.join(base_dir, "TAVERN", r_str.lstrip("/")),
+                        os.path.join(base_dir, r_str.lstrip("/")),
+                    ]
+                    for p in search_paths:
+                        if os.path.isfile(p):
+                            try:
+                                with open(p, "rb") as f:
+                                    log(f"[Image Reference] Loaded local reference file from disk: {p}")
+                                    return (f.read(), "image/png")
+                            except Exception as e:
+                                log(f"[Image Reference] Failed reading local file {p}: {e}")
+                    # Try local Vite/Express dev servers
+                    for port in (5173, 3001):
+                        try:
+                            test_url = f"http://localhost:{port}/{r_str.lstrip('/')}"
+                            req_t = urllib.request.Request(test_url, headers={"User-Agent": "UniversalGift"})
+                            with urllib.request.urlopen(req_t, timeout=3) as resp_t:
+                                if resp_t.status == 200:
+                                    log(f"[Image Reference] Fetched local reference from dev server: {test_url}")
+                                    return (resp_t.read(), "image/png")
+                        except Exception:
+                            pass
+                    log(f"[Image Reference] Unable to resolve relative path {r_str}")
+                    return None
+                else:
+                    # Raw base64 string
+                    try:
+                        decoded = base64.b64decode(r_str)
+                        if len(decoded) > 100:
+                            return (decoded, "image/png")
+                    except Exception as e:
+                        log(f"[Image Reference] Error decoding raw base64 string: {e}")
+                    return None
+
+            if isinstance(ref_img, list):
+                for item in ref_img:
+                    res = parse_single_ref(item)
+                    if res:
+                        images_to_upload.append(res)
+            else:
+                res = parse_single_ref(ref_img)
+                if res:
+                    images_to_upload.append(res)
+
+            if images_to_upload:
+                try:
+                    file_refs = upload_images(images_to_upload)
+                    log(f"[Image Reference] Conditioned on {len(images_to_upload)} character reference image(s): {file_refs}")
+                except Exception as e:
+                    log(f"[Image Reference ERROR] upload_images failed: {e}")
+                    return self._send_error(f"Failed to upload reference image to Gemini: {e}", 400)
+            else:
+                log(f"[Image Reference ERROR] Failed to resolve provided reference image!")
+                return self._send_error("Reference image was provided but could not be parsed or resolved. Provide a valid base64 data URL, image URL, or avatar file path.", 400)
 
         image_prompt = prompt.strip()
         if not any(image_prompt.lower().startswith(p) for p in ("generate an image", "create an image", "draw ", "render ")):
             image_prompt = f"Generate an image: {image_prompt}"
 
+        if file_refs:
+            if "exact" not in image_prompt.lower() and "style" not in image_prompt.lower():
+                image_prompt += " Replicate the exact 2D art style, line art thickness, coloring, and aesthetic of the reference image. Do not smooth it out."
+
+        if transparent and "green background" not in image_prompt.lower():
+            if any(k in image_prompt.lower() for k in ("bust", "upper chest", "portrait", "shoulders")):
+                image_prompt += " on a solid bright green background, flat plain backdrop, framed centered."
+            else:
+                image_prompt += " on a solid bright green background, flat plain backdrop, character standing centered."
+
         try:
-            raw = gemini_stream_generate(image_prompt, model_id, think_mode)
+            raw = gemini_stream_generate(image_prompt, model_id, think_mode, file_refs)
             image_urls = extract_response_images(raw)
             text = extract_response_text(raw)
             created = int(time.time())
@@ -1378,8 +1764,12 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
             if image_urls:
                 for img_url in image_urls[:n]:
                     img_bytes = fetch_image_bytes(img_url)
+                    if img_bytes and transparent:
+                        img_bytes = remove_chroma_background(img_bytes)
+
                     catbox_url = ""
-                    if img_bytes:
+                    # Skip external Catbox upload when client only requests local base64 (saves ~5-6s per image)
+                    if response_format != "b64_json" and img_bytes:
                         catbox_url = upload_to_catbox(img_bytes)
                     final_url = catbox_url or img_url
 
@@ -1392,7 +1782,9 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
                     else:
                         data.append({"url": final_url, "revised_prompt": prompt})
             else:
-                data.append({"url": "", "revised_prompt": text or prompt})
+                err_msg = text or "Gemini did not return an image. Prompt may have been filtered or refused."
+                log(f"[Image Generation Failed] {err_msg}")
+                return self._send_error(err_msg, 502, "upstream_refusal")
 
             self._send_json({
                 "created": created,
@@ -1401,6 +1793,99 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             log(f"Image generation error: {e}")
             self._send_error(str(e), 500, "upstream_error")
+
+
+    def handle_scene_illustrate(self, body: bytes):
+        try:
+            req = json.loads(body)
+        except Exception as e:
+            return self._send_error(f"Invalid JSON body: {e}")
+
+        text = req.get("text") or req.get("scene") or req.get("prompt") or ""
+        location = req.get("location") or ""
+        chat_id = req.get("chat_id") or req.get("chatId") or "default"
+        time_phase = req.get("time_phase") or req.get("timePhase") or ""
+        force = bool(req.get("force") or req.get("force_regenerate") or False)
+        style = req.get("style", "visual novel anime digital scenery background, cinematic lighting, masterpiece, 1080p widescreen wallpaper")
+
+        if not text and "messages" in req:
+            msgs = req.get("messages", [])
+            recent = [m.get("content", "") for m in msgs[-3:] if m.get("content")]
+            text = " ".join(recent)
+
+        if not text and not location:
+            return self._send_error("No scene text or location provided", 400)
+
+        # 1. Location Memory Cache Check (Instant 0 ms recall if already visited & not forced)
+        if not force and location:
+            remembered = get_remembered_location(chat_id, location, time_phase)
+            if remembered and remembered.get("url"):
+                log(f"[Location Memory HIT] Recalled background for '{location}': {remembered['url']}")
+                return self._send_json({
+                    "url": remembered["url"],
+                    "cached": True,
+                    "location": location,
+                    "time_phase": time_phase,
+                    "prompt": remembered.get("prompt", ""),
+                    "success": True
+                })
+
+        # 2. Clean narrative text strictly for environment / scenery (NO characters, NO dialogue)
+        clean_text = text
+        clean_text = re.sub(r'<{1,2}scene:[^>]*>{1,2}', '', clean_text)
+        clean_text = re.sub(r'!\[.*?\]\(.*?\)', '', clean_text)
+        clean_text = re.sub(r'\[.*?\]\(.*?\)', '', clean_text)
+        clean_text = re.sub(r'["“「][^"”」]*["”」]', '', clean_text)
+        clean_text = re.sub(r'[*_~`]', '', clean_text)
+        clean_text = re.sub(r'\s+', ' ', clean_text).strip()
+        if len(clean_text) > 300:
+            clean_text = clean_text[:300]
+
+        env_cues = []
+        if location:
+            env_cues.append(f"Setting: {location}")
+        if time_phase:
+            env_cues.append(f"Time of day: {time_phase}")
+        if clean_text:
+            env_cues.append(f"Environment: {clean_text}")
+
+        env_desc = ". ".join(env_cues) if env_cues else "scenic anime visual novel setting"
+
+        image_prompt = (
+            f"Generate an image: {style}. {env_desc}. "
+            "Anime visual novel background art, empty scenic architecture, interior or exterior scenery backdrop, "
+            "atmospheric cinematic lighting, highly detailed environment, 16:9 widescreen composition, 1080p full HD wallpaper. "
+            "STRICT NEGATIVE CONSTRAINT: Strictly empty background, NO people, NO characters, NO human beings, NO silhouettes, NO faces, nobody. Scenery backdrop only."
+        )
+
+        try:
+            raw_model = req.get("model", "nano-banana-2")
+            _, model_id, think_mode, _ = self._resolve_model(raw_model)
+            raw = gemini_stream_generate(image_prompt, model_id, think_mode)
+            image_urls = extract_response_images(raw)
+            final_url = ""
+            if image_urls:
+                img_bytes = fetch_image_bytes(image_urls[0])
+                if img_bytes:
+                    hd_bytes = make_1080p_widescreen(img_bytes)
+                    final_url = upload_to_catbox(hd_bytes) or image_urls[0]
+                else:
+                    final_url = image_urls[0]
+
+            if final_url and location:
+                store_remembered_location(chat_id, location, final_url, time_phase, image_prompt)
+                log(f"[Location Memory SAVED] Stored background for '{location}': {final_url}")
+
+            self._send_json({
+                "url": final_url,
+                "cached": False,
+                "location": location,
+                "prompt": image_prompt,
+                "success": bool(final_url)
+            })
+        except Exception as e:
+            log(f"Scene illustration error: {e}")
+            self._send_error(str(e), 500)
 
     def _extract_model_from_path(self) -> str:
         m = re.search(r"/v1beta/models/([^:]+)", self.path)
@@ -1419,6 +1904,17 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
             self.handle_chat(body)
         elif path in ("/v1/images/generations", "/images/generations"):
             self.handle_images(body)
+        elif path in ("/v1/scene/illustrate", "/scene/illustrate", "/v1/chat/illustrate"):
+            self.handle_scene_illustrate(body)
+        elif path in ("/v1/scene/clear_memory", "/scene/clear_memory"):
+            try:
+                data = json.loads(body) if body else {}
+            except Exception:
+                data = {}
+            cid = data.get("chatId") or data.get("chat_id") or ""
+            loc = data.get("location") or ""
+            clear_remembered_location(cid, loc)
+            self._send_json({"cleared": True, "chatId": cid, "location": loc})
         elif ":streamGenerateContent" in path:
             self.handle_google_generate(body, stream=True)
         elif ":generateContent" in path:
@@ -1450,8 +1946,9 @@ def run_server():
     if args.quiet:
         CONFIG["log_requests"] = False
 
-    class ReusableTCPServer(socketserver.TCPServer):
+    class ReusableTCPServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
         allow_reuse_address = True
+        daemon_threads = True
 
     server = ReusableTCPServer((CONFIG["host"], CONFIG["port"]), GeminiHandler)
     display_host = "localhost" if CONFIG["host"] in ("0.0.0.0", "") else CONFIG["host"]

@@ -188,4 +188,4 @@ Run `python3 gemini_web2api.py --help` for options:
 ---
 
 ## 📄 License
-MIT License. Built for the open-source community by **InsomniacZero**.
+MIT License. Built for the open-source community by **InsomniacZero** and **ZeroNine1**.
