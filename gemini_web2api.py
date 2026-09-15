@@ -11,7 +11,7 @@ as a standard OpenAI-compatible API (/v1/chat/completions) and Google API
 - Developers: Python openai SDK, Node.js, cURL
 - Chatbots & Roleplay: SillyTavern, Janitor AI, etc.
 
-Author: InsomniacZero & ZeroNine1
+Author: InsomniacZero
 Repository: https://github.com/InsomniacZero/Universal-Gift
 License: MIT
 """
