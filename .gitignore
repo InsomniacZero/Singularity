@@ -12,3 +12,5 @@ config.json
 .env
 *.log
 TAVERN/
+.scene_location_memory.json
+*.json.bak

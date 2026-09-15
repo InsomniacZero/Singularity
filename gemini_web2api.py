@@ -179,7 +179,19 @@ def load_cookie() -> tuple:
     """Load cookie from file. Returns (cookie_str, sapisid)."""
     cookie_file = CONFIG.get("cookie_file")
     if not cookie_file or not os.path.exists(cookie_file):
-        for candidate in ("cookie-safe.txt", "cookie.txt"):
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        candidates = [
+            os.path.join(base_dir, "cookie-safe.txt"),
+            os.path.join(base_dir, "cookie.txt"),
+            os.path.join(base_dir, "..", "cookie-safe.txt"),
+            os.path.join(base_dir, "..", "cookie.txt"),
+            os.path.join(os.getcwd(), "cookie-safe.txt"),
+            os.path.join(os.getcwd(), "cookie.txt"),
+            os.path.join(os.getcwd(), "universal-gift", "cookie-safe.txt"),
+            "cookie-safe.txt",
+            "cookie.txt",
+        ]
+        for candidate in candidates:
             if os.path.exists(candidate):
                 cookie_file = candidate
                 break
@@ -1687,6 +1699,10 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
                         os.path.join(base_dir, "TAVERN", "data", r_str.lstrip("/")),
                         os.path.join(base_dir, "TAVERN", r_str.lstrip("/")),
                         os.path.join(base_dir, r_str.lstrip("/")),
+                        os.path.join(base_dir, "..", "data", r_str.lstrip("/")),
+                        os.path.join(base_dir, "..", r_str.lstrip("/")),
+                        os.path.join(os.getcwd(), "data", r_str.lstrip("/")),
+                        os.path.join(os.getcwd(), r_str.lstrip("/")),
                     ]
                     for p in search_paths:
                         if os.path.isfile(p):
@@ -1745,14 +1761,23 @@ class GeminiHandler(http.server.BaseHTTPRequestHandler):
             image_prompt = f"Generate an image: {image_prompt}"
 
         if file_refs:
-            if "exact" not in image_prompt.lower() and "style" not in image_prompt.lower():
-                image_prompt += " Replicate the exact 2D art style, line art thickness, coloring, and aesthetic of the reference image. Do not smooth it out."
+            # 1. Dress / Outfit consistency
+            if not any(k in image_prompt.lower() for k in ("outfit", "dress", "clothing", "wear the exact", "same clothes")):
+                image_prompt += " The character MUST wear the EXACT SAME dress and clothing shown in the reference image (identical outfit design, neckline, collar, colors, and accessories). Do NOT alter or change the clothes."
+
+            # 2. Framing: Full shoulders, elbows, and hands completely inside canvas
+            if not any(k in image_prompt.lower() for k in ("framing", "shoulders", "elbows", "hands stay")):
+                image_prompt += " Vertical upper body portrait framed from mid-chest upward. Ensure both full shoulders, and all raised elbows and hands, are completely visible inside the frame borders without edge cutoff."
+
+            # 3. Authentic art style & strict anti-smoothing
+            if not any(k in image_prompt.lower() for k in ("anti-smoothing", "airbrush", "line art weight")):
+                image_prompt += " Duplicate the exact art style, line art weight, linework texture, and shading of the reference image. Strictly do not smooth it out, do not airbrush, and do not use 3D CGI plastic rendering."
 
         if transparent and "green background" not in image_prompt.lower():
             if any(k in image_prompt.lower() for k in ("bust", "upper chest", "portrait", "shoulders")):
-                image_prompt += " on a solid bright green background, flat plain backdrop, framed centered."
+                image_prompt += " on a solid bright green background, flat plain backdrop, framed centered with both full shoulders, elbows, and hands completely inside the frame borders."
             else:
-                image_prompt += " on a solid bright green background, flat plain backdrop, character standing centered."
+                image_prompt += " on a solid bright green background, flat plain backdrop, character standing centered with all limbs completely inside the frame borders."
 
         try:
             raw = gemini_stream_generate(image_prompt, model_id, think_mode, file_refs)
