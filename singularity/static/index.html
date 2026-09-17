@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Singularity</title>
+  <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+
+  <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet" />
+
+  <link rel="stylesheet" href="/static/tokens.css" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+
+<body>
+  <div id="toast-container"></div>
+
+  <div id="app">
+    <!-- Sidebar Navigation -->
+    <aside class="sidebar">
+      <div class="brand-header">
+        <img src="/logo.svg" alt="Singularity Logo" class="brand-logo" />
+        <div class="brand-meta">
+          <div class="brand-title">Singularity</div>
+        </div>
+      </div>
+
+      <nav class="sidebar-nav">
+        <div class="nav-item active" data-tab="control">
+          <div class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="7" height="7"></rect>
+              <rect x="14" y="3" width="7" height="7"></rect>
+              <rect x="14" y="14" width="7" height="7"></rect>
+              <rect x="3" y="14" width="7" height="7"></rect>
+            </svg>
+          </div>
+          <span>Control Center</span>
+          <span class="nav-badge" id="nav-active-count">6 Active</span>
+        </div>
+
+        <div class="nav-item" data-tab="limits">
+          <div class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+            </svg>
+          </div>
+          <span>Limits & Quotas</span>
+        </div>
+
+        <div class="nav-item" data-tab="models">
+          <div class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path
+                d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z">
+              </path>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+              <line x1="12" y1="22.08" x2="12" y2="12"></line>
+            </svg>
+          </div>
+          <span>Available Models</span>
+          <span class="nav-badge" id="nav-model-count">186 Models</span>
+        </div>
+
+        <div class="nav-item" data-tab="cookies">
+          <div class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+              <circle cx="12" cy="7" r="4"></circle>
+            </svg>
+          </div>
+          <span>Cookie Stacker</span>
+        </div>
+
+        <div class="nav-item" data-tab="playground">
+          <div class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+          </div>
+          <span>Playground</span>
+        </div>
+
+        <div class="nav-item" data-tab="tunnel">
+          <div class="nav-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="2" y1="12" x2="22" y2="12"></line>
+              <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+            </svg>
+          </div>
+          <span>Singularity-Access</span>
+          <span class="nav-badge" id="nav-tunnel-badge">Offline</span>
+        </div>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="gateway-status-pill">
+          <div class="status-indicator">
+            <span class="status-dot" id="hub-dot"></span>
+            <span id="hub-status-text">Gateway Online</span>
+          </div>
+          <span style="font-family: var(--font-mono); color: var(--text-muted);">:9000</span>
+        </div>
+
+        <div class="theme-toggle-row">
+          <span>Dark Mode</span>
+          <label class="theme-switch">
+            <input type="checkbox" id="theme-checkbox" checked />
+            <span class="slider"></span>
+          </label>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Workspace Pane -->
+    <main class="main-content">
+      <header class="top-bar">
+        <div class="page-meta">
+          <h1 id="page-heading">Control Center</h1>
+          <p id="page-subheading"></p>
+        </div>
+
+        <div class="top-bar-actions" id="top-actions">
+          <button class="btn btn-secondary" id="btn-refresh-telemetry">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"></polyline>
+              <polyline points="1 20 1 14 7 14"></polyline>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+            </svg>
+            Refresh
+          </button>
+          <button class="btn btn-primary" id="btn-start-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            Start All
+          </button>
+          <button class="btn btn-danger" id="btn-stop-all">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            </svg>
+            Stop All
+          </button>
+        </div>
+      </header>
+
+      <section class="panel-viewport">
+        <!-- 1. CONTROL CENTER TAB -->
+        <div class="tab-pane active" id="pane-control">
+          <div class="gateway-hero">
+            <div class="gateway-hero-header">
+              <div>
+                <h3 style="font-size: 18px; font-weight: 700;">Universal API Base URL</h3>
+              </div>
+              <button class="btn btn-secondary btn-sm" id="btn-copy-url">Copy Endpoint</button>
+            </div>
+            <div class="endpoint-copy-row">
+              <span class="endpoint-text" id="gateway-url-text">http://localhost:9000/v1</span>
+            </div>
+            <div class="app-clients-row">
+              <div class="client-chip clickable-chip" id="chip-sillytavern" title="Click to toggle /chat/completions">
+                SillyTavern: <code>/chat/completions</code>
+              </div>
+              <div class="client-chip">API Key: <code>sk-singularity-local</code> (or any)</div>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: 10px;">
+            <h3 style="font-size: 16px; font-weight: 700;">Provider Daemon Fleet</h3>
+            <span style="font-size: 12px; color: var(--text-muted);">Auto-refreshes every 3 seconds</span>
+          </div>
+
+          <div class="provider-grid" id="providers-container">
+            <!-- Rendered dynamically by app.js -->
+          </div>
+        </div>
+
+        <!-- 2. LIMITS & QUOTAS TAB -->
+        <div class="tab-pane" id="pane-limits">
+          <div class="limits-card-deck" id="limits-container">
+            <!-- Rendered dynamically by app.js -->
+          </div>
+        </div>
+
+        <!-- 3. AVAILABLE MODELS TAB -->
+        <div class="tab-pane" id="pane-models">
+          <div class="catalog-toolbar">
+            <div class="filter-pills" id="model-filter-pills">
+              <button class="filter-btn active" data-filter="all">All Models</button>
+              <button class="filter-btn" data-filter="unlocked">Unlocked</button>
+              <button class="filter-btn" data-filter="locked">Locked</button>
+              <button class="filter-btn" data-filter="chatgpt">ChatGPT</button>
+              <button class="filter-btn" data-filter="claude">Claude</button>
+              <button class="filter-btn" data-filter="gemini">Gemini</button>
+              <button class="filter-btn" data-filter="kimi">Kimi</button>
+              <button class="filter-btn" data-filter="glm">GLM</button>
+              <button class="filter-btn" data-filter="grok">Grok</button>
+            </div>
+            <input type="text" class="model-search-input" id="model-search"
+              placeholder="Search model or capability..." />
+          </div>
+
+          <div class="models-sections-wrapper" id="models-container">
+            <!-- Rendered dynamically by app.js -->
+          </div>
+        </div>
+
+        <!-- 4. COOKIE STACKER & ACCOUNTS TAB -->
+        <div class="tab-pane" id="pane-cookies">
+          <div class="cookie-section">
+            <div class="provider-tabs-bar" id="cookie-provider-tabs">
+              <button class="provider-tab-btn active" data-p="chatgpt">ChatGPT</button>
+              <button class="provider-tab-btn" data-p="claude">Claude</button>
+              <button class="provider-tab-btn" data-p="grok">Grok</button>
+              <button class="provider-tab-btn" data-p="kimi">Kimi</button>
+              <button class="provider-tab-btn" data-p="gemini">Gemini</button>
+              <button class="provider-tab-btn" data-p="glm">GLM</button>
+            </div>
+
+            <!-- Dedicated Token Extraction & Account Safety Guide -->
+            <div class="token-guide-card" id="token-guide-card">
+              <!-- Rendered dynamically by app.js based on active provider -->
+            </div>
+
+            <div class="add-cookie-card">
+              <div style="display: flex; align-items: flex-start; justify-content: space-between;">
+                <div>
+                  <h3 style="font-size: 15px; font-weight: 700;" id="cookie-input-title">Add / Stack Accounts</h3>
+                  <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;" id="cookie-input-desc">
+                    Paste new account credentials. You can paste multiple accounts line-by-line (one per line or JSON
+                    block) to stack accounts.
+                  </p>
+                </div>
+                <button class="btn btn-primary" id="btn-save-cookie">Save & Stack</button>
+              </div>
+
+              <textarea class="cookie-textarea" id="cookie-textarea" placeholder="Paste credential here..."></textarea>
+            </div>
+
+            <div>
+              <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 12px;">Active Stacked Accounts</h3>
+              <div class="account-stack-container" id="stacked-accounts-list">
+                <!-- Rendered dynamically by app.js -->
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 5. PLAYGROUND TAB -->
+        <div class="tab-pane" id="pane-playground">
+          <div class="playground-layout">
+            <!-- Sidebar Controls -->
+            <div class="playground-sidebar">
+              <div>
+                <label
+                  style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); margin-bottom: 6px; display: block;">Select
+                  Model</label>
+                <!-- Custom Select Dropdown Component (NO DEFAULT GOOGLE SELECT) -->
+                <div class="custom-select-wrapper" id="playground-model-select">
+                  <div class="custom-select-trigger" id="model-select-trigger">
+                    <span id="model-select-label">gpt-5-6-mini</span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  </div>
+                  <div class="custom-select-popover" id="model-select-popover">
+                    <div class="select-search-box">
+                      <input type="text" class="select-search-input" id="model-filter-input"
+                        placeholder="Search models..." />
+                    </div>
+                    <div id="select-options-list">
+                      <!-- Rendered by app.js -->
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label
+                  style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; font-family: var(--font-mono); margin-bottom: 6px; display: block;">System
+                  Prompt</label>
+                <textarea class="cookie-textarea" id="system-prompt-input" style="min-height: 80px; font-size: 12px;"
+                  placeholder="You are a helpful, brilliant AI assistant..."></textarea>
+              </div>
+
+              <div>
+                <div
+                  style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
+                  <span>Temperature</span>
+                  <span id="temp-val" style="font-family: var(--font-mono);">0.7</span>
+                </div>
+                <input type="range" id="temp-range" min="0" max="1" step="0.05" value="0.7"
+                  style="width: 100%; accent-color: var(--brand-primary);" />
+              </div>
+
+              <div style="margin-top: auto;">
+                <button class="btn btn-secondary" id="btn-clear-chat" style="width: 100%;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                  </svg>
+                  Clear Chat History
+                </button>
+              </div>
+            </div>
+
+            <!-- Chat Area -->
+            <div class="playground-chat-area">
+              <div class="chat-history" id="chat-history">
+                <div class="chat-msg assistant">
+                  <div class="msg-bubble">
+                    Hello! I'm connected to the <strong>Singularity Universal Gateway</strong>. Select any model on the
+                    left and test instant inference with live streaming deltas.
+                  </div>
+                </div>
+              </div>
+
+              <div class="chat-input-bar">
+                <textarea class="chat-textarea" id="chat-input"
+                  placeholder="Type a message to test model inference... (Enter to send, Shift+Enter for newline)"></textarea>
+                <button class="btn btn-primary btn-icon" id="btn-send-chat" title="Send message">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="22" y1="2" x2="11" y2="13"></line>
+                    <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 6. CLOUD TUNNEL TAB (ngrok Remote Access) -->
+        <div class="tab-pane" id="pane-tunnel">
+          <div class="tunnel-container">
+            <!-- Hero Status Banner -->
+            <div class="gateway-hero" id="tunnel-hero">
+              <div class="gateway-hero-header">
+                <div>
+                  <h3 style="font-size: 18px; font-weight: 700;" id="tunnel-status-title">Singularity-Access</h3>
+                </div>
+
+                <div style="display: flex; gap: 8px; align-items: center;">
+                  <button class="btn btn-primary btn-sm" id="btn-toggle-tunnel">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polygon points="5 3 19 12 5 21 5 3"></polygon>
+                    </svg>
+                    <span id="btn-toggle-tunnel-text">Start ngrok Tunnel</span>
+                  </button>
+                  <button class="btn btn-secondary btn-sm" id="btn-refresh-tunnel">Refresh</button>
+                  <button class="btn btn-secondary btn-sm" id="btn-copy-tunnel-url">Copy Endpoint</button>
+                </div>
+              </div>
+
+              <!-- Endpoint Copy Row matching Universal API Base URL -->
+              <div class="endpoint-copy-row">
+                <span class="endpoint-text" id="tunnel-url-text">Offline — Click "Start ngrok Tunnel" to expose</span>
+              </div>
+
+              <!-- App Clients Row matching Universal Link with SillyTavern small button and API Key -->
+              <div class="app-clients-row" id="tunnel-clients-row">
+                <div class="client-chip clickable-chip" id="chip-tunnel-st" title="Click to toggle /chat/completions">
+                  SillyTavern: <code>/chat/completions</code>
+                </div>
+                <div class="client-chip">API Key: <code>sk-singularity-local</code> (or any)</div>
+              </div>
+            </div>
+
+            <!-- Remote Device Access Guide Cards -->
+            <div class="tunnel-guide-grid">
+              <div class="tunnel-guide-card">
+                <div class="tunnel-card-icon">📱</div>
+                <h4 class="tunnel-card-title">Phone & Tablet Access</h4>
+                <p class="tunnel-card-desc">
+                  Open your mobile browser and navigate directly to your <strong>Remote Web UI URL</strong> to manage models, stack cookies, or test inference in Playground straight from your phone.
+                </p>
+                <div class="tunnel-card-badge">No app installation needed</div>
+              </div>
+
+              <div class="tunnel-guide-card">
+                <div class="tunnel-card-icon">🎭</div>
+                <h4 class="tunnel-card-title">SillyTavern Mobile / Remote</h4>
+                <p class="tunnel-card-desc">
+                  Set API to <strong>Chat Completion (OpenAI)</strong>, paste the <strong>Public Universal URL</strong> as Server Base URL, and set API Key to <code>sk-singularity-local</code>.
+                </p>
+                <div class="tunnel-card-badge">Endpoint: /v1/chat/completions</div>
+              </div>
+
+              <div class="tunnel-guide-card">
+                <div class="tunnel-card-icon">💻</div>
+                <h4 class="tunnel-card-title">Secondary Laptop / Remote PC</h4>
+                <p class="tunnel-card-desc">
+                  Connect apps like NextChat, Chatbox, or LibreChat running on other computers anywhere in the world to your home GPU/cookie fleet.
+                </p>
+                <div class="tunnel-card-badge">OpenAI-Compatible /v1</div>
+              </div>
+            </div>
+
+            <!-- Authtoken Management Card -->
+            <div class="tunnel-config-card">
+              <div style="display: flex; align-items: flex-start; justify-content: space-between;">
+                <div>
+                  <h4 style="font-size: 14px; font-weight: 700;">ngrok Authtoken Settings</h4>
+                  <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                    Configure or update your token to unlock unlimited persistent sessions.
+                  </p>
+                </div>
+                <button class="btn btn-secondary btn-sm" id="btn-save-authtoken">Save Token</button>
+              </div>
+
+              <div style="display: flex; gap: 10px; margin-top: 10px;">
+                <input type="password" class="model-search-input" id="input-ngrok-authtoken" style="flex: 1;" placeholder="Paste ngrok authtoken here..." />
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+
+</html>

@@ -1,191 +1,199 @@
-# 🎁 Universal-Gift: Universal Free Gemini Web2API Proxy
+# ⚡ Singularity — Universal AI Gateway & Hub
 
-> **Turn Google Gemini into a free, high-speed, OpenAI-compatible API (`http://localhost:8045/v1`) for any application — coding assistants, web UIs, agents, and custom scripts.**
+> **One localhost endpoint. Six AI providers. 186+ models. Zero API keys needed.**
 
----
-
-### 🌟 Key Highlights
-
-* **100% Free & Unlimited**: Runs via Google's web engine in anonymous Guest Mode. No credit card, no API key billing, and no Google account login required.
-* **OpenAI & Google Compatible**: Exposes standard `/v1/chat/completions`, `/v1/images/generations`, `/v1/models`, and `/v1beta/models` endpoints.
-* **Connect Anywhere**: Ready to drop into **Cursor**, **VS Code (Continue / Cline / Roo / Aider)**, **Open WebUI**, **LibreChat**, **LangChain**, **Python `openai` SDK**, **SillyTavern**, and more.
-* **All Modern Gemini Models**: Access `gemini-3.8-flash`, `gemini-3.1-pro`, `gemini-3.1-pro-extended` (Deep Reasoning), and the **Nano Banana** image models (`nano-banana-2`, `nano-banana-pro`, `nano-banana`).
-* **Full Streaming, Vision & Image Gen**: Real-time SSE streaming, multimodal image input, tool calling, and standard `/v1/images/generations` support.
-* **Auto-Healing Engine**: Automatically auto-recovers XSRF tokens and build labels without requiring restarts.
+Singularity is a unified AI gateway that aggregates **ChatGPT, Claude, Gemini, Grok, Kimi, and GLM** into a single OpenAI-compatible API endpoint at `http://localhost:9000/v1`. Stack multiple accounts per provider, monitor live quotas, and control everything from a premium dark-mode dashboard.
 
 ---
 
-## ⚡ Quick 1-Click Install
+## 🌟 Key Highlights
 
-### 📱 Android (Termux)
-Open **Termux** and paste this single command:
+- **Universal `/v1` Endpoint** — Drop-in OpenAI-compatible API serving 186+ models from 6 providers through one URL
+- **Cookie Stacker** — Stack multiple free accounts per provider and rotate them automatically for higher throughput
+- **Live Quotas & Limits** — Real-time monitoring of remaining image gens, reasoning tokens, and message caps per provider
+- **Singularity-Access (ngrok)** — One-click tunnel to expose your local gateway to the internet for mobile & remote access
+- **Interactive Playground** — Test any model with live streaming directly in the dashboard
+- **Full Streaming & Vision** — SSE streaming, multimodal image input, tool calling, and image generation across all providers
+- **Dynamic Model Catalog** — Models auto-lock/unlock based on which accounts you've stacked
+
+---
+
+## 📱 Dashboard Preview
+
+The Singularity dashboard runs at `http://localhost:9000` and provides:
+
+| Tab | What It Does |
+|---|---|
+| **Control Center** | Start/stop provider daemons, view fleet status, copy API endpoint |
+| **Limits & Quotas** | Live remaining queries, image gens, and reasoning budgets per provider |
+| **Available Models** | Browse all 186+ models with lock/unlock status and provider filters |
+| **Cookie Stacker** | Add accounts per provider with built-in token extraction guides |
+| **Playground** | Interactive chat with model selector, temperature control, and streaming |
+| **Singularity-Access** | ngrok tunnel for remote/mobile access with one click |
+
+---
+
+## ⚡ Quick Start
+
+### Prerequisites
+- **Python 3.10+**
+- **pip** (Python package manager)
+- The individual provider backends (ChatGPT2API, Claude2API, etc.) set up in the parent directory
+
+### Install & Run
+
 ```bash
-pkg update -y && pkg install -y git && git clone https://github.com/InsomniacZero/Universal-Gift.git && cd Universal-Gift && bash termux_install.sh
+# Clone the repo
+git clone https://github.com/InsomniacZero/Singularity.git
+cd Singularity
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Start the gateway
+python3 singularity/server.py
 ```
-> **Shortcut:** From now on, simply type `gift` in Termux and press Enter to start!
+
+The dashboard opens at **`http://localhost:9000`** and the API is live at **`http://localhost:9000/v1`**.
 
 ---
 
-### 💻 Windows (PowerShell)
-Open **PowerShell** and paste this single command:
-```powershell
-irm https://raw.githubusercontent.com/InsomniacZero/Universal-Gift/main/install.ps1 | iex
-```
-> **Shortcut:** From now on, simply type `gift` in PowerShell or CMD to start!
+## 🔌 How to Connect
 
----
+Once running, point any OpenAI-compatible client to:
 
-### 🐧 Linux / macOS
-Open your terminal and run:
-```bash
-git clone https://github.com/InsomniacZero/Universal-Gift.git
-cd Universal-Gift
-bash termux_install.sh
-```
-> **Shortcut:** Type `gift` to start!
+| Setting | Value |
+|---|---|
+| **Base URL** | `http://localhost:9000/v1` |
+| **API Key** | `sk-singularity-local` (or any string) |
 
----
+### SillyTavern
+- **API Type:** Chat Completion (OpenAI)
+- **Server URL:** `http://localhost:9000/v1/chat/completions`
+- **API Key:** `sk-singularity-local`
 
-## 🔌 How to Connect in Your Apps
+### Cursor / VS Code / Continue / Cline
+- **Provider:** OpenAI Compatible
+- **Base URL:** `http://localhost:9000/v1`
+- **Model:** Pick any from the catalog (e.g. `gpt-5-6-mini`, `claude-3-7-sonnet`, `gemini-3.8-flash`)
 
-Once the server is running, it listens at **`http://localhost:8045/v1`** (or `http://<YOUR_LAN_IP>:8045/v1` for devices on the same Wi-Fi network).
-
-### 1. Cursor & VS Code Extensions (Continue / Cline / Roo Code / Aider)
-Configure your AI provider as **OpenAI Compatible**:
-* **Base URL / API Base:** `http://localhost:8045/v1`
-* **API Key:** Any string (e.g. `gift`)
-* **Model:** `gemini-3.1-pro` (for advanced coding) or `gemini-3.8-flash` (for fast edits)
-
----
-
-### 2. Open WebUI / LibreChat / Chatbox / NextChat
-* **API Host / Base URL:** `http://localhost:8045/v1`
-* **API Key:** `gift`
-* All models will automatically populate in the model selection list!
-
----
-
-### 3. Python (`openai` Official SDK)
+### Python SDK
 ```python
 from openai import OpenAI
 
-# Point to your local Universal-Gift proxy
 client = OpenAI(
-    base_url="http://localhost:8045/v1",
-    api_key="gift"  # Any non-empty string works
+    base_url="http://localhost:9000/v1",
+    api_key="sk-singularity-local"
 )
 
-# Non-streaming
 response = client.chat.completions.create(
-    model="gemini-3.1-pro",
-    messages=[
-        {"role": "system", "content": "You are a senior systems architect."},
-        {"role": "user", "content": "Design a high-throughput event processing architecture in Go."}
-    ]
-)
-print(response.choices[0].message.content)
-
-# Streaming
-stream = client.chat.completions.create(
-    model="gemini-3.8-flash",
-    messages=[{"role": "user", "content": "Write a quicksort in Rust with unit tests."}],
+    model="gpt-5-6-mini",
+    messages=[{"role": "user", "content": "Hello from Singularity!"}],
     stream=True
 )
-for chunk in stream:
+for chunk in response:
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="", flush=True)
 ```
 
-# Image Generation (Nano Banana)
-image_resp = client.images.generate(
-    model="nano-banana-2",
-    prompt="A photorealistic 3D figurine of a cybernetic cat sitting on neon streets, octane render 8k",
-    n=1,
-    size="1024x1024"
-)
-print(image_resp.data[0].url)
-```
-
----
-
-### 4. cURL / Terminal
+### cURL
 ```bash
-# Chat Completion
-curl http://localhost:8045/v1/chat/completions \
+curl http://localhost:9000/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer sk-singularity-local" \
   -d '{
     "model": "gemini-3.8-flash",
-    "messages": [
-      {"role": "system", "content": "You are a concise assistant."},
-      {"role": "user", "content": "Hello! What can you do?"}
-    ]
-  }'
-
-# Image Generation (Nano Banana)
-curl http://localhost:8045/v1/images/generations \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "nano-banana-2",
-    "prompt": "An astronaut riding a green horse on Mars, cinematic lighting",
-    "n": 1
+    "messages": [{"role": "user", "content": "What is Singularity?"}],
+    "stream": true
   }'
 ```
 
 ---
 
-### 5. Chatbots & Roleplay (SillyTavern, Janitor AI, etc.)
-* **API Type:** OpenAI Compatible (or Custom)
-* **Proxy / Endpoint URL:** `http://localhost:8045/v1/chat/completions`
-* **Model ID:** `gemini-3.1-pro-extended`, `gemini-3.8-flash`, or `nano-banana-2`
-* **API Key:** `gift`
+## 🎯 Provider Fleet
 
----
+Singularity orchestrates six provider backends:
 
-## 📋 Model Directory & Aliases
-
-| Model Identifier | Mode | Description | Best For |
+| Provider | Port | Models | Highlights |
 |---|---|---|---|
-| **`gemini-3.8-flash`** *(Default)* | Fast | Google's latest high-speed, general-purpose model | Daily tasks, general chat, fast code generation |
-| **`gemini-3.8-flash-thinking`** | Reasoning | Flash with Deep Reasoning mode (~20k reasoning budget) | Math, complex logic, step-by-step puzzles |
-| **`gemini-3.1-pro`** | Flagship Pro | Advanced Google Pro model | Heavy programming, architecture, complex refactoring |
-| **`gemini-3.1-pro-extended`** | Pro Reasoning | Gemini 3.1 Pro with Extended Thinking enabled | Maximum intelligence, hard coding problems, deep stories |
-| **`gemini-3.1-pro-thinking`** | Pro Reasoning | Alias for `gemini-3.1-pro-extended` | Reasoning tokens before generation |
-| **`nano-banana-2`** | Image Gen | Next-gen image synthesis (Gemini 3.1 Flash Image) | High-speed photorealistic image gen & consistent subject editing |
-| **`nano-banana-pro`** | Flagship Image | Flagship high-res visual model (Gemini 3 Pro Image) | Complex prompts, legible typography, ultra-high fidelity art |
-| **`nano-banana`** | Image Gen | Original viral image generator (Gemini 2.5 Flash Image) | Creative styling, 3D figurines, natural language photo manipulation |
-| **`nano-banana-2-lite`** | Rapid Image | Lightweight quick generation (Gemini 3.1 Flash-Lite Image) | Ultra-fast image previews, batch concept generation |
-| **`imagen-3`** | Image Gen | Alias for `nano-banana-pro` image model | Drop-in standard for Imagen / OpenAI image workflows |
-| **`gemini-3.7-flash`** | Fast | Gemini 3.7 Flash | Fallback / alternative generation |
-| **`gemini-3.6-flash`** | Fast | Stable 3.6 Flash | Previous stable generation |
-| **`gemini-flash-lite`** | Ultra Fast | Lightweight, high-throughput model | Simple classification, extraction, summaries |
-| **`gemini-auto`** | Auto | Automatic dynamic model routing | Adaptive workload handling |
-
-> **Smart Alias Matching:** You can pass short names like `banana-2`, `banana-pro`, `nano-banana`, `imagen-3`, `3.1-pro`, `pro`, `flash`, `3.1-pro-extended`, or even standard aliases like `gpt-4o` and the proxy maps them automatically.
+| **ChatGPT** | 8000 | 20 | GPT-5.6-Mini/Sol/Terra, GPT-6-Astra, GPT-Image-2.5 |
+| **Claude** | 8080 | 20 | Claude 3.7 Sonnet, Claude 4 Opus/Sonnet, Claude Fable |
+| **Gemini** | 8084 | 21 | Gemini 3.8 Flash, 3.1 Pro, Nano Banana image models |
+| **Grok** | 8087 | 8 | Grok 3, Grok 3 Mini, Grok Imagine |
+| **Kimi** | 8086 | 31 | Kimi K2, K2 Math, K2 Vision (200k/500k context) |
+| **GLM** | 8085 | 86 | GLM-4 Plus, CogView, Video Gen, Music Gen |
 
 ---
 
-## ⚙️ Advanced Settings & Flags
+## 🍪 Cookie Stacker
 
-Run `python3 gemini_web2api.py --help` for options:
+The **Cookie Stacker** tab lets you add multiple free accounts per provider to increase throughput and avoid rate limits. Each provider has a built-in guide showing exactly how to extract your session tokens:
 
-| Flag | Default | Description |
+- **ChatGPT** → `chatgpt.com/api/auth/session` (use separate Chrome profiles)
+- **Claude** → Session key from `claude.ai` cookies
+- **Grok** → `x.com` auth cookies
+- **Kimi** → `kimi.com` refresh token
+- **Gemini** → Google `__Secure-1PSID` cookie
+- **GLM** → No credentials needed (free tier)
+
+> ⚠️ Always use **separate Chrome profiles** per account. Never log out of accounts you're using for stacking.
+
+---
+
+## 🌐 Singularity-Access (Remote / Mobile)
+
+The **Singularity-Access** tab lets you expose your local server to the internet via ngrok:
+
+1. Click **Start ngrok Tunnel**
+2. Get a public URL like `https://your-subdomain.ngrok-free.dev`
+3. Use this URL on your phone, tablet, or any remote device
+4. SillyTavern mobile → paste the public URL + `/v1/chat/completions`
+
+> Requires [ngrok](https://ngrok.com/) installed. Free tier works out of the box.
+
+---
+
+## 📁 Project Structure
+
+```
+Singularity/
+├── singularity/
+│   ├── server.py          # FastAPI gateway (port 9000)
+│   ├── providers.py       # Provider engine, model catalog, cookie management
+│   ├── tunnel.py          # ngrok tunnel manager
+│   └── static/
+│       ├── index.html     # Dashboard UI
+│       ├── app.js         # Frontend logic
+│       ├── style.css      # Styles
+│       ├── tokens.css     # Design tokens
+│       ├── logo.svg       # Singularity logo
+│       └── icons/         # Provider SVG icons
+├── requirements.txt
+├── .gitignore
+└── README.md
+```
+
+---
+
+## ⚙️ API Endpoints
+
+| Method | Endpoint | Description |
 |---|---|---|
-| `--port` | `8045` | Port to bind the server on |
-| `--host` | `0.0.0.0` | Host to bind on (`0.0.0.0` enables local network access) |
-| `--model` | `gemini-3.8-flash` | Default model when not specified by client |
-| `--cookie` | `cookie.txt` | Path to optional Google account cookie file |
-| `--proxy` | `None` | Upstream HTTP/SOCKS proxy (e.g. `http://127.0.0.1:7890`) |
-| `--api-key` | `""` | Require a custom API key for clients to access your server |
-| `--quiet` | `False` | Disable request logging in console |
-
----
-
-## 🔒 Privacy & Guest Mode
-
-* By default, **Universal-Gift** runs in **Guest Mode**. It never requires your personal Google credentials or cookies.
-* If you want to connect a specific Google account (e.g. for Gemini Advanced subscription features), simply export your `cookie.txt` using any standard cookie extension and place it in the folder.
+| `GET` | `/v1/models` | List all available models (OpenAI format) |
+| `POST` | `/v1/chat/completions` | Chat completion (streaming & non-streaming) |
+| `GET` | `/api/services` | Provider fleet status |
+| `POST` | `/api/services/{id}/start` | Start a specific provider |
+| `POST` | `/api/services/{id}/stop` | Stop a specific provider |
+| `GET` | `/api/limits` | Live quota data for all providers |
+| `GET` | `/api/models` | Full model catalog with lock/unlock status |
+| `GET` | `/api/cookies` | View stacked accounts per provider |
+| `POST` | `/api/cookies` | Add/stack new account credentials |
+| `GET` | `/api/tunnel/status` | ngrok tunnel status |
+| `POST` | `/api/tunnel/start` | Start ngrok tunnel |
+| `POST` | `/api/tunnel/stop` | Stop ngrok tunnel |
 
 ---
 
 ## 📄 License
-MIT License. Built for the open-source community by **InsomniacZero**.
+
+MIT License. Built by **InsomniacZero**.
