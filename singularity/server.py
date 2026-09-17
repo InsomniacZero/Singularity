@@ -7,13 +7,89 @@ Port 9000
 import json
 import os
 import time
+import inspect
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Request, Response, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
-from fastapi.staticfiles import StaticFiles
+try:
+    from fastapi import FastAPI, HTTPException, Request, Response, status
+    from fastapi.middleware.cors import CORSMiddleware
+    from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+    from fastapi.staticfiles import StaticFiles
+
+    app = FastAPI(title="Singularity Unified AI Gateway", version="1.0.0")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+except ImportError:
+    # Lightweight pure-Python fallback for Termux / mobile (no Rust / Pydantic build needed!)
+    from starlette.applications import Starlette
+    from starlette.exceptions import HTTPException
+    from starlette.requests import Request
+    from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
+    from starlette.middleware.cors import CORSMiddleware
+    from starlette.staticfiles import StaticFiles
+    from starlette.routing import Route, Mount
+
+    async def _http_exception_handler(request, exc):
+        return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
+
+    class StarletteGateway(Starlette):
+        def __init__(self):
+            super().__init__(
+                exception_handlers={HTTPException: _http_exception_handler}
+            )
+            self.add_middleware(
+                CORSMiddleware,
+                allow_origins=["*"],
+                allow_credentials=True,
+                allow_methods=["*"],
+                allow_headers=["*"],
+            )
+
+        def _route_decorator(self, path: str, methods: list):
+            def decorator(func):
+                sig = inspect.signature(func)
+                async def handler(request):
+                    kwargs = {}
+                    for p in sig.parameters.values():
+                        if p.name in ("request", "req"):
+                            kwargs[p.name] = request
+                        elif p.name in request.path_params:
+                            kwargs[p.name] = request.path_params[p.name]
+                    if inspect.iscoroutinefunction(func):
+                        res = await func(**kwargs)
+                    else:
+                        res = func(**kwargs)
+                    if isinstance(res, (dict, list)):
+                        return JSONResponse(res)
+                    return res
+                self.router.routes.append(Route(path, handler, methods=methods))
+                return func
+            return decorator
+
+        def get(self, path: str):
+            return self._route_decorator(path, ["GET"])
+
+        def post(self, path: str):
+            return self._route_decorator(path, ["POST"])
+
+        def head(self, path: str):
+            return self._route_decorator(path, ["HEAD", "GET"])
+
+    app = StarletteGateway()
+
+BASE_DIR = Path(__file__).resolve().parent
+STATIC_DIR = BASE_DIR / "static"
+
+import sys
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
+
 import httpx
 import uvicorn
 
@@ -31,19 +107,6 @@ from providers import (
     start_provider,
     stop_all_services,
     stop_provider,
-)
-
-BASE_DIR = Path(__file__).resolve().parent
-STATIC_DIR = BASE_DIR / "static"
-
-app = FastAPI(title="Singularity Unified AI Gateway", version="1.0.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
 )
 
 

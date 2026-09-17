@@ -58,10 +58,10 @@ The dashboard opens at **`http://localhost:9000`** and the API is live at **`htt
 Open **[Termux](https://f-droid.org/en/packages/com.termux/)** and paste:
 
 ```bash
-# Install prerequisites (rust is required to build pydantic-core)
-pkg update -y && pkg install -y python git rust
+# Install prerequisites (zero build tools needed, pure Python)
+pkg update -y && pkg install -y python git
 
-# Clone & install (~20-30 min first time, Rust compiles pydantic-core)
+# Clone & install (takes ~5 seconds!)
 git clone https://github.com/InsomniacZero/Singularity.git
 cd Singularity
 pip install -r requirements.txt
@@ -70,10 +70,10 @@ pip install -r requirements.txt
 python3 singularity/server.py
 ```
 
-> **⚠️ First install takes ~20-30 minutes** — Termux uses Python 3.14 which has no pre-built `pydantic-core` wheel, so Rust compiles it from source. This is a one-time cost; subsequent installs are instant.
+> **⚡ 5-Second Zero-Compilation Engine:** Singularity uses an ultra-lightweight ASGI engine (`starlette` + `uvicorn` + `httpx`) with zero Rust, C++, or Pydantic compilation. It installs in seconds on any Android phone!
 >
-> **Access from same phone:** Open `http://localhost:9000` in your phone browser.
-> **Access from PC on same Wi-Fi:** Use `http://<PHONE_IP>:9000/v1` (run `ifconfig` in Termux to find your IP).
+> **Access from same phone:** Open `http://localhost:9000` in your mobile browser.
+> **Access from PC on same Wi-Fi:** Use `http://<PHONE_IP>:9000/v1` (run `ifconfig` in Termux to find your phone's local IP).
 
 ---
 
