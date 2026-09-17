@@ -58,8 +58,8 @@ The dashboard opens at **`http://localhost:9000`** and the API is live at **`htt
 Open **[Termux](https://f-droid.org/en/packages/com.termux/)** and paste:
 
 ```bash
-# Install prerequisites
-pkg update -y && pkg install -y python git
+# Install prerequisites (rust is needed to build pydantic-core)
+pkg update -y && pkg install -y python git rust
 
 # Clone & install
 git clone https://github.com/InsomniacZero/Singularity.git
@@ -70,6 +70,8 @@ pip install -r requirements.txt
 python3 singularity/server.py
 ```
 
+> **⚠️ `rust` is required** — Termux builds pydantic-core from source on Android. `pkg install rust` takes ~2 min but only needs to be done once.
+>
 > **Access from same phone:** Open `http://localhost:9000` in your phone browser.
 > **Access from PC on same Wi-Fi:** Use `http://<PHONE_IP>:9000/v1` (run `ifconfig` in Termux to find your IP).
 
