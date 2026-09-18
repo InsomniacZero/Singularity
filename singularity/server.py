@@ -80,6 +80,15 @@ except Exception:
         def post(self, path: str):
             return self._route_decorator(path, ["POST"])
 
+        def delete(self, path: str):
+            return self._route_decorator(path, ["DELETE"])
+
+        def put(self, path: str):
+            return self._route_decorator(path, ["PUT"])
+
+        def patch(self, path: str):
+            return self._route_decorator(path, ["PATCH"])
+
         def head(self, path: str):
             return self._route_decorator(path, ["HEAD", "GET"])
 
