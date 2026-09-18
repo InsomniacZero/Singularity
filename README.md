@@ -1,4 +1,4 @@
-# ⚡ Singularity — Universal AI Gateway & Hub
+# <img src="singularity/static/logo.svg" width="36" height="36" alt="Singularity Logo" style="vertical-align: middle; margin-right: 8px;" /> Singularity
 
 > **One localhost endpoint. Six AI providers. 186+ models. Zero API keys needed.**
 
