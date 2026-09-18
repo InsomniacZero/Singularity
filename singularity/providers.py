@@ -1642,7 +1642,7 @@ def start_provider(provider_id: str) -> Dict[str, Any]:
 
     script_path = ROOT_DIR / meta["start_script"]
     if not script_path.exists():
-        return {"status": "error", "message": f"Script not found: {script_path}"}
+        return {"status": "error", "message": f"{meta['name']} runner script '{meta['start_script']}' not found in {ROOT_DIR.name}. Start provider on port {port} or configure proxy."}
 
     try:
         # Use subprocess with nohup / detached process
@@ -1929,13 +1929,19 @@ def get_stored_cookies() -> Dict[str, Any]:
     if chatgpt_file.exists():
         try:
             acc_data = json.loads(chatgpt_file.read_text(encoding="utf-8"))
-            for acc in acc_data:
-                chatgpt_accounts.append({
-                    "email": acc.get("email"),
-                    "name": acc.get("name"),
-                    "plan": acc.get("type"),
-                    "status": acc.get("status"),
-                })
+            if isinstance(acc_data, list):
+                for acc in acc_data:
+                    email = acc.get("email")
+                    name = acc.get("name") or (email.split("@")[0] if email else "Account")
+                    token = acc.get("access_token") or ""
+                    masked = token[:15] + "..." + token[-10:] if len(token) > 25 else (email or "Active")
+                    chatgpt_accounts.append({
+                        "email": email or name,
+                        "name": name,
+                        "plan": acc.get("type") or "free",
+                        "status": acc.get("status") or "Active",
+                        "masked": masked,
+                    })
         except Exception:
             pass
     result["chatgpt"] = {
@@ -1947,8 +1953,81 @@ def get_stored_cookies() -> Dict[str, Any]:
     return result
 
 
+def parse_chatgpt_account_input(raw: str) -> Optional[Dict[str, Any]]:
+    """Parse Next-Auth session JSON dumps, access tokens, or raw JWT dumps."""
+    raw = raw.strip()
+    if not raw:
+        return None
+
+    # 1. Try parsing JSON
+    try:
+        data = json.loads(raw)
+        if isinstance(data, dict):
+            user = data.get("user", {}) if isinstance(data.get("user"), dict) else {}
+            email = user.get("email") or data.get("email")
+            name = user.get("name") or data.get("name")
+            access_token = data.get("accessToken") or data.get("access_token")
+            session_token = data.get("sessionToken") or data.get("session_token")
+            plan = data.get("account", {}).get("planType") or data.get("plan_type") or data.get("type") or "free"
+
+            if not access_token and "token" in data:
+                access_token = data["token"]
+
+            if not email and access_token and access_token.startswith("eyJ"):
+                try:
+                    import base64
+                    payload_b64 = access_token.split(".")[1]
+                    payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+                    payload = json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
+                    email = payload.get("https://api.openai.com/profile", {}).get("email") or payload.get("email")
+                    if not name:
+                        name = payload.get("https://api.openai.com/profile", {}).get("name")
+                except Exception:
+                    pass
+
+            if access_token or session_token or email:
+                if not email:
+                    email = f"user_{access_token[:8]}" if access_token else "chatgpt_user"
+                if not name:
+                    name = email.split("@")[0] if "@" in email else "ChatGPT User"
+                return {
+                    "email": email,
+                    "name": name,
+                    "type": plan,
+                    "status": "Active",
+                    "access_token": access_token or "",
+                    "session_token": session_token or "",
+                }
+    except Exception:
+        pass
+
+    # 2. Raw JWT or session token string
+    if raw.startswith("eyJ") or len(raw) > 40:
+        email = "chatgpt_user"
+        name = "ChatGPT User"
+        try:
+            import base64
+            payload_b64 = raw.split(".")[1]
+            payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+            payload = json.loads(base64.urlsafe_b64decode(payload_b64).decode("utf-8"))
+            email = payload.get("https://api.openai.com/profile", {}).get("email") or payload.get("email") or email
+            name = payload.get("https://api.openai.com/profile", {}).get("name") or (email.split("@")[0] if "@" in email else name)
+        except Exception:
+            pass
+        return {
+            "email": email,
+            "name": name,
+            "type": "free",
+            "status": "Active",
+            "access_token": raw,
+            "session_token": "",
+        }
+
+    return None
+
+
 def save_stacked_cookies(provider_id: str, accounts: List[str]) -> Dict[str, Any]:
-    """Save stacked accounts for a provider (one entry per item, not comma-separated)."""
+    """Save stacked accounts for a provider with auto-directory creation and robust parsing."""
     if provider_id not in PROVIDERS_CONFIG:
         return {"status": "error", "message": f"Unknown provider: {provider_id}"}
 
@@ -1957,8 +2036,7 @@ def save_stacked_cookies(provider_id: str, accounts: List[str]) -> Dict[str, Any
     try:
         if provider_id == "claude":
             yaml_path = PROVIDERS_CONFIG["claude"]["cookie_file"]
-            existing = yaml_path.read_text(encoding="utf-8") if yaml_path.exists() else ""
-            # Generate new sessions block
+            yaml_path.parent.mkdir(parents=True, exist_ok=True)
             sessions_lines = ["# Claude2API Configuration", "sessions:"]
             for key in clean_items:
                 sessions_lines.append(f'  - sessionKey: "{key}"')
@@ -1973,16 +2051,19 @@ def save_stacked_cookies(provider_id: str, accounts: List[str]) -> Dict[str, Any
 
         elif provider_id == "grok":
             cookie_path = PROVIDERS_CONFIG["grok"]["cookie_file"]
+            cookie_path.parent.mkdir(parents=True, exist_ok=True)
             lines = [item for item in clean_items if item]
             cookie_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         elif provider_id == "gemini":
             cookie_path = PROVIDERS_CONFIG["gemini"]["cookie_file"]
+            cookie_path.parent.mkdir(parents=True, exist_ok=True)
             lines = [item for item in clean_items if item]
             cookie_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         elif provider_id == "kimi":
             env_path = PROVIDERS_CONFIG["kimi"]["cookie_file"]
+            env_path.parent.mkdir(parents=True, exist_ok=True)
             if clean_items:
                 primary_token = clean_items[0]
                 content = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
@@ -1994,20 +2075,60 @@ def save_stacked_cookies(provider_id: str, accounts: List[str]) -> Dict[str, Any
 
         elif provider_id == "glm":
             token_path = PROVIDERS_CONFIG["glm"]["cookie_file"]
+            token_path.parent.mkdir(parents=True, exist_ok=True)
             lines = [item for item in clean_items if item]
             token_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
         elif provider_id == "chatgpt":
-            # For chatgpt, if JSON was passed, import via c2a
-            c2a_path = ROOT_DIR / "chatgpt2api" / "c2a"
-            for item in clean_items:
-                if item.startswith("{") or item.startswith("["):
-                    tmp_file = ROOT_DIR / "chatgpt2api" / "data" / "_import_temp.json"
-                    tmp_file.write_text(item, encoding="utf-8")
-                    subprocess.run([str(c2a_path), "import", str(tmp_file)], cwd=str(ROOT_DIR / "chatgpt2api"))
-                    if tmp_file.exists():
-                        tmp_file.unlink()
+            chatgpt_data_dir = PROVIDERS_CONFIG["chatgpt"]["cookie_file"].parent
+            chatgpt_data_dir.mkdir(parents=True, exist_ok=True)
+            accounts_file = PROVIDERS_CONFIG["chatgpt"]["cookie_file"]
 
-        return {"status": "ok", "message": f"Successfully updated {len(clean_items)} accounts for {provider_id}."}
+            existing_accounts = []
+            if accounts_file.exists():
+                try:
+                    loaded = json.loads(accounts_file.read_text(encoding="utf-8"))
+                    if isinstance(loaded, list):
+                        existing_accounts = loaded
+                except Exception:
+                    existing_accounts = []
+
+            c2a_path = ROOT_DIR / "chatgpt2api" / "c2a"
+            can_use_c2a = c2a_path.exists() and os.access(c2a_path, os.X_OK)
+
+            added_count = 0
+            for item in clean_items:
+                imported_by_c2a = False
+                if can_use_c2a and (item.startswith("{") or item.startswith("[")):
+                    try:
+                        tmp_file = chatgpt_data_dir / "_import_temp.json"
+                        tmp_file.write_text(item, encoding="utf-8")
+                        sub_res = subprocess.run([str(c2a_path), "import", str(tmp_file)], cwd=str(ROOT_DIR / "chatgpt2api"), capture_output=True)
+                        if tmp_file.exists():
+                            tmp_file.unlink()
+                        if sub_res.returncode == 0:
+                            imported_by_c2a = True
+                            added_count += 1
+                    except Exception:
+                        imported_by_c2a = False
+
+                if not imported_by_c2a:
+                    parsed = parse_chatgpt_account_input(item)
+                    if parsed:
+                        replaced = False
+                        for i, acc in enumerate(existing_accounts):
+                            if (parsed.get("email") and acc.get("email") == parsed.get("email")) or \
+                               (parsed.get("access_token") and acc.get("access_token") == parsed.get("access_token")):
+                                existing_accounts[i].update(parsed)
+                                replaced = True
+                                break
+                        if not replaced:
+                            existing_accounts.append(parsed)
+                        added_count += 1
+
+            # Save updated accounts file
+            accounts_file.write_text(json.dumps(existing_accounts, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        return {"status": "ok", "message": f"Successfully updated accounts for {provider_id}."}
     except Exception as e:
         return {"status": "error", "message": str(e)}

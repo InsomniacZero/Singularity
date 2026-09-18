@@ -325,7 +325,11 @@ async function restartService(id) {
     showToast(`Restarting ${id}...`, 'info');
     const res = await fetch(`/api/services/${id}/restart`, { method: 'POST' });
     const data = await res.json();
-    showToast(`Restarted ${id}`, 'success');
+    if (data.status === 'ok') {
+      showToast(data.message || `Restarted ${id}`, 'success');
+    } else {
+      showToast(data.message || `Could not restart ${id}`, 'warning');
+    }
     await fetchServices();
   } catch (err) {
     showToast(err.message, 'error');
@@ -1164,11 +1168,14 @@ async function saveCookies() {
       showToast(data.message, 'success');
       textarea.value = '';
       await loadCookiesTab();
-      // Prompt to restart service
-      setTimeout(() => {
-        showToast(`Restarting ${p} daemon to apply new credentials...`, 'info');
-        restartService(p);
-      }, 1000);
+      // Restart daemon to apply new credentials only if it is already running
+      const srv = state.services?.find(s => s.id === p);
+      if (srv && srv.running) {
+        setTimeout(() => {
+          showToast(`Restarting ${p} daemon to apply new credentials...`, 'info');
+          restartService(p);
+        }, 800);
+      }
     } else {
       showToast(data.message || 'Failed to save', 'error');
     }
