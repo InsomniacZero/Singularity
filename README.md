@@ -46,8 +46,13 @@ cd Singularity
 pip install -r requirements.txt
 
 # Start the gateway
-python3 singularity/server.py
+./start.sh
 ```
+
+> **Tip:** To launch anytime using the `singular` command, add the alias:
+> ```bash
+> echo "alias singular='$(pwd)/start.sh'" >> ~/.bashrc && source ~/.bashrc
+> ```
 
 The dashboard opens at **`http://localhost:9000`** and the API is live at **`http://localhost:9000/v1`**.
 
@@ -58,9 +63,10 @@ The dashboard opens at **`http://localhost:9000`** and the API is live at **`htt
 Open **[Termux](https://f-droid.org/en/packages/com.termux/)** and paste this one-liner:
 
 ```bash
-rm -rf Singularity && pkg update -y && pkg install -y python git && pip install --break-system-packages starlette uvicorn httpx && git clone https://github.com/InsomniacZero/Singularity.git && cd Singularity/singularity && python3 server.py
+rm -rf Singularity && pkg update -y && pkg install -y python git && pip install --break-system-packages starlette uvicorn httpx && git clone https://github.com/InsomniacZero/Singularity.git && cd Singularity && chmod +x start.sh && ln -sf $(pwd)/start.sh $PREFIX/bin/singular && ./start.sh
 ```
 
+* **Next time:** Simply type **`singular`** from anywhere in Termux to launch!
 * **Access from phone browser:** Open `http://localhost:9000`
 * **Access from PC on same Wi-Fi:** Use `http://<PHONE_IP>:9000/v1` (check `ifconfig` in Termux).
 
