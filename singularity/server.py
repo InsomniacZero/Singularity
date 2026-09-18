@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 try:
+    if os.getenv("NO_FASTAPI", "").strip() in ("1", "true", "yes"):
+        raise ImportError("FastAPI disabled by NO_FASTAPI env var")
     from fastapi import FastAPI, HTTPException, Request, Response, status
     from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -25,7 +27,7 @@ try:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-except ImportError:
+except Exception:
     # Lightweight pure-Python fallback for Termux / mobile (no Rust / Pydantic build needed!)
     from starlette.applications import Starlette
     from starlette.exceptions import HTTPException

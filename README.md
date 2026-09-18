@@ -53,27 +53,34 @@ The dashboard opens at **`http://localhost:9000`** and the API is live at **`htt
 
 ---
 
-### 📱 Android (Termux)
+### 📱 Android (Termux) - Phone Setup
 
-Open **[Termux](https://f-droid.org/en/packages/com.termux/)** and paste:
+Open **[Termux](https://f-droid.org/en/packages/com.termux/)** and paste this one-liner (cleans any old folder, installs pure-Python dependencies, and starts the gateway with **zero Rust or Pydantic compilation**):
 
 ```bash
-# Install prerequisites (zero build tools needed, pure Python)
-pkg update -y && pkg install -y python git
-
-# Clone & install (takes ~5 seconds!)
-git clone https://github.com/InsomniacZero/Singularity.git
-cd Singularity
-pip install -r requirements.txt
-
-# Start the gateway
-python3 singularity/server.py
+rm -rf Singularity && pkg update -y && pkg install -y python git && pip install --break-system-packages starlette uvicorn httpx && git clone https://github.com/InsomniacZero/Singularity.git && cd Singularity/singularity && python3 server.py
 ```
 
-> **⚡ 5-Second Zero-Compilation Engine:** Singularity uses an ultra-lightweight ASGI engine (`starlette` + `uvicorn` + `httpx`) with zero Rust, C++, or Pydantic compilation. It installs in seconds on any Android phone!
+Or step-by-step:
+
+```bash
+# 1. Clean any existing folder
+rm -rf Singularity
+
+# 2. Install prerequisites & pure-Python libraries
+pkg update -y && pkg install -y python git
+pip install --break-system-packages starlette uvicorn httpx
+
+# 3. Clone & run
+git clone https://github.com/InsomniacZero/Singularity.git
+cd Singularity/singularity
+python3 server.py
+```
+
+> **⚡ Zero Rust / Zero Pydantic:** Singularity runs on a pure-Python Starlette engine (`starlette` + `uvicorn` + `httpx`). It requires no `fastapi`, no `pydantic`, and no Rust toolchain on Android!
 >
-> **Access from same phone:** Open `http://localhost:9000` in your mobile browser.
-> **Access from PC on same Wi-Fi:** Use `http://<PHONE_IP>:9000/v1` (run `ifconfig` in Termux to find your phone's local IP).
+> **Access from phone browser:** Open `http://localhost:9000`
+> **Access from PC on same Wi-Fi:** Use `http://<PHONE_IP>:9000/v1` (check `ifconfig` in Termux).
 
 ---
 
