@@ -1716,7 +1716,7 @@ async def get_all_limits() -> Dict[str, Any]:
     """Collect live limits and quotas across all 6 providers."""
     limits: Dict[str, Any] = {}
 
-    # 1. ChatGPT limits via c2a CLI
+    # 1. ChatGPT limits via c2a CLI (with accounts.json direct fallback)
     chatgpt_data = []
     try:
         cli_path = ROOT_DIR / "chatgpt2api" / "c2a"
@@ -1742,8 +1742,32 @@ async def get_all_limits() -> Dict[str, Any]:
                         "file_upload": features.get("file_upload", "N/A"),
                         "restore_at": acc.get("restore_at"),
                     })
-    except Exception as e:
-        chatgpt_data = [{"error": str(e)}]
+    except Exception:
+        chatgpt_data = []
+
+    # Direct fallback: if c2a wasn't available (e.g. running on Termux / standalone), read accounts.json directly
+    if not chatgpt_data:
+        accounts_file = PROVIDERS_CONFIG["chatgpt"]["cookie_file"]
+        if accounts_file.exists():
+            try:
+                loaded = json.loads(accounts_file.read_text(encoding="utf-8"))
+                if isinstance(loaded, list):
+                    for acc in loaded:
+                        limits_progress = acc.get("limits_progress", [])
+                        features = {f.get("feature_name"): f.get("remaining") for f in limits_progress} if isinstance(limits_progress, list) else {}
+                        chatgpt_data.append({
+                            "email": acc.get("email") or acc.get("name") or "Account",
+                            "type": (acc.get("type") or "free").upper(),
+                            "status": acc.get("status", "Active"),
+                            "image_quota": acc.get("quota", "—"),
+                            "reason_remaining": features.get("reason", "—"),
+                            "deep_research": features.get("deep_research", "—"),
+                            "file_upload": features.get("file_upload", "—"),
+                            "restore_at": acc.get("restore_at", "Active"),
+                        })
+            except Exception:
+                pass
+
     limits["chatgpt"] = {
         "title": "ChatGPT Account Pool",
         "accounts_count": len(chatgpt_data),
@@ -1759,19 +1783,31 @@ async def get_all_limits() -> Dict[str, Any]:
                 grok_limits = resp.json()
     except Exception:
         pass
+
+    cookie_path = ROOT_DIR / "grok2api" / "cookies.txt"
+    has_grok_cookie = cookie_path.exists() and bool(cookie_path.read_text(encoding="utf-8").strip())
+    if not grok_limits:
+        grok_limits = {
+            "account_uid": "Connected" if has_grok_cookie else "No Account Integrated",
+            "rate_limits": {},
+            "imagine_quota": {
+                "imagePro": {"remainingQueries": 0},
+                "video720p": {"remainingQueries": 0}
+            }
+        }
     limits["grok"] = {
         "title": "Grok / xAI Limits",
         "data": grok_limits,
     }
 
     # 3. Kimi token and membership info
-    kimi_limits = {"status": "unknown"}
+    kimi_limits = {"status": "none", "membership_level": "No Token Configured", "daily_research_quota": "—", "context_window": "—", "expires_at": "Not Configured"}
     try:
         kimi_env = ROOT_DIR / "kimi2api" / ".env"
         if kimi_env.exists():
             content = kimi_env.read_text(encoding="utf-8")
             m = re.search(r"KIMI_TOKEN=([^\s]+)", content)
-            if m:
+            if m and m.group(1).strip():
                 jwt_str = m.group(1).strip()
                 parts = jwt_str.split(".")
                 if len(parts) >= 2:
@@ -1790,27 +1826,28 @@ async def get_all_limits() -> Dict[str, Any]:
                         "status": "active",
                     }
     except Exception as e:
-        kimi_limits = {"error": str(e)}
+        kimi_limits = {"error": str(e), "membership_level": "Error Reading Token", "daily_research_quota": "—", "context_window": "—", "expires_at": "Error"}
     limits["kimi"] = {
         "title": "Kimi / Moonshot AI Limits",
         "data": kimi_limits,
     }
 
     # 4. Claude sessions limit info
-    claude_limits = {}
+    claude_limits = {"active_sessions": 0, "rolling_window": "None", "free_tier_status": "No Session Connected", "pro_tier_models": "Locked"}
     try:
         yaml_path = ROOT_DIR / "claude2api" / "config.yaml"
         if yaml_path.exists():
             content = yaml_path.read_text(encoding="utf-8")
             keys = re.findall(r'sessionKey:\s*"([^"]+)"', content)
+            session_count = len(keys)
             claude_limits = {
-                "active_sessions": len(keys),
-                "rolling_window": "5-hour dynamic context window",
-                "free_tier_status": "Active (Standard Claude 5 Sonnet & Haiku)",
+                "active_sessions": session_count,
+                "rolling_window": "5-hour dynamic context window" if session_count > 0 else "None",
+                "free_tier_status": "Active (Standard Claude 5 Sonnet & Haiku)" if session_count > 0 else "No Session Connected",
                 "pro_tier_models": "Locked (Opus 5 requires Pro cookie)",
             }
     except Exception as e:
-        claude_limits = {"error": str(e)}
+        claude_limits = {"error": str(e), "active_sessions": 0, "rolling_window": "Error", "free_tier_status": "Error", "pro_tier_models": "Locked"}
     limits["claude"] = {
         "title": "Claude / Anthropic Limits",
         "data": claude_limits,
@@ -1843,18 +1880,17 @@ async def get_all_limits() -> Dict[str, Any]:
 
 
 def get_stored_cookies() -> Dict[str, Any]:
-    """Read stacked cookies/accounts for all 6 providers."""
+    """Read stacked cookies/accounts for all 6 providers with index and identifiers."""
     result: Dict[str, Any] = {}
 
     # Gemini
     gemini_file = PROVIDERS_CONFIG["gemini"]["cookie_file"]
     gemini_cookies = []
     if gemini_file.exists():
-        for line in gemini_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#"):
-                masked = line[:15] + "..." + line[-10:] if len(line) > 30 else line
-                gemini_cookies.append({"raw": line, "masked": masked})
+        lines = [l.strip() for l in gemini_file.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
+        for idx, line in enumerate(lines):
+            masked = line[:15] + "..." + line[-10:] if len(line) > 30 else line
+            gemini_cookies.append({"id": idx, "raw": line, "masked": masked, "identifier": line})
     result["gemini"] = {
         "type": "cookie_string",
         "label": "Google __Secure-1PSID Cookie",
@@ -1867,9 +1903,9 @@ def get_stored_cookies() -> Dict[str, Any]:
     if claude_file.exists():
         content = claude_file.read_text(encoding="utf-8")
         keys = re.findall(r'sessionKey:\s*"([^"]+)"', content)
-        for k in keys:
+        for idx, k in enumerate(keys):
             masked = k[:16] + "..." + k[-10:] if len(k) > 30 else k
-            claude_accounts.append({"sessionKey": k, "masked": masked})
+            claude_accounts.append({"id": idx, "sessionKey": k, "masked": masked, "identifier": k})
     result["claude"] = {
         "type": "session_key",
         "label": "Claude sessionKey (sk-ant-sid02-...)",
@@ -1882,9 +1918,10 @@ def get_stored_cookies() -> Dict[str, Any]:
     if kimi_file.exists():
         content = kimi_file.read_text(encoding="utf-8")
         tokens = re.findall(r'KIMI_TOKEN=([^\s]+)', content)
-        for t in tokens:
-            masked = t[:15] + "..." + t[-10:] if len(t) > 30 else t
-            kimi_accounts.append({"token": t, "masked": masked})
+        for idx, t in enumerate(tokens):
+            if t.strip():
+                masked = t[:15] + "..." + t[-10:] if len(t) > 30 else t
+                kimi_accounts.append({"id": idx, "token": t, "masked": masked, "identifier": t})
     result["kimi"] = {
         "type": "jwt_refresh",
         "label": "Kimi Refresh Token (JWT)",
@@ -1895,13 +1932,12 @@ def get_stored_cookies() -> Dict[str, Any]:
     grok_file = PROVIDERS_CONFIG["grok"]["cookie_file"]
     grok_accounts = []
     if grok_file.exists():
-        for line in grok_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#"):
-                uid_m = re.search(r"x-userid=([^;]+)", line)
-                uid = uid_m.group(1) if uid_m else "default"
-                masked = f"x-userid={uid[:8]}...; sso={line[:12]}..."
-                grok_accounts.append({"raw": line, "masked": masked})
+        lines = [l.strip() for l in grok_file.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
+        for idx, line in enumerate(lines):
+            uid_m = re.search(r"x-userid=([^;]+)", line)
+            uid = uid_m.group(1).strip() if uid_m else "default"
+            masked = f"x-userid={uid[:8]}...; sso={line[:12]}..."
+            grok_accounts.append({"id": idx, "raw": line, "masked": masked, "identifier": uid if uid != "default" else line})
     result["grok"] = {
         "type": "cookie_string",
         "label": "Grok SSO & x-userid",
@@ -1912,11 +1948,10 @@ def get_stored_cookies() -> Dict[str, Any]:
     glm_file = PROVIDERS_CONFIG["glm"]["cookie_file"]
     glm_tokens = []
     if glm_file.exists():
-        for line in glm_file.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#"):
-                masked = line[:12] + "..." + line[-8:] if len(line) > 24 else line
-                glm_tokens.append({"token": line, "masked": masked})
+        lines = [l.strip() for l in glm_file.read_text(encoding="utf-8").splitlines() if l.strip() and not l.startswith("#")]
+        for idx, line in enumerate(lines):
+            masked = line[:12] + "..." + line[-8:] if len(line) > 24 else line
+            glm_tokens.append({"id": idx, "token": line, "masked": masked, "identifier": line})
     result["glm"] = {
         "type": "token_lines",
         "label": "GLM Refresh Tokens",
@@ -1930,17 +1965,19 @@ def get_stored_cookies() -> Dict[str, Any]:
         try:
             acc_data = json.loads(chatgpt_file.read_text(encoding="utf-8"))
             if isinstance(acc_data, list):
-                for acc in acc_data:
+                for idx, acc in enumerate(acc_data):
                     email = acc.get("email")
-                    name = acc.get("name") or (email.split("@")[0] if email else "Account")
+                    name = acc.get("name") or (email.split("@")[0] if email else f"Account #{idx + 1}")
                     token = acc.get("access_token") or ""
                     masked = token[:15] + "..." + token[-10:] if len(token) > 25 else (email or "Active")
                     chatgpt_accounts.append({
+                        "id": idx,
                         "email": email or name,
                         "name": name,
                         "plan": acc.get("type") or "free",
                         "status": acc.get("status") or "Active",
                         "masked": masked,
+                        "identifier": email or token or str(idx),
                     })
         except Exception:
             pass
@@ -2027,7 +2064,7 @@ def parse_chatgpt_account_input(raw: str) -> Optional[Dict[str, Any]]:
 
 
 def save_stacked_cookies(provider_id: str, accounts: List[str]) -> Dict[str, Any]:
-    """Save stacked accounts for a provider with auto-directory creation and robust parsing."""
+    """Save stacked accounts with strict deduplication and directory creation."""
     if provider_id not in PROVIDERS_CONFIG:
         return {"status": "error", "message": f"Unknown provider: {provider_id}"}
 
@@ -2037,8 +2074,14 @@ def save_stacked_cookies(provider_id: str, accounts: List[str]) -> Dict[str, Any
         if provider_id == "claude":
             yaml_path = PROVIDERS_CONFIG["claude"]["cookie_file"]
             yaml_path.parent.mkdir(parents=True, exist_ok=True)
+            existing_keys = []
+            if yaml_path.exists():
+                existing_keys = re.findall(r'sessionKey:\s*"([^"]+)"', yaml_path.read_text(encoding="utf-8"))
+            all_keys = existing_keys + clean_items
+            unique_keys = list(dict.fromkeys(k.strip() for k in all_keys if k.strip()))
+
             sessions_lines = ["# Claude2API Configuration", "sessions:"]
-            for key in clean_items:
+            for key in unique_keys:
                 sessions_lines.append(f'  - sessionKey: "{key}"')
                 sessions_lines.append('    orgID: ""')
             sessions_lines.append("")
@@ -2052,14 +2095,45 @@ def save_stacked_cookies(provider_id: str, accounts: List[str]) -> Dict[str, Any
         elif provider_id == "grok":
             cookie_path = PROVIDERS_CONFIG["grok"]["cookie_file"]
             cookie_path.parent.mkdir(parents=True, exist_ok=True)
-            lines = [item for item in clean_items if item]
-            cookie_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            existing_lines = []
+            if cookie_path.exists():
+                existing_lines = [l.strip() for l in cookie_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            all_lines = existing_lines + clean_items
+            # Deduplicate by x-userid or entire line
+            unique_lines = []
+            seen_uids = set()
+            for line in all_lines:
+                uid_m = re.search(r"x-userid=([^;]+)", line)
+                uid = uid_m.group(1).strip() if uid_m else None
+                if uid:
+                    if uid in seen_uids:
+                        continue
+                    seen_uids.add(uid)
+                elif line in unique_lines:
+                    continue
+                unique_lines.append(line)
+            cookie_path.write_text("\n".join(unique_lines) + ("\n" if unique_lines else ""), encoding="utf-8")
 
         elif provider_id == "gemini":
             cookie_path = PROVIDERS_CONFIG["gemini"]["cookie_file"]
             cookie_path.parent.mkdir(parents=True, exist_ok=True)
-            lines = [item for item in clean_items if item]
-            cookie_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            existing_lines = []
+            if cookie_path.exists():
+                existing_lines = [l.strip() for l in cookie_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            all_lines = existing_lines + clean_items
+            unique_lines = []
+            seen_sids = set()
+            for line in all_lines:
+                sid_m = re.search(r"__Secure-1PSID=([^;]+)", line)
+                sid = sid_m.group(1).strip() if sid_m else None
+                if sid:
+                    if sid in seen_sids:
+                        continue
+                    seen_sids.add(sid)
+                elif line in unique_lines:
+                    continue
+                unique_lines.append(line)
+            cookie_path.write_text("\n".join(unique_lines) + ("\n" if unique_lines else ""), encoding="utf-8")
 
         elif provider_id == "kimi":
             env_path = PROVIDERS_CONFIG["kimi"]["cookie_file"]
@@ -2076,29 +2150,23 @@ def save_stacked_cookies(provider_id: str, accounts: List[str]) -> Dict[str, Any
         elif provider_id == "glm":
             token_path = PROVIDERS_CONFIG["glm"]["cookie_file"]
             token_path.parent.mkdir(parents=True, exist_ok=True)
-            lines = [item for item in clean_items if item]
-            token_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            existing_lines = []
+            if token_path.exists():
+                existing_lines = [l.strip() for l in token_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            all_lines = existing_lines + clean_items
+            unique_lines = list(dict.fromkeys(l for l in all_lines if l))
+            token_path.write_text("\n".join(unique_lines) + ("\n" if unique_lines else ""), encoding="utf-8")
 
         elif provider_id == "chatgpt":
             chatgpt_data_dir = PROVIDERS_CONFIG["chatgpt"]["cookie_file"].parent
             chatgpt_data_dir.mkdir(parents=True, exist_ok=True)
             accounts_file = PROVIDERS_CONFIG["chatgpt"]["cookie_file"]
 
-            existing_accounts = []
-            if accounts_file.exists():
-                try:
-                    loaded = json.loads(accounts_file.read_text(encoding="utf-8"))
-                    if isinstance(loaded, list):
-                        existing_accounts = loaded
-                except Exception:
-                    existing_accounts = []
-
             c2a_path = ROOT_DIR / "chatgpt2api" / "c2a"
             can_use_c2a = c2a_path.exists() and os.access(c2a_path, os.X_OK)
 
-            added_count = 0
             for item in clean_items:
-                imported_by_c2a = False
+                imported = False
                 if can_use_c2a and (item.startswith("{") or item.startswith("[")):
                     try:
                         tmp_file = chatgpt_data_dir / "_import_temp.json"
@@ -2107,28 +2175,197 @@ def save_stacked_cookies(provider_id: str, accounts: List[str]) -> Dict[str, Any
                         if tmp_file.exists():
                             tmp_file.unlink()
                         if sub_res.returncode == 0:
-                            imported_by_c2a = True
-                            added_count += 1
+                            imported = True
                     except Exception:
-                        imported_by_c2a = False
+                        imported = False
 
-                if not imported_by_c2a:
+                if not imported:
+                    # Direct json/token parsing fallback (works offline and on Termux)
+                    existing_accounts = []
+                    if accounts_file.exists():
+                        try:
+                            loaded = json.loads(accounts_file.read_text(encoding="utf-8"))
+                            if isinstance(loaded, list):
+                                existing_accounts = loaded
+                        except Exception:
+                            existing_accounts = []
+
                     parsed = parse_chatgpt_account_input(item)
                     if parsed:
+                        p_email = (parsed.get("email") or "").strip().lower()
+                        p_tok = (parsed.get("access_token") or "").strip()
                         replaced = False
                         for i, acc in enumerate(existing_accounts):
-                            if (parsed.get("email") and acc.get("email") == parsed.get("email")) or \
-                               (parsed.get("access_token") and acc.get("access_token") == parsed.get("access_token")):
+                            a_email = (acc.get("email") or "").strip().lower()
+                            a_tok = (acc.get("access_token") or "").strip()
+                            if (p_email and not p_email.startswith("user_") and a_email == p_email) or \
+                               (p_tok and a_tok == p_tok):
                                 existing_accounts[i].update(parsed)
                                 replaced = True
                                 break
                         if not replaced:
                             existing_accounts.append(parsed)
-                        added_count += 1
 
-            # Save updated accounts file
-            accounts_file.write_text(json.dumps(existing_accounts, indent=2, ensure_ascii=False), encoding="utf-8")
+                        accounts_file.write_text(json.dumps(existing_accounts, indent=2, ensure_ascii=False), encoding="utf-8")
+
+            # Final reload and strict global deduplication pass across all accounts in accounts_file
+            if accounts_file.exists():
+                try:
+                    loaded = json.loads(accounts_file.read_text(encoding="utf-8"))
+                    if isinstance(loaded, list):
+                        unique_accounts = []
+                        seen_emails = set()
+                        seen_tokens = set()
+                        for acc in loaded:
+                            email = (acc.get("email") or "").strip().lower()
+                            token = (acc.get("access_token") or "").strip()
+                            if email and not email.startswith("user_") and email != "chatgpt_user":
+                                if email in seen_emails:
+                                    continue
+                                seen_emails.add(email)
+                            if token:
+                                if token in seen_tokens:
+                                    continue
+                                seen_tokens.add(token)
+                            unique_accounts.append(acc)
+                        accounts_file.write_text(json.dumps(unique_accounts, indent=2, ensure_ascii=False), encoding="utf-8")
+                except Exception:
+                    pass
 
         return {"status": "ok", "message": f"Successfully updated accounts for {provider_id}."}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+def remove_stacked_cookie(provider_id: str, identifier: Optional[str] = None, index: Optional[int] = None) -> Dict[str, Any]:
+    """Remove a specific stacked account from a provider's configuration."""
+    if provider_id not in PROVIDERS_CONFIG:
+        return {"status": "error", "message": f"Unknown provider: {provider_id}"}
+
+    try:
+        if provider_id == "chatgpt":
+            accounts_file = PROVIDERS_CONFIG["chatgpt"]["cookie_file"]
+            if not accounts_file.exists():
+                return {"status": "error", "message": "No ChatGPT accounts file found."}
+
+            loaded = json.loads(accounts_file.read_text(encoding="utf-8"))
+            if not isinstance(loaded, list):
+                return {"status": "error", "message": "Invalid accounts format."}
+
+            initial_len = len(loaded)
+            new_accounts = []
+
+            if index is not None and 0 <= index < len(loaded):
+                new_accounts = [acc for i, acc in enumerate(loaded) if i != index]
+            elif identifier:
+                ident = identifier.strip().lower()
+                for acc in loaded:
+                    email = (acc.get("email") or "").strip().lower()
+                    name = (acc.get("name") or "").strip().lower()
+                    token = (acc.get("access_token") or "").strip()
+                    if email == ident or name == ident or token == identifier.strip() or token.startswith(identifier.strip()):
+                        continue
+                    new_accounts.append(acc)
+            else:
+                return {"status": "error", "message": "Neither index nor identifier provided."}
+
+            if len(new_accounts) == initial_len:
+                return {"status": "error", "message": "Account not found to remove."}
+
+            accounts_file.write_text(json.dumps(new_accounts, indent=2, ensure_ascii=False), encoding="utf-8")
+            return {"status": "ok", "message": "Successfully removed ChatGPT account."}
+
+        elif provider_id == "claude":
+            yaml_path = PROVIDERS_CONFIG["claude"]["cookie_file"]
+            if not yaml_path.exists():
+                return {"status": "error", "message": "Claude config file not found."}
+            content = yaml_path.read_text(encoding="utf-8")
+            keys = re.findall(r'sessionKey:\s*"([^"]+)"', content)
+            initial_len = len(keys)
+
+            if index is not None and 0 <= index < len(keys):
+                keys = [k for i, k in enumerate(keys) if i != index]
+            elif identifier:
+                keys = [k for k in keys if k != identifier.strip()]
+
+            if len(keys) == initial_len:
+                return {"status": "error", "message": "Session key not found to remove."}
+
+            sessions_lines = ["# Claude2API Configuration", "sessions:"]
+            for key in keys:
+                sessions_lines.append(f'  - sessionKey: "{key}"')
+                sessions_lines.append('    orgID: ""')
+            sessions_lines.append("")
+            sessions_lines.append('address: "0.0.0.0:8080"')
+            sessions_lines.append('apiKey: "sk-claude-local"')
+            sessions_lines.append('chatDelete: true')
+            sessions_lines.append('maxChatHistoryLength: 10000')
+            sessions_lines.append('retryCount: 1')
+            yaml_path.write_text("\n".join(sessions_lines), encoding="utf-8")
+            return {"status": "ok", "message": "Successfully removed Claude session."}
+
+        elif provider_id == "grok":
+            cookie_path = PROVIDERS_CONFIG["grok"]["cookie_file"]
+            if not cookie_path.exists():
+                return {"status": "error", "message": "Grok cookies file not found."}
+            lines = [l.strip() for l in cookie_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            initial_len = len(lines)
+
+            if index is not None and 0 <= index < len(lines):
+                lines = [l for i, l in enumerate(lines) if i != index]
+            elif identifier:
+                lines = [l for l in lines if identifier.strip() not in l]
+
+            if len(lines) == initial_len:
+                return {"status": "error", "message": "Grok cookie not found to remove."}
+
+            cookie_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+            return {"status": "ok", "message": "Successfully removed Grok cookie."}
+
+        elif provider_id == "gemini":
+            cookie_path = PROVIDERS_CONFIG["gemini"]["cookie_file"]
+            if not cookie_path.exists():
+                return {"status": "error", "message": "Gemini cookies file not found."}
+            lines = [l.strip() for l in cookie_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            initial_len = len(lines)
+
+            if index is not None and 0 <= index < len(lines):
+                lines = [l for i, l in enumerate(lines) if i != index]
+            elif identifier:
+                lines = [l for l in lines if identifier.strip() not in l]
+
+            if len(lines) == initial_len:
+                return {"status": "error", "message": "Gemini cookie not found to remove."}
+
+            cookie_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+            return {"status": "ok", "message": "Successfully removed Gemini cookie."}
+
+        elif provider_id == "glm":
+            token_path = PROVIDERS_CONFIG["glm"]["cookie_file"]
+            if not token_path.exists():
+                return {"status": "error", "message": "GLM tokens file not found."}
+            lines = [l.strip() for l in token_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+            initial_len = len(lines)
+
+            if index is not None and 0 <= index < len(lines):
+                lines = [l for i, l in enumerate(lines) if i != index]
+            elif identifier:
+                lines = [l for l in lines if l != identifier.strip()]
+
+            if len(lines) == initial_len:
+                return {"status": "error", "message": "GLM token not found to remove."}
+
+            token_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+            return {"status": "ok", "message": "Successfully removed GLM token."}
+
+        elif provider_id == "kimi":
+            env_path = PROVIDERS_CONFIG["kimi"]["cookie_file"]
+            if env_path.exists():
+                content = env_path.read_text(encoding="utf-8")
+                content = re.sub(r"KIMI_TOKEN=[^\n]+", "KIMI_TOKEN=", content)
+                env_path.write_text(content, encoding="utf-8")
+            return {"status": "ok", "message": "Successfully cleared Kimi token."}
+
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
+

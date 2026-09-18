@@ -1003,6 +1003,40 @@ button, a, select, input, textarea, [role="button"], .btn, .nav-item, .client-ch
   color: var(--text-muted);
 }
 
+.account-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.btn-remove-acc {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  color: #f87171;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  white-space: nowrap;
+}
+
+.btn-remove-acc:hover {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: #ef4444;
+  color: #fca5a5;
+  transform: translateY(-1px);
+}
+
+.btn-remove-acc:active {
+  transform: translateY(0);
+}
+
+
 /* Token Extraction & Account Safety Guide Section */
 .token-guide-card {
   background: var(--bg-surface);

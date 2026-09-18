@@ -104,6 +104,7 @@ from providers import (
     get_dynamic_models_catalog,
     get_pid_for_port,
     get_stored_cookies,
+    remove_stacked_cookie,
     save_stacked_cookies,
     start_all_services,
     start_provider,
@@ -346,6 +347,20 @@ async def api_save_cookies(provider_id: str, request: Request):
         accounts = [line.strip() for line in accounts.splitlines() if line.strip()]
     res = save_stacked_cookies(provider_id, accounts)
     return res
+
+
+@app.post("/api/cookies/{provider_id}/remove")
+@app.delete("/api/cookies/{provider_id}")
+async def api_remove_cookie(provider_id: str, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    identifier = body.get("identifier")
+    index = body.get("index")
+    res = remove_stacked_cookie(provider_id, identifier=identifier, index=index)
+    return res
+
 
 
 # -------------------------------------------------------------------

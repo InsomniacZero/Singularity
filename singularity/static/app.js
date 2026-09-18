@@ -423,7 +423,7 @@ function renderLimits() {
       <div class="limits-group-header">
         <div>
           <h3 style="font-size: 16px; font-weight: 700;">ChatGPT Account Pool Quotas</h3>
-          <p style="font-size: 12px; color: var(--text-muted);">Loaded live via c2a CLI (${chatgpt.accounts_count || 0} accounts active)</p>
+          <p style="font-size: 12px; color: var(--text-muted);">Loaded live via account pool (${chatgpt.accounts_count || 0} accounts active)</p>
         </div>
       </div>
       <div class="table-wrapper">
@@ -451,7 +451,7 @@ function renderLimits() {
       <div class="limits-group-header">
         <div>
           <h3 style="font-size: 16px; font-weight: 700;">Grok / xAI Limits & Imagine Tokens</h3>
-          <p style="font-size: 12px; color: var(--text-muted);">Account UID: ${escapeHtml(grokData.account_uid || 'default')}</p>
+          <p style="font-size: 12px; color: var(--text-muted);">Account UID: ${escapeHtml(grokData.account_uid && grokData.account_uid !== 'default' ? grokData.account_uid : 'No Account Integrated')}</p>
         </div>
       </div>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px;">
@@ -460,14 +460,14 @@ function renderLimits() {
           <div style="font-size: 20px; font-weight: 700; color: var(--brand-primary); margin-top: 4px;">
             ${grokImagine.imagePro?.remainingQueries ?? 0} Queries
           </div>
-          <div style="font-size: 11px; color: var(--text-muted);">Reset: ${grokImagine.imagePro?.nextAvailableAt ? new Date(grokImagine.imagePro.nextAvailableAt).toLocaleTimeString() : 'Ready'}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">Reset: ${grokImagine.imagePro?.nextAvailableAt ? new Date(grokImagine.imagePro.nextAvailableAt).toLocaleTimeString() : '—'}</div>
         </div>
         <div class="card" style="padding: 14px;">
           <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">VIDEO 720P GENERATION</div>
           <div style="font-size: 20px; font-weight: 700; color: var(--color-success); margin-top: 4px;">
-            ${grokImagine.video720p?.remainingQueries ?? 1} Slots
+            ${grokImagine.video720p?.remainingQueries ?? 0} Slots
           </div>
-          <div style="font-size: 11px; color: var(--text-muted);">24-hour window</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${(grokData.account_uid && grokData.account_uid !== 'default') ? '24-hour window' : 'No account integrated'}</div>
         </div>
       </div>
       <div class="table-wrapper">
@@ -495,19 +495,19 @@ function renderLimits() {
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
             <span style="color: var(--text-secondary);">Membership Tier</span>
-            <span style="font-weight: 600; color: var(--brand-primary);">${kimi.data?.membership_level || 'Member'}</span>
+            <span style="font-weight: 600; color: ${kimi.data?.status === 'active' ? 'var(--brand-primary)' : 'var(--text-muted)'};">${kimi.data?.membership_level || 'No Token'}</span>
           </div>
           <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
             <span style="color: var(--text-secondary);">Deep Research Quota</span>
-            <span style="font-weight: 600;">${kimi.data?.daily_research_quota || '50 queries / day'}</span>
+            <span style="font-weight: 600;">${kimi.data?.daily_research_quota || '—'}</span>
           </div>
           <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
             <span style="color: var(--text-secondary);">Context Capacity</span>
-            <span style="font-family: var(--font-mono);">${kimi.data?.context_window || '200k tokens'}</span>
+            <span style="font-family: var(--font-mono);">${kimi.data?.context_window || '—'}</span>
           </div>
           <div style="display: flex; justify-content: space-between; padding-top: 2px;">
             <span style="color: var(--text-secondary);">Token Expiry</span>
-            <span style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">${kimi.data?.expires_at || 'Valid'}</span>
+            <span style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">${kimi.data?.expires_at || 'Not configured'}</span>
           </div>
         </div>
       </div>
@@ -518,15 +518,15 @@ function renderLimits() {
         <div style="display: flex; flex-direction: column; gap: 10px;">
           <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
             <span style="color: var(--text-secondary);">Active Sessions</span>
-            <span style="font-weight: 600; color: var(--brand-primary);">${claude.data?.active_sessions || 1} Connected</span>
+            <span style="font-weight: 600; color: ${(claude.data?.active_sessions || 0) > 0 ? 'var(--brand-primary)' : 'var(--text-muted)'};">${claude.data?.active_sessions ?? 0} Connected</span>
           </div>
           <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
             <span style="color: var(--text-secondary);">Message Context Limit</span>
-            <span style="font-weight: 600;">${claude.data?.rolling_window || '5-hour window'}</span>
+            <span style="font-weight: 600;">${(claude.data?.active_sessions || 0) > 0 ? (claude.data?.rolling_window || '5-hour window') : 'No session'}</span>
           </div>
           <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
             <span style="color: var(--text-secondary);">Standard Models</span>
-            <span class="lock-badge unlocked">Sonnet 5 & 4.6 Unlocked</span>
+            <span class="lock-badge ${(claude.data?.active_sessions || 0) > 0 ? 'unlocked' : 'locked'}">${(claude.data?.active_sessions || 0) > 0 ? 'Sonnet 5 & 4.6 Unlocked' : 'No Session Stacked'}</span>
           </div>
           <div style="display: flex; justify-content: space-between; padding-top: 2px;">
             <span style="color: var(--text-secondary);">Opus 5 Status</span>
@@ -1133,6 +1133,7 @@ async function loadCookiesTab() {
   listContainer.innerHTML = accounts.map((acc, idx) => {
     const label = acc.email || acc.name || acc.masked || `Account #${idx + 1}`;
     const sub = acc.plan ? `Plan: ${acc.plan.toUpperCase()} • Status: ${acc.status || 'Active'}` : (acc.masked || 'Active Session');
+    const ident = acc.identifier || acc.email || acc.sessionKey || acc.token || acc.raw || '';
 
     return `
       <div class="account-card">
@@ -1140,10 +1141,62 @@ async function loadCookiesTab() {
           <div class="account-card-title">${escapeHtml(label)}</div>
           <div class="account-card-desc">${escapeHtml(sub)}</div>
         </div>
-        <span class="lock-badge unlocked">STACKED</span>
+        <div class="account-card-actions">
+          <span class="lock-badge unlocked">STACKED</span>
+          <button class="btn-remove-acc" onclick="removeStackedAccount('${p}', ${idx}, '${escapeHtml(ident)}')" title="Remove this account">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              <line x1="10" y1="11" x2="10" y2="17"></line>
+              <line x1="14" y1="11" x2="14" y2="17"></line>
+            </svg>
+            <span>Remove</span>
+          </button>
+        </div>
       </div>
     `;
   }).join('');
+}
+
+async function removeStackedAccount(provider, index, identifier) {
+  if (!confirm(`Are you sure you want to remove this account from ${provider.toUpperCase()}?`)) {
+    return;
+  }
+
+  try {
+    showToast(`Removing account from ${provider.toUpperCase()}...`, 'info');
+    const res = await fetch(`/api/cookies/${provider}/remove`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ index: index, identifier: identifier }),
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      showToast(data.message, 'success');
+      await loadCookiesTab();
+      // Also refresh limits tab in background
+      try {
+        const limRes = await fetch('/api/limits');
+        if (limRes.ok) {
+          state.limits = await limRes.json();
+          renderLimits();
+        }
+      } catch (_) {}
+
+      // Restart daemon to apply removal if currently running
+      const srv = state.services?.find(s => s.id === provider);
+      if (srv && srv.running) {
+        setTimeout(() => {
+          showToast(`Restarting ${provider} daemon to apply changes...`, 'info');
+          restartService(provider);
+        }, 800);
+      }
+    } else {
+      showToast(data.message || 'Failed to remove account', 'error');
+    }
+  } catch (err) {
+    showToast(err.message, 'error');
+  }
 }
 
 async function saveCookies() {
@@ -1168,6 +1221,15 @@ async function saveCookies() {
       showToast(data.message, 'success');
       textarea.value = '';
       await loadCookiesTab();
+      // Refresh limits tab so new accounts appear immediately
+      try {
+        const limRes = await fetch('/api/limits');
+        if (limRes.ok) {
+          state.limits = await limRes.json();
+          renderLimits();
+        }
+      } catch (_) {}
+
       // Restart daemon to apply new credentials only if it is already running
       const srv = state.services?.find(s => s.id === p);
       if (srv && srv.running) {
@@ -1183,6 +1245,7 @@ async function saveCookies() {
     showToast(err.message, 'error');
   }
 }
+
 
 // ===================================================================
 // Custom Select Component (NO DEFAULT GOOGLE SELECT)
