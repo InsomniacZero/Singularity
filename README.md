@@ -53,34 +53,16 @@ The dashboard opens at **`http://localhost:9000`** and the API is live at **`htt
 
 ---
 
-### 📱 Android (Termux) - Phone Setup
+### 📱 Android (Termux)
 
-Open **[Termux](https://f-droid.org/en/packages/com.termux/)** and paste this one-liner (cleans any old folder, installs pure-Python dependencies, and starts the gateway with **zero Rust or Pydantic compilation**):
+Open **[Termux](https://f-droid.org/en/packages/com.termux/)** and paste this one-liner:
 
 ```bash
 rm -rf Singularity && pkg update -y && pkg install -y python git && pip install --break-system-packages starlette uvicorn httpx && git clone https://github.com/InsomniacZero/Singularity.git && cd Singularity/singularity && python3 server.py
 ```
 
-Or step-by-step:
-
-```bash
-# 1. Clean any existing folder
-rm -rf Singularity
-
-# 2. Install prerequisites & pure-Python libraries
-pkg update -y && pkg install -y python git
-pip install --break-system-packages starlette uvicorn httpx
-
-# 3. Clone & run
-git clone https://github.com/InsomniacZero/Singularity.git
-cd Singularity/singularity
-python3 server.py
-```
-
-> **⚡ Zero Rust / Zero Pydantic:** Singularity runs on a pure-Python Starlette engine (`starlette` + `uvicorn` + `httpx`). It requires no `fastapi`, no `pydantic`, and no Rust toolchain on Android!
->
-> **Access from phone browser:** Open `http://localhost:9000`
-> **Access from PC on same Wi-Fi:** Use `http://<PHONE_IP>:9000/v1` (check `ifconfig` in Termux).
+* **Access from phone browser:** Open `http://localhost:9000`
+* **Access from PC on same Wi-Fi:** Use `http://<PHONE_IP>:9000/v1` (check `ifconfig` in Termux).
 
 ---
 
