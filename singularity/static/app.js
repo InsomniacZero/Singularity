@@ -1632,14 +1632,30 @@ document.addEventListener('DOMContentLoaded', () => {
   initCopyAction();
   initTunnelControls();
 
-  // Fleet controls
-  document.getElementById('btn-refresh-telemetry').addEventListener('click', () => {
+  // Fleet controls (Desktop & Mobile)
+  const handleRefresh = () => {
     showToast('Refreshing telemetry...', 'info');
     fetchServices();
     fetchLimits();
-  });
-  document.getElementById('btn-start-all').addEventListener('click', startAllServices);
-  document.getElementById('btn-stop-all').addEventListener('click', stopAllServices);
+  };
+
+  const btnRefresh = document.getElementById('btn-refresh-telemetry');
+  if (btnRefresh) btnRefresh.addEventListener('click', handleRefresh);
+
+  const btnRefreshMobile = document.getElementById('btn-refresh-telemetry-mobile');
+  if (btnRefreshMobile) btnRefreshMobile.addEventListener('click', handleRefresh);
+
+  const btnStartAll = document.getElementById('btn-start-all');
+  if (btnStartAll) btnStartAll.addEventListener('click', startAllServices);
+
+  const btnStartAllMobile = document.getElementById('btn-start-all-mobile');
+  if (btnStartAllMobile) btnStartAllMobile.addEventListener('click', startAllServices);
+
+  const btnStopAll = document.getElementById('btn-stop-all');
+  if (btnStopAll) btnStopAll.addEventListener('click', stopAllServices);
+
+  const btnStopAllMobile = document.getElementById('btn-stop-all-mobile');
+  if (btnStopAllMobile) btnStopAllMobile.addEventListener('click', stopAllServices);
 
   // Initial Data Fetches
   fetchServices();

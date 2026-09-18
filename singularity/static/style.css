@@ -1692,10 +1692,19 @@ input:checked + .slider:before {
   transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.sidebar-overlay.active {
-  display: block;
-  opacity: 1;
-  pointer-events: auto;
+.mobile-fleet-actions {
+  display: none;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap;
+}
+
+.mobile-fleet-actions .btn {
+  flex: 1;
+  min-width: 85px;
+  justify-content: center;
 }
 
 /* Comprehensive Responsive Rules for Mobile / Tablet */
@@ -1738,31 +1747,29 @@ input:checked + .slider:before {
   }
 
   .top-bar {
-    padding: 0 12px !important;
+    padding: 0 14px !important;
     height: 56px !important;
     min-height: 56px !important;
     gap: 8px !important;
   }
 
   .page-meta h1 {
-    font-size: 15px !important;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 150px;
+    font-size: 16px !important;
+    font-weight: 700 !important;
   }
 
   .page-meta p {
     display: none !important;
   }
 
+  /* Hide header action buttons completely on phone to eliminate overflow */
   .top-bar-actions {
-    gap: 6px !important;
+    display: none !important;
   }
 
-  .top-bar-actions .btn {
-    padding: 5px 8px !important;
-    font-size: 11px !important;
+  /* Show mobile fleet buttons in Universal Base URL card */
+  .mobile-fleet-actions {
+    display: flex !important;
   }
 
   .panel-viewport {
