@@ -101,18 +101,25 @@ function initNavigation() {
   };
 
   if (mobileToggle) {
-    mobileToggle.addEventListener('click', toggleSidebar);
+    mobileToggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleSidebar();
+    });
   }
 
   if (overlay) {
-    overlay.addEventListener('click', closeSidebar);
+    overlay.addEventListener('click', (e) => {
+      e.preventDefault();
+      closeSidebar();
+    });
   }
 
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
       const target = tab.dataset.tab;
       switchTab(target);
-      if (window.innerWidth <= 900) {
+      if (window.innerWidth <= 1024) {
         closeSidebar();
       }
     });
