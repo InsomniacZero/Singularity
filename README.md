@@ -128,8 +128,8 @@ Singularity orchestrates six provider backends:
 | **Claude** | 8080 | 20 | Claude 3.7 Sonnet, Claude 4 Opus/Sonnet, Claude Fable |
 | **Gemini** | 8084 | 21 | Gemini 3.8 Flash, 3.1 Pro, Nano Banana image models |
 | **Grok** | 8087 | 8 | Grok 3, Grok 3 Mini, Grok Imagine |
-| **Kimi** | 8086 | 31 | Kimi K2, K2 Math, K2 Vision (200k/500k context) |
-| **GLM** | 8085 | 86 | GLM-4 Plus, CogView, Video Gen, Music Gen |
+| **Kimi** | 8086 | 31 | Kimi K3 Flagship, K3 Thinking/Search, K2.8 (200k context) |
+| **GLM** | 8085 | 86 | GLM 5.3, GLM 5.3 Thinking/Search, CogView 4, GLM-5 Turbo |
 
 ---
 
