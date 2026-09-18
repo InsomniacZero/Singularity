@@ -12,6 +12,7 @@
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent; /* Disable ugly mobile blue tap highlight */
 }
 
 html, body {
@@ -25,6 +26,13 @@ html, body {
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+button, a, select, input, textarea, [role="button"], .btn, .nav-item, .client-chip {
+  -webkit-tap-highlight-color: transparent !important;
+  outline: none;
 }
 
 /* Scrollbars */
@@ -322,6 +330,13 @@ html, body {
   user-select: none;
   white-space: nowrap;
   transition: all var(--transition-fast);
+  -webkit-tap-highlight-color: transparent !important;
+  outline: none;
+}
+
+.btn:focus, .btn:active {
+  outline: none;
+  -webkit-tap-highlight-color: transparent !important;
 }
 
 .btn:active {
