@@ -202,6 +202,16 @@ Singularity/
 
 ---
 
+## 👥 Contributors
+
+- **[InsomniacZero](https://github.com/InsomniacZero)** — Creator & Maintainer
+- **[Gemini](https://github.com/gemini-code-assist)** — Core Backend Architecture & Provider Integration
+- **[Claude](https://github.com/claude)** — Responsive Mobile UI, Polish & Frontend Optimization
+
+See [CONTRIBUTORS.md](CONTRIBUTORS.md) for full attribution.
+
+---
+
 ## 📄 License
 
 MIT License. Built by **InsomniacZero**.
