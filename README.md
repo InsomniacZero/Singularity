@@ -67,8 +67,19 @@ rm -rf Singularity && pkg update -y && pkg install -y python git && pip install 
 ```
 
 * **Next time:** Simply type **`singular`** from anywhere in Termux to launch!
+* **To update:** `cd ~/Singularity && git pull && singular`
 * **Access from phone browser:** Open `http://localhost:9000`
 * **Access from PC on same Wi-Fi:** Use `http://<PHONE_IP>:9000/v1` (check `ifconfig` in Termux).
+
+---
+
+### 🔄 Updating
+
+To pull the latest updates and start Singularity:
+
+```bash
+cd ~/Singularity && git pull && singular
+```
 
 ---
 
