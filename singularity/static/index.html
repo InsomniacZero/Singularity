@@ -119,12 +119,24 @@
       </div>
     </aside>
 
+    <!-- Mobile Sidebar Backdrop Overlay -->
+    <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
     <!-- Main Workspace Pane -->
     <main class="main-content">
       <header class="top-bar">
-        <div class="page-meta">
-          <h1 id="page-heading">Control Center</h1>
-          <p id="page-subheading"></p>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <button class="mobile-nav-toggle" id="mobile-nav-toggle" aria-label="Toggle navigation menu" title="Menu">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+          <div class="page-meta">
+            <h1 id="page-heading">Control Center</h1>
+            <p id="page-subheading"></p>
+          </div>
         </div>
 
         <div class="top-bar-actions" id="top-actions">

@@ -1649,3 +1649,115 @@ input:checked + .slider:before {
   gap: 12px;
 }
 
+/* ===================================================================
+   Mobile Hamburger Toggle & Responsive Navigation (Phone UI)
+   =================================================================== */
+.mobile-nav-toggle {
+  display: none;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.mobile-nav-toggle:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-medium);
+}
+
+.mobile-nav-toggle:active {
+  transform: scale(0.95);
+}
+
+.sidebar-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 998;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.sidebar-overlay.active {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (max-width: 900px) {
+  .mobile-nav-toggle {
+    display: inline-flex;
+  }
+
+  .sidebar-overlay {
+    display: block;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 280px;
+    min-width: 280px;
+    z-index: 999;
+    transform: translateX(-100%);
+    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: none;
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.6);
+  }
+
+  .top-bar {
+    padding: 0 14px;
+    height: 56px;
+    min-height: 56px;
+  }
+
+  .panel-viewport {
+    padding: 14px 12px;
+    height: calc(100% - 56px);
+  }
+
+  .top-bar-actions .btn {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
+
+  .gateway-hero-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .models-grid,
+  .fleet-grid,
+  .tunnel-guide-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .playground-layout {
+    grid-template-columns: 1fr;
+    height: auto;
+  }
+
+  .playground-sidebar {
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+}
+
+

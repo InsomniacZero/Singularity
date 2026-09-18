@@ -84,10 +84,37 @@ function initTheme() {
 // ===================================================================
 function initNavigation() {
   const tabs = document.querySelectorAll('.nav-item');
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('sidebar-overlay');
+  const mobileToggle = document.getElementById('mobile-nav-toggle');
+
+  const closeSidebar = () => {
+    if (sidebar) sidebar.classList.remove('open');
+    if (overlay) overlay.classList.remove('active');
+  };
+
+  const toggleSidebar = () => {
+    if (sidebar) {
+      const isOpen = sidebar.classList.toggle('open');
+      if (overlay) overlay.classList.toggle('active', isOpen);
+    }
+  };
+
+  if (mobileToggle) {
+    mobileToggle.addEventListener('click', toggleSidebar);
+  }
+
+  if (overlay) {
+    overlay.addEventListener('click', closeSidebar);
+  }
+
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
       const target = tab.dataset.tab;
       switchTab(target);
+      if (window.innerWidth <= 900) {
+        closeSidebar();
+      }
     });
   });
 }
