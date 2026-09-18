@@ -1682,14 +1682,25 @@ input:checked + .slider:before {
 .sidebar-overlay {
   display: none;
   position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.65);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  height: 100dvh;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
   z-index: 998;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity 0.3s cubic-bezier(0.25, 1, 0.5, 1), backdrop-filter 0.3s ease;
+  will-change: opacity;
+}
+
+.sidebar-overlay.active {
+  display: block !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
 }
 
 .mobile-fleet-actions {
@@ -1724,20 +1735,26 @@ input:checked + .slider:before {
     top: 0 !important;
     left: 0 !important;
     bottom: 0 !important;
-    width: 290px !important;
-    max-width: 85vw !important;
+    width: 285px !important;
+    max-width: 82vw !important;
     min-width: 0 !important;
+    height: 100% !important;
     height: 100dvh !important;
     z-index: 1000 !important;
-    transform: translateX(-100%) !important;
-    transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    transform: translate3d(-100%, 0, 0) !important;
+    -webkit-transform: translate3d(-100%, 0, 0) !important;
+    transition: transform 0.32s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.32s ease !important;
+    -webkit-transition: -webkit-transform 0.32s cubic-bezier(0.32, 0.72, 0, 1), box-shadow 0.32s ease !important;
+    will-change: transform !important;
     box-shadow: none !important;
     overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
   }
 
   .sidebar.open {
-    transform: translateX(0) !important;
-    box-shadow: 10px 0 40px rgba(0, 0, 0, 0.7) !important;
+    transform: translate3d(0, 0, 0) !important;
+    -webkit-transform: translate3d(0, 0, 0) !important;
+    box-shadow: 12px 0 45px rgba(0, 0, 0, 0.6) !important;
   }
 
   .main-content {

@@ -109,11 +109,23 @@ function initNavigation() {
   }
 
   if (overlay) {
-    overlay.addEventListener('click', (e) => {
-      e.preventDefault();
-      closeSidebar();
+    ['click', 'touchstart', 'pointerdown'].forEach(evt => {
+      overlay.addEventListener(evt, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        closeSidebar();
+      }, { passive: false });
     });
   }
+
+  // Also catch any click outside the sidebar when open on mobile
+  document.addEventListener('click', (e) => {
+    if (sidebar && sidebar.classList.contains('open')) {
+      if (!sidebar.contains(e.target) && !mobileToggle?.contains(e.target)) {
+        closeSidebar();
+      }
+    }
+  });
 
   tabs.forEach(tab => {
     tab.addEventListener('click', () => {
