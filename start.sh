@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 # Singularity Gateway Launcher
-DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Resolve real directory even when called through a symlink (e.g. $PREFIX/bin/singular)
+if command -v realpath >/dev/null 2>&1; then
+    SCRIPT_PATH="$(realpath "${BASH_SOURCE[0]}")"
+    DIR="$(dirname "$SCRIPT_PATH")"
+else
+    SOURCE="${BASH_SOURCE[0]}"
+    while [ -L "$SOURCE" ]; do
+        DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+        SOURCE="$(readlink "$SOURCE")"
+        [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+    done
+    DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+fi
 
 # Auto-link 'singular' binary into PATH if in Termux
 if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ ! -e "$PREFIX/bin/singular" ]; then
