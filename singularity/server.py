@@ -4,6 +4,7 @@ Singularity Unified AI Hub & Universal Gateway
 Port 9000
 """
 
+import asyncio
 import json
 import os
 import time
@@ -105,6 +106,8 @@ import httpx
 import uvicorn
 
 import tunnel
+import db
+import providers
 from providers import (
     MODELS_CATALOG,
     PROVIDERS_CONFIG,
@@ -175,6 +178,57 @@ async def list_models():
     return {"object": "list", "data": data}
 
 
+def is_simulation_mode() -> bool:
+    """Check if device simulation mode is enabled."""
+    return providers.is_simulation_active()
+
+
+async def generate_simulated_stream(model_name: str, provider_id: str) -> AsyncIterator[bytes]:
+    """Yield OpenAI-compatible SSE chunks for offline/device simulation testing."""
+    created_ts = int(time.time())
+    sim_id = f"chatcmpl-sim-{int(time.time()*1000)}"
+
+    role_chunk = {
+        "id": sim_id,
+        "object": "chat.completion.chunk",
+        "created": created_ts,
+        "model": model_name,
+        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+    }
+    yield f"data: {json.dumps(role_chunk)}\n\n".encode("utf-8")
+    await asyncio.sleep(0.04)
+
+    sim_text = (
+        f"⚡ **Singularity Portable Gateway** (Simulated Response)\n\n"
+        f"• **Model:** `{model_name}`\n"
+        f"• **Provider:** `{provider_id.upper()}`\n"
+        f"• **Gateway Status:** 100% Self-Contained (Zero Legacy Dependencies)\n\n"
+        f"Your device simulation is verified and running cleanly. Streaming SSE buffers, token rotation, and headers are functioning as expected."
+    )
+
+    words = sim_text.split(" ")
+    for w in words:
+        c = {
+            "id": sim_id,
+            "object": "chat.completion.chunk",
+            "created": created_ts,
+            "model": model_name,
+            "choices": [{"index": 0, "delta": {"content": w + " "}, "finish_reason": None}],
+        }
+        yield f"data: {json.dumps(c)}\n\n".encode("utf-8")
+        await asyncio.sleep(0.02)
+
+    finish_chunk = {
+        "id": sim_id,
+        "object": "chat.completion.chunk",
+        "created": created_ts,
+        "model": model_name,
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+    }
+    yield f"data: {json.dumps(finish_chunk)}\n\n".encode("utf-8")
+    yield b"data: [DONE]\n\n"
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
     """Universal router for chat completions across all 6 providers."""
@@ -190,13 +244,54 @@ async def chat_completions(request: Request):
         raise HTTPException(status_code=400, detail=f"No provider found for model: {model_name}")
 
     target_port = meta["port"]
-    target_url = f"http://127.0.0.1:{target_port}/v1/chat/completions"
+    target_host = providers.get_provider_host(provider_id)
+    target_url = f"http://{target_host}:{target_port}/v1/chat/completions"
 
     headers = {"Content-Type": "application/json"}
-    if meta["auth_header"]:
+    if provider_id == "kimi":
+        rotated_token = db.get_next_token("kimi")
+        if rotated_token:
+            headers["Authorization"] = f"Bearer {rotated_token}"
+        elif meta["auth_header"]:
+            headers["Authorization"] = meta["auth_header"]
+    elif meta["auth_header"]:
         headers["Authorization"] = meta["auth_header"]
 
     is_stream = body.get("stream", False)
+    simulate_requested = is_simulation_mode() or body.get("simulate", False)
+
+    if simulate_requested:
+        if is_stream:
+            return StreamingResponse(
+                generate_simulated_stream(model_name, provider_id),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                    "X-Singularity-Provider": provider_id,
+                    "X-Singularity-Simulated": "true",
+                },
+            )
+        else:
+            return JSONResponse(
+                status_code=200,
+                content={
+                    "id": f"chatcmpl-sim-{int(time.time()*1000)}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": model_name,
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": f"⚡ Singularity Portable Gateway (Simulated Response for {model_name})",
+                        },
+                        "finish_reason": "stop",
+                    }],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 15, "total_tokens": 25},
+                },
+            )
 
     if is_stream:
         async def stream_generator() -> AsyncIterator[bytes]:
@@ -212,6 +307,11 @@ async def chat_completions(request: Request):
                     async for chunk in upstream.aiter_bytes():
                         if chunk:
                             yield chunk
+            except httpx.ConnectError:
+                p_name = meta.get("name", provider_id)
+                err_msg = f"Provider {p_name} is offline on {target_host}:{target_port}. Start it in Control Center or enable Device Simulation (./singular simulate on)."
+                yield f"data: {json.dumps({'error': err_msg})}\n\n".encode("utf-8")
+                yield b"data: [DONE]\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'error': f'Singularity Gateway Error: {str(e)}'})}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
@@ -241,7 +341,7 @@ async def chat_completions(request: Request):
         except httpx.ConnectError:
             raise HTTPException(
                 status_code=502,
-                detail=f"Provider {meta['name']} is offline on port {target_port}. Start it in the Singularity Control Center.",
+                detail=f"Provider {meta['name']} is offline on {target_host}:{target_port}. Start it in Control Center or enable device simulation (SINGULARITY_SIMULATE=1).",
             )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
@@ -259,7 +359,19 @@ async def image_generations(request: Request):
     provider_id = resolve_model_provider(model)
     meta = PROVIDERS_CONFIG.get(provider_id, PROVIDERS_CONFIG["gemini"])
 
-    target_url = f"http://127.0.0.1:{meta['port']}/v1/images/generations"
+    simulate_requested = is_simulation_mode() or body.get("simulate", False)
+    if simulate_requested:
+        return JSONResponse(status_code=200, content={
+            "created": int(time.time()),
+            "data": [{
+                "url": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1024&q=80",
+                "revised_prompt": body.get("prompt", "A high-fidelity futuristic rendering generated by Singularity")
+            }]
+        })
+
+    target_port = meta["port"]
+    target_host = providers.get_provider_host(provider_id)
+    target_url = f"http://{target_host}:{target_port}/v1/images/generations"
     headers = {"Content-Type": "application/json"}
     if meta["auth_header"]:
         headers["Authorization"] = meta["auth_header"]
@@ -332,6 +444,57 @@ async def api_restart_service(provider_id: str):
     return start_provider(provider_id)
 
 
+@app.get("/api/simulation")
+async def api_get_simulation():
+    active = providers.is_simulation_active()
+    return {
+        "enabled": active,
+        "mode": "simulated" if active else "live",
+        "description": "Device Simulation Mode allows testing UI, models, and clients without local backends.",
+    }
+
+
+@app.post("/api/simulation")
+async def api_toggle_simulation(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    enabled = body.get("enabled")
+    if enabled is None:
+        enabled = not providers.is_simulation_active()
+    db.set_setting("simulation_mode", "1" if enabled else "0")
+    return {
+        "status": "ok",
+        "enabled": bool(enabled),
+        "mode": "simulated" if enabled else "live",
+    }
+
+
+@app.get("/api/config")
+async def api_get_config():
+    return {
+        "simulation_mode": providers.is_simulation_active(),
+        "remote_host": db.get_setting("remote_host", "127.0.0.1"),
+        "settings": db.get_all_settings(),
+        "vault_stats": db.get_stats(),
+    }
+
+
+@app.post("/api/config")
+async def api_set_config(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    for k, v in body.items():
+        db.set_setting(k, str(v))
+    return {
+        "status": "ok",
+        "settings": db.get_all_settings(),
+    }
+
+
 @app.get("/api/limits")
 async def api_get_limits():
     return await get_all_limits()
@@ -345,6 +508,24 @@ async def api_get_models():
 @app.get("/api/cookies")
 async def api_get_cookies():
     return get_stored_cookies()
+
+
+@app.get("/api/cookies/export")
+async def api_export_cookies():
+    return db.export_all_json()
+
+
+@app.post("/api/cookies/import")
+async def api_import_cookies(request: Request):
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    try:
+        res = db.import_all_json(data)
+        return res
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/api/cookies/{provider_id}")
@@ -367,7 +548,8 @@ async def api_remove_cookie(provider_id: str, request: Request):
         body = {}
     identifier = body.get("identifier")
     index = body.get("index")
-    res = remove_stacked_cookie(provider_id, identifier=identifier, index=index)
+    account_id = body.get("id")
+    res = remove_stacked_cookie(provider_id, identifier=identifier, index=account_id if account_id is not None else index)
     return res
 
 

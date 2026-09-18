@@ -29,6 +29,25 @@ if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ ! -e "$PREFIX/bin/singular" ]; 
     ln -sf "$DIR/start.sh" "$PREFIX/bin/singular" 2>/dev/null || true
 fi
 
+if [ -x "$DIR/singularity/.venv/bin/python3" ]; then
+    PYTHON_BIN="$DIR/singularity/.venv/bin/python3"
+else
+    PYTHON_BIN="python3"
+fi
+
 cd "$DIR/singularity" || exit 1
-exec python3 server.py "$@"
+
+# Route CLI commands vs background/daemon server launch
+case "$1" in
+    status|limits|accounts|import|export|simulate|host|chat|service|-h|--help)
+        exec "$PYTHON_BIN" cli.py "$@"
+        ;;
+    server|"")
+        [ "$1" == "server" ] && shift
+        exec "$PYTHON_BIN" server.py "$@"
+        ;;
+    *)
+        exec "$PYTHON_BIN" server.py "$@"
+        ;;
+esac
 

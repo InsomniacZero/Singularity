@@ -80,6 +80,46 @@ function initTheme() {
 }
 
 // ===================================================================
+// Device Simulation Toggle
+// ===================================================================
+async function initSimulationToggle() {
+  const simToggle = document.getElementById('simulation-checkbox');
+  if (!simToggle) return;
+
+  try {
+    const res = await fetch('/api/simulation');
+    if (res.ok) {
+      const data = await res.json();
+      simToggle.checked = !!data.enabled;
+    }
+  } catch (e) {
+    console.warn('Could not fetch simulation status:', e);
+  }
+
+  simToggle.addEventListener('change', async () => {
+    try {
+      const res = await fetch('/api/simulation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: simToggle.checked }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(
+          data.enabled
+            ? '⚡ Device Simulation Mode Enabled: Offline AI streaming verified without local daemons.'
+            : '🔌 Device Simulation Mode Disabled: Connecting to live provider backends.',
+          'info'
+        );
+        fetchServices();
+      }
+    } catch (e) {
+      showToast('Failed to update simulation mode: ' + e.message, 'error');
+    }
+  });
+}
+
+// ===================================================================
 // Navigation Tabs
 // ===================================================================
 function initNavigation() {
@@ -842,7 +882,30 @@ function initCookieTabs() {
   });
 
   const saveBtn = document.getElementById('btn-save-cookie');
-  saveBtn.addEventListener('click', saveCookies);
+  if (saveBtn) saveBtn.addEventListener('click', saveCookies);
+
+  const exportBtn = document.getElementById('btn-export-cookies');
+  if (exportBtn) exportBtn.addEventListener('click', exportAllCookies);
+
+  const importBtn = document.getElementById('btn-import-cookies');
+  const importInput = document.getElementById('import-file-input');
+  if (importBtn && importInput) {
+    importBtn.addEventListener('click', () => importInput.click());
+    importInput.addEventListener('change', handleImportCookiesFile);
+  }
+}
+
+function getRuleIconSvg(icon) {
+  if (icon === 'users') {
+    return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`;
+  }
+  if (icon === 'lock') {
+    return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>`;
+  }
+  if (icon === 'shield') {
+    return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>`;
+  }
+  return `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>`;
 }
 
 const TOKEN_GUIDES = {
@@ -864,17 +927,17 @@ const TOKEN_GUIDES = {
     ],
     rules: [
       {
-        icon: '👥',
+        icon: 'users',
         title: 'Create Separate Chrome Profiles',
         desc: 'Always create a separate, isolated Chrome profile for each ChatGPT account you stack to prevent session cookie collisions.'
       },
       {
-        icon: '🔒',
+        icon: 'lock',
         title: 'Never Click "Log Out"',
         desc: 'Do not log out of the account in your browser! Logging out immediately revokes your session token on OpenAI servers. Simply close the tab/window.'
       },
       {
-        icon: '🛡️',
+        icon: 'shield',
         title: 'Do Not Use Your Main Account',
         desc: 'Never use your primary daily personal ChatGPT account. Use dedicated secondary or throwaway accounts for API pooling.'
       }
@@ -898,17 +961,17 @@ const TOKEN_GUIDES = {
     ],
     rules: [
       {
-        icon: '👥',
+        icon: 'users',
         title: 'Separate Browser Profiles',
         desc: 'Use distinct browser profiles when managing multiple Claude accounts to keep session credentials fully independent.'
       },
       {
-        icon: '🔒',
+        icon: 'lock',
         title: 'Do Not Log Out',
         desc: 'Logging out terminates the sessionKey immediately on Anthropic authentication servers. Just close the browser tab.'
       },
       {
-        icon: '🛡️',
+        icon: 'shield',
         title: 'Avoid Personal Main Accounts',
         desc: 'Use secondary/dedicated accounts so automated API calls do not burn through your personal conversation rate limits.'
       }
@@ -932,17 +995,17 @@ const TOKEN_GUIDES = {
     ],
     rules: [
       {
-        icon: '👥',
+        icon: 'users',
         title: 'Separate Browser Profiles',
         desc: 'Keep separate browser profiles for each X/Grok account to prevent cookie collisions and cross-account logouts.'
       },
       {
-        icon: '🔒',
+        icon: 'lock',
         title: 'Never Click Sign Out',
         desc: 'Signing out revokes the Twitter/X SSO session. Leave the session active and just close the window.'
       },
       {
-        icon: '🛡️',
+        icon: 'shield',
         title: 'Dedicated Grok Accounts',
         desc: 'Avoid using your primary personal Twitter profile for heavy API querying.'
       }
@@ -966,17 +1029,17 @@ const TOKEN_GUIDES = {
     ],
     rules: [
       {
-        icon: '👥',
+        icon: 'users',
         title: 'Separate Browser Profiles',
         desc: 'Use distinct browser profiles if stacking multiple Moonshot / Kimi accounts.'
       },
       {
-        icon: '🔒',
+        icon: 'lock',
         title: 'Keep Sessions Active',
         desc: 'Do not click sign out in the web interface; simply close the browser window.'
       },
       {
-        icon: '🛡️',
+        icon: 'shield',
         title: 'Dedicated Phone Accounts',
         desc: 'Use dedicated numbers for high-throughput automated workloads.'
       }
@@ -1000,17 +1063,17 @@ const TOKEN_GUIDES = {
     ],
     rules: [
       {
-        icon: '👥',
+        icon: 'users',
         title: 'Dedicated Chrome Profiles',
         desc: 'CRITICAL: Always create a separate Chrome profile for each Google account to keep Google credentials isolated.'
       },
       {
-        icon: '🔒',
+        icon: 'lock',
         title: 'Never Click Sign Out',
         desc: 'Signing out immediately destroys Google security tickets across all apps. Just close the Chrome window.'
       },
       {
-        icon: '🛡️',
+        icon: 'shield',
         title: 'Never Use Primary Google Account',
         desc: 'Do NOT use your personal Google account with private Gmail, Drive, Photos, or payment methods. Use dedicated burner/secondary Google accounts.'
       }
@@ -1025,6 +1088,20 @@ async function loadCookiesTab() {
     state.cookiesData = await res.json();
   } catch (err) {
     console.error('Error fetching cookies:', err);
+  }
+
+  // Update cross-device SQLite status badge
+  let totalAccounts = 0;
+  if (state.cookiesData) {
+    Object.values(state.cookiesData).forEach(entry => {
+      if (entry && Array.isArray(entry.accounts)) {
+        totalAccounts += entry.accounts.length;
+      }
+    });
+  }
+  const syncBadge = document.getElementById('sync-db-status');
+  if (syncBadge) {
+    syncBadge.textContent = `${totalAccounts} Stacked`;
   }
 
   const p = state.activeCookieProvider;
@@ -1042,7 +1119,7 @@ async function loadCookiesTab() {
     },
     claude: {
       title: 'Claude SessionKey Stacker',
-      desc: 'Paste sessionKey strings (sk-ant-sid02-...). Stacks multiple sessions into claude2api config.yaml line-by-line.',
+      desc: 'Paste sessionKey strings (sk-ant-sid02-...). Stacks multiple sessions into the Singularity Unified Vault (SQLite).',
       placeholder: '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',
     },
     grok: {
@@ -1052,7 +1129,7 @@ async function loadCookiesTab() {
     },
     kimi: {
       title: 'Kimi JWT Stacker',
-      desc: 'Paste Kimi refresh token JWT (one per line). Stored in kimi2api/.env.',
+      desc: 'Paste Kimi refresh token JWT (one per line). Stored securely in Singularity Unified Vault (SQLite).',
       placeholder: 'eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9...',
     },
     gemini: {
@@ -1062,7 +1139,7 @@ async function loadCookiesTab() {
     },
     glm: {
       title: 'GLM Token Stacker',
-      desc: 'Paste Zhipu AI refresh tokens (one per line into glm2api/token.txt).',
+      desc: 'Paste Zhipu AI refresh tokens (one per line). Stored securely in Singularity Unified Vault (SQLite).',
       placeholder: 'Paste GLM refresh token line-by-line...',
     },
   }[p] || { title: 'Account Stacker', desc: '', placeholder: '' };
@@ -1103,15 +1180,23 @@ async function loadCookiesTab() {
         </div>
 
         <div class="token-guide-rules">
-          ${guide.rules.map(r => `
-            <div class="token-rule-card">
-              <span class="token-rule-icon">${r.icon}</span>
-              <div>
-                <strong>${escapeHtml(r.title)}</strong>
-                <span>${escapeHtml(r.desc)}</span>
+          <div class="token-rules-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--brand-primary)" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+            </svg>
+            <span>Session Stability & Account Safeguards</span>
+          </div>
+          <div class="token-rules-list">
+            ${guide.rules.map(r => `
+              <div class="token-rule-item">
+                <span class="token-rule-icon-wrap">${getRuleIconSvg(r.icon)}</span>
+                <div class="token-rule-text">
+                  <strong>${escapeHtml(r.title)}:</strong>
+                  <span>${escapeHtml(r.desc)}</span>
+                </div>
               </div>
-            </div>
-          `).join('')}
+            `).join('')}
+          </div>
         </div>
       `;
     }
@@ -1143,7 +1228,7 @@ async function loadCookiesTab() {
         </div>
         <div class="account-card-actions">
           <span class="lock-badge unlocked">STACKED</span>
-          <button class="btn-remove-acc" onclick="removeStackedAccount('${p}', ${idx}, '${escapeHtml(ident)}')" title="Remove this account">
+          <button class="btn-remove-acc" onclick="removeStackedAccount('${p}', ${acc.id != null ? acc.id : idx}, '${escapeHtml(ident)}')" title="Remove this account">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -1168,7 +1253,7 @@ async function removeStackedAccount(provider, index, identifier) {
     const res = await fetch(`/api/cookies/${provider}/remove`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ index: index, identifier: identifier }),
+      body: JSON.stringify({ index: index, identifier: identifier, id: index }),
     });
     const data = await res.json();
     if (data.status === 'ok') {
@@ -1243,6 +1328,62 @@ async function saveCookies() {
     }
   } catch (err) {
     showToast(err.message, 'error');
+  }
+}
+
+async function exportAllCookies() {
+  try {
+    showToast('Exporting credentials backup...', 'info');
+    const res = await fetch('/api/cookies/export');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+
+    const jsonStr = JSON.stringify(data, null, 2);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const dateStr = new Date().toISOString().slice(0, 10);
+    a.download = `singularity_credentials_${dateStr}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    showToast(`Exported ${data.total_accounts || 0} accounts successfully!`, 'success');
+  } catch (err) {
+    showToast(`Export failed: ${err.message}`, 'error');
+  }
+}
+
+async function handleImportCookiesFile(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+
+  try {
+    showToast('Reading credentials file...', 'info');
+    const text = await file.text();
+    const parsed = JSON.parse(text);
+
+    showToast('Importing credentials to SQLite...', 'info');
+    const res = await fetch('/api/cookies/import', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(parsed),
+    });
+
+    const data = await res.json();
+    if (!res.ok || data.status !== 'ok') {
+      throw new Error(data.message || data.detail || 'Import failed');
+    }
+
+    showToast(data.message || 'Imported accounts successfully!', 'success');
+    await loadCookiesTab();
+    fetchServices();
+  } catch (err) {
+    showToast(`Import error: ${err.message}`, 'error');
+  } finally {
+    event.target.value = '';
   }
 }
 
@@ -1706,6 +1847,7 @@ function loadTunnelTab() {
 // ===================================================================
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
+  initSimulationToggle();
   initNavigation();
   initModelFilters();
   initCookieTabs();

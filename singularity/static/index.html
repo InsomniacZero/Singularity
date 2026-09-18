@@ -116,6 +116,14 @@
             <span class="slider"></span>
           </label>
         </div>
+
+        <div class="theme-toggle-row" style="margin-top: 6px;">
+          <span title="Device Simulation Mode: test all 206 models & UI offline without running local backends">Simulate Mode</span>
+          <label class="theme-switch">
+            <input type="checkbox" id="simulation-checkbox" />
+            <span class="slider"></span>
+          </label>
+        </div>
       </div>
     </aside>
 
@@ -281,7 +289,31 @@
             </div>
 
             <div>
-              <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 12px;">Active Stacked Accounts</h3>
+              <div class="stacked-accounts-header">
+                <div class="stacked-accounts-title-wrap">
+                  <h3 style="font-size: 15px; font-weight: 700; margin: 0;">Active Stacked Accounts</h3>
+                  <span class="sync-badge-pill" id="sync-db-status">10 Stacked</span>
+                </div>
+                <div class="sync-actions-group">
+                  <button class="btn btn-secondary btn-sm" id="btn-export-cookies" title="Export all accounts to a JSON backup">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="7 10 12 15 17 10"></polyline>
+                      <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span>Export Backup</span>
+                  </button>
+                  <button class="btn btn-secondary btn-sm" id="btn-import-cookies" title="Restore accounts from JSON backup">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="17 8 12 3 7 8"></polyline>
+                      <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <span>Import Backup</span>
+                  </button>
+                  <input type="file" id="import-file-input" accept=".json" style="display: none;" />
+                </div>
+              </div>
               <div class="account-stack-container" id="stacked-accounts-list">
                 <!-- Rendered dynamically by app.js -->
               </div>
@@ -408,33 +440,77 @@
               </div>
             </div>
 
-            <!-- Remote Device Access Guide Cards -->
-            <div class="tunnel-guide-grid">
-              <div class="tunnel-guide-card">
-                <div class="tunnel-card-icon">📱</div>
-                <h4 class="tunnel-card-title">Phone & Tablet Access</h4>
-                <p class="tunnel-card-desc">
-                  Open your mobile browser and navigate directly to your <strong>Remote Web UI URL</strong> to manage models, stack cookies, or test inference in Playground straight from your phone.
-                </p>
-                <div class="tunnel-card-badge">No app installation needed</div>
+            <!-- Remote Device Access & Client Integrations Panel -->
+            <div class="tunnel-integrations-card">
+              <div class="tunnel-integrations-header">
+                <div class="tunnel-integrations-title">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"></circle>
+                    <line x1="2" y1="12" x2="22" y2="12"></line>
+                    <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                  </svg>
+                  <span>Remote Client Integrations</span>
+                </div>
+                <span class="tunnel-integrations-sub">Connect your devices and apps using the public tunnel endpoint</span>
               </div>
 
-              <div class="tunnel-guide-card">
-                <div class="tunnel-card-icon">🎭</div>
-                <h4 class="tunnel-card-title">SillyTavern Mobile / Remote</h4>
-                <p class="tunnel-card-desc">
-                  Set API to <strong>Chat Completion (OpenAI)</strong>, paste the <strong>Public Universal URL</strong> as Server Base URL, and set API Key to <code>sk-singularity-local</code>.
-                </p>
-                <div class="tunnel-card-badge">Endpoint: /v1/chat/completions</div>
-              </div>
+              <div class="tunnel-integrations-list">
+                <!-- 1. Mobile Web UI -->
+                <div class="tunnel-integration-item">
+                  <div class="tunnel-item-icon-box">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect>
+                      <line x1="12" y1="18" x2="12.01" y2="18"></line>
+                    </svg>
+                  </div>
+                  <div class="tunnel-item-body">
+                    <div class="tunnel-item-header">
+                      <h4 class="tunnel-item-name">Phone & Tablet Access</h4>
+                      <span class="tunnel-item-tag">Web Dashboard</span>
+                    </div>
+                    <p class="tunnel-item-desc">
+                      Open your mobile browser (Chrome/Safari) and navigate to the <strong>Remote Public URL</strong> to manage provider services, stack cookies, and run playground tests directly from your phone.
+                    </p>
+                  </div>
+                </div>
 
-              <div class="tunnel-guide-card">
-                <div class="tunnel-card-icon">💻</div>
-                <h4 class="tunnel-card-title">Secondary Laptop / Remote PC</h4>
-                <p class="tunnel-card-desc">
-                  Connect apps like NextChat, Chatbox, or LibreChat running on other computers anywhere in the world to your home GPU/cookie fleet.
-                </p>
-                <div class="tunnel-card-badge">OpenAI-Compatible /v1</div>
+                <!-- 2. SillyTavern Mobile / Remote -->
+                <div class="tunnel-integration-item">
+                  <div class="tunnel-item-icon-box">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                  </div>
+                  <div class="tunnel-item-body">
+                    <div class="tunnel-item-header">
+                      <h4 class="tunnel-item-name">SillyTavern Remote Connection</h4>
+                      <span class="tunnel-item-tag font-mono">/v1/chat/completions</span>
+                    </div>
+                    <p class="tunnel-item-desc">
+                      Set API to <strong>Chat Completion (OpenAI)</strong>, paste your <strong>Public Universal URL</strong> as Server Base URL, and set API Key to <code>sk-singularity-local</code> (or any dummy key).
+                    </p>
+                  </div>
+                </div>
+
+                <!-- 3. Desktop Apps / Secondary PC -->
+                <div class="tunnel-integration-item">
+                  <div class="tunnel-item-icon-box">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                      <line x1="8" y1="21" x2="16" y2="21"></line>
+                      <line x1="12" y1="17" x2="12" y2="21"></line>
+                    </svg>
+                  </div>
+                  <div class="tunnel-item-body">
+                    <div class="tunnel-item-header">
+                      <h4 class="tunnel-item-name">Secondary Laptop & Remote Apps</h4>
+                      <span class="tunnel-item-tag font-mono">OpenAI-Compatible</span>
+                    </div>
+                    <p class="tunnel-item-desc">
+                      Connect desktop clients like NextChat, Chatbox, LibreChat, or custom automated scripts anywhere in the world directly to your home AI cluster.
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
 
