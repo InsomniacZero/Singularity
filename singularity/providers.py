@@ -1944,6 +1944,9 @@ def stop_all_services() -> Dict[str, Any]:
 
 _KIMI_QUOTA_CACHE: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
 _GROK_QUOTA_CACHE: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
+_CLAUDE_QUOTA_CACHE: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
+_GEMINI_QUOTA_CACHE: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
+_GLM_QUOTA_CACHE: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
 
 
 async def fetch_grok_account_quotas(account: Dict[str, Any]) -> Dict[str, Any]:
@@ -2087,6 +2090,223 @@ async def fetch_kimi_account_quotas(account: Dict[str, Any]) -> Dict[str, Any]:
     return res_acc
 
 
+async def fetch_claude_account_quotas(account: Dict[str, Any]) -> Dict[str, Any]:
+    """Fetch live usage/plan details from claude.ai API for a stacked session."""
+    session_key = account.get("token", "").strip()
+    ident = account.get("identifier") or account.get("name") or "Claude Account"
+    name = account.get("name") or f"Claude ({ident[:14]})"
+    plan = (account.get("plan") or "free").lower()
+
+    res: Dict[str, Any] = {
+        "id": ident,
+        "name": name,
+        "plan": plan.title(),
+        "status": "Active" if account.get("status") == "active" else "Disabled",
+        "org_name": "—",
+        "models_unlocked": [],
+        "usage_tokens": "—",
+        "limit_tokens": "—",
+        "context_window": "200K tokens",
+        "reset_date": "Rolling 5h",
+        "capabilities": [],
+    }
+
+    if not session_key:
+        return res
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Cookie": f"sessionKey={session_key}" if not session_key.startswith("sessionKey=") else session_key,
+        "Referer": "https://claude.ai/",
+        "Origin": "https://claude.ai",
+    }
+
+    try:
+        async with httpx.AsyncClient(headers=headers, timeout=6.0, follow_redirects=True) as client:
+            # 1. Fetch organizations (plan, name, capabilities)
+            try:
+                orgs_resp = await client.get("https://claude.ai/api/organizations")
+                if orgs_resp.status_code == 200:
+                    orgs = orgs_resp.json()
+                    if isinstance(orgs, list) and orgs:
+                        org = orgs[0]
+                        res["org_name"] = org.get("name") or ident
+                        caps = org.get("capabilities", [])
+                        res["capabilities"] = caps if isinstance(caps, list) else []
+                        billing = org.get("billing_type") or org.get("plan_tier") or ""
+                        if billing:
+                            res["plan"] = billing.replace("_", " ").title()
+                        # Derive model access from plan
+                        plan_lower = res["plan"].lower()
+                        if any(t in plan_lower for t in ["pro", "team", "enterprise"]):
+                            res["models_unlocked"] = ["claude-opus-4", "claude-sonnet-4", "claude-haiku-3.5", "claude-opus-3", "extended-thinking"]
+                        else:
+                            res["models_unlocked"] = ["claude-sonnet-4", "claude-haiku-3.5"]
+            except Exception:
+                pass
+
+            # 2. Fetch usage / token limits from the account endpoint
+            try:
+                account_resp = await client.get("https://claude.ai/api/account")
+                if account_resp.status_code == 200:
+                    acc_data = account_resp.json()
+                    usage = acc_data.get("usage", {})
+                    if isinstance(usage, dict) and usage:
+                        used = usage.get("prompt_tokens", usage.get("tokens_used", 0))
+                        limit = usage.get("limit", usage.get("token_limit", 0))
+                        if limit:
+                            res["usage_tokens"] = f"{used:,}"
+                            res["limit_tokens"] = f"{limit:,}"
+                        reset = usage.get("reset_at") or usage.get("next_reset")
+                        if reset:
+                            res["reset_date"] = str(reset)[:10]
+            except Exception:
+                pass
+
+    except Exception:
+        pass
+
+    return res
+
+
+async def fetch_gemini_account_quotas(account: Dict[str, Any]) -> Dict[str, Any]:
+    """Fetch live Gemini account details from Google AI Studio / Gemini Web."""
+    cookie_str = account.get("token", "").strip()
+    ident = account.get("identifier") or account.get("name") or "Gemini Account"
+    name = account.get("name") or f"Gemini ({ident[:14]})"
+
+    res: Dict[str, Any] = {
+        "id": ident,
+        "name": name,
+        "plan": (account.get("plan") or "Google One").title(),
+        "status": "Active" if account.get("status") == "active" else "Disabled",
+        "models_available": ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.1-pro", "gemini-3.8-flash-thinking"],
+        "context_window": "1M tokens",
+        "daily_messages": "Unlimited",
+        "image_generation": "Imagen 3 (via Catbox CDN)",
+        "extensions": [],
+    }
+
+    if not cookie_str:
+        return res
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cookie": cookie_str,
+        "Referer": "https://gemini.google.com/",
+        "Origin": "https://gemini.google.com",
+        "X-Same-Domain": "1",
+    }
+
+    try:
+        async with httpx.AsyncClient(headers=headers, timeout=6.0, follow_redirects=True) as client:
+            # Attempt to confirm auth and fetch Advanced (Gemini Advanced) status
+            try:
+                resp = await client.get("https://gemini.google.com/u/0/app")
+                body = resp.text
+                if "Gemini Advanced" in body or "gemini_advanced" in body.lower():
+                    res["plan"] = "Gemini Advanced (Google One)"
+                    res["models_available"] = [
+                        "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.1-pro",
+                        "gemini-3.8-flash-thinking", "gemini-3.1-pro-thinking",
+                        "gemini-3.5-flash-lite",
+                    ]
+                    res["daily_messages"] = "Unlimited (Advanced)"
+                elif resp.status_code == 200:
+                    res["plan"] = "Gemini Free"
+                    res["daily_messages"] = "Capped (Free Tier)"
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    return res
+
+
+async def fetch_glm_account_info(account: Dict[str, Any]) -> Dict[str, Any]:
+    """Fetch GLM Zhipu user account info with live token validation."""
+    refresh_token = account.get("token", "").strip()
+    ident = account.get("identifier") or account.get("name") or "GLM Account"
+    name = account.get("name") or f"GLM ({ident[:14]})"
+
+    res: Dict[str, Any] = {
+        "id": ident,
+        "name": name,
+        "token_status": "Valid",
+        "plan": "Registered User",
+        "models_available": [
+            "GLM-4-Flash (128K ctx)",
+            "GLM-4-Plus (128K ctx)",
+            "GLM-4-Long (1M ctx)",
+            "GLM-Zero-Preview (Reasoning)",
+            "CogView-3-Plus (Image Gen)",
+        ],
+        "concurrency": 50,
+        "context_window": "128K tokens",
+    }
+
+    if not refresh_token:
+        res["token_status"] = "Guest Mode"
+        res["plan"] = "Anonymous Guest"
+        res["concurrency"] = 10
+        return res
+
+    try:
+        import hashlib, uuid, time as _time
+        now_ms = str(int(_time.time() * 1000))
+        digits = [int(c) for c in now_ms]
+        checksum = (sum(digits) - digits[-2]) % 10
+        timestamp = now_ms[:-2] + str(checksum) + now_ms[-1]
+        nonce = uuid.uuid4().hex
+        sign = hashlib.md5(f"{timestamp}-{nonce}-8a1317a7468aa3ad86e997d08f3f31cb".encode()).hexdigest()
+
+        base_headers = {
+            "Accept": "application/json, text/plain, */*",
+            "App-Name": "chatglm",
+            "Origin": "https://chatglm.cn",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "X-App-Platform": "pc",
+            "X-App-Version": "0.0.1",
+            "X-Device-Id": uuid.uuid4().hex,
+            "X-Nonce": nonce,
+            "X-Request-Id": uuid.uuid4().hex,
+            "X-Sign": sign,
+            "X-Timestamp": timestamp,
+            "Authorization": f"Bearer {refresh_token}",
+        }
+
+        async with httpx.AsyncClient(timeout=6.0) as client:
+            # Refresh token to get access token + user info
+            refresh_resp = await client.post(
+                "https://chatglm.cn/chatglm/user-api/user/refresh",
+                headers=base_headers,
+                json={},
+            )
+            if refresh_resp.status_code == 200:
+                data = refresh_resp.json()
+                result = data.get("result", {})
+                if result.get("access_token"):
+                    res["token_status"] = "Valid (Authenticated)"
+                user_info = result.get("user_info", {})
+                if user_info:
+                    phone = user_info.get("phone", "")
+                    if phone:
+                        res["id"] = phone[-4:].rjust(len(ident), "*") if len(phone) > 4 else ident
+                    nickname = user_info.get("nickname", "")
+                    if nickname:
+                        res["name"] = nickname
+                    vip = user_info.get("vip", False) or user_info.get("is_vip", False)
+                    if vip:
+                        res["plan"] = "VIP Member"
+                        res["concurrency"] = 100
+            elif refresh_resp.status_code in (401, 403):
+                res["token_status"] = "Expired / Invalid"
+    except Exception:
+        res["token_status"] = "Unreachable"
+
+    return res
+
+
 async def get_all_limits() -> Dict[str, Any]:
     """Collect live limits and quotas across all 6 providers from SQLite DB and active daemons."""
     limits: Dict[str, Any] = {}
@@ -2203,47 +2423,118 @@ async def get_all_limits() -> Dict[str, Any]:
         }
     limits["kimi"] = kimi_limits
 
-    # 4. Claude sessions limit info from SQLite DB
+    # 4. Claude – live per-account limits fetched from claude.ai
     claude_accounts = db.get_accounts("claude")
-    session_count = len(claude_accounts)
-    claude_limits = {
-        "active_sessions": session_count,
-        "rolling_window": "5-hour dynamic context window" if session_count > 0 else "None",
-        "free_tier_status": f"Active ({session_count} stacked session{'s' if session_count > 1 else ''})" if session_count > 0 else "No Session Connected",
-        "pro_tier_models": "Unlocked" if any(a.get("plan") in ["pro", "team"] for a in claude_accounts) else "Standard Tier",
-    }
+    now_ts_cl = time.time()
+    if claude_accounts:
+        if now_ts_cl - _CLAUDE_QUOTA_CACHE.get("timestamp", 0) < 45.0 and _CLAUDE_QUOTA_CACHE.get("data"):
+            claude_data = _CLAUDE_QUOTA_CACHE["data"]
+        else:
+            claude_data = await asyncio.gather(
+                *(fetch_claude_account_quotas(acc) for acc in claude_accounts),
+                return_exceptions=True,
+            )
+            claude_data = [d for d in claude_data if isinstance(d, dict)]
+            _CLAUDE_QUOTA_CACHE["timestamp"] = now_ts_cl
+            _CLAUDE_QUOTA_CACHE["data"] = claude_data
+    else:
+        claude_data = []
+
+    has_pro = any(
+        any(t in (a.get("plan") or "").lower() for t in ["pro", "team", "enterprise", "advanced"])
+        for a in claude_data
+    )
     limits["claude"] = {
-        "title": "Claude / Anthropic Limits",
-        "data": claude_limits,
+        "title": "Claude / Anthropic Account Pool",
+        "accounts_count": len(claude_data),
+        "accounts": claude_data,
+        "summary": {
+            "total_sessions": len(claude_data),
+            "pro_sessions": sum(1 for a in claude_data if any(t in (a.get("plan") or "").lower() for t in ["pro", "team", "enterprise"])),
+            "context_window": "200K tokens",
+            "has_extended_thinking": has_pro,
+        },
     }
 
-    # 5. Gemini limits info from SQLite DB
+    # 5. Gemini – live per-account details
     gemini_accounts = db.get_accounts("gemini")
-    count = len(gemini_accounts)
-    gemini_limits = {
-        "status": f"Active ({count} stacked accounts)" if count > 0 else "Guest Mode (Universal High-Speed)",
-        "accounts_connected": count,
-        "thinking_budget": "Dynamic Reasoning (Flash 3.8 & 3.1 Pro)",
-        "image_generation": "Nano Banana Models Active (Catbox.moe CDN)",
-        "daily_cap": "Unlimited High-Speed",
-    }
+    now_ts_gm = time.time()
+    if gemini_accounts:
+        if now_ts_gm - _GEMINI_QUOTA_CACHE.get("timestamp", 0) < 45.0 and _GEMINI_QUOTA_CACHE.get("data"):
+            gemini_data = _GEMINI_QUOTA_CACHE["data"]
+        else:
+            gemini_data = await asyncio.gather(
+                *(fetch_gemini_account_quotas(acc) for acc in gemini_accounts),
+                return_exceptions=True,
+            )
+            gemini_data = [d for d in gemini_data if isinstance(d, dict)]
+            _GEMINI_QUOTA_CACHE["timestamp"] = now_ts_gm
+            _GEMINI_QUOTA_CACHE["data"] = gemini_data
+    else:
+        # Guest mode — no auth needed, always available
+        gemini_data = [{
+            "id": "guest",
+            "name": "Guest / Anonymous",
+            "plan": "Gemini Free (Guest)",
+            "status": "Active",
+            "models_available": ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.5-flash", "gemini-3.1-pro", "gemini-3.8-flash-thinking"],
+            "context_window": "1M tokens",
+            "daily_messages": "High-Speed (Guest Mode)",
+            "image_generation": "Imagen 3 (Catbox CDN)",
+        }]
     limits["gemini"] = {
-        "title": "Gemini Limits",
-        "data": gemini_limits,
+        "title": "Gemini / Google Account Pool",
+        "accounts_count": len(gemini_data),
+        "accounts": gemini_data,
+        "summary": {
+            "guest_mode": len(gemini_accounts) == 0,
+            "advanced_count": sum(1 for a in gemini_data if "advanced" in (a.get("plan") or "").lower()),
+            "image_generation": "Imagen 3 (Catbox.moe CDN)",
+        },
     }
 
-    # 6. GLM limits info from SQLite DB
+    # 6. GLM – live token validation & user info per stacked account
     glm_accounts = db.get_accounts("glm")
-    glm_count = len(glm_accounts)
-    glm_limits = {
-        "concurrency_slots": f"{50 * max(1, glm_count)} Concurrent Requests",
-        "guest_mode": "Auto-Guest Token Rotation Enabled",
-        "refresh_frequency": "Dynamic on token expiration",
-        "stacked_tokens": glm_count,
-    }
+    now_ts_glm = time.time()
+    if now_ts_glm - _GLM_QUOTA_CACHE.get("timestamp", 0) < 45.0 and _GLM_QUOTA_CACHE.get("data"):
+        glm_data = _GLM_QUOTA_CACHE["data"]
+    else:
+        if glm_accounts:
+            glm_data_raw = await asyncio.gather(
+                *(fetch_glm_account_info(acc) for acc in glm_accounts),
+                return_exceptions=True,
+            )
+            glm_data = [d for d in glm_data_raw if isinstance(d, dict)]
+        else:
+            # Always available via auto Guest Token
+            glm_data = [{
+                "id": "guest",
+                "name": "Auto Guest Token",
+                "token_status": "Active (Auto-Generated)",
+                "plan": "Anonymous Guest",
+                "models_available": [
+                    "GLM-4-Flash (128K ctx)",
+                    "GLM-4-Plus (128K ctx)",
+                    "GLM-4-Long (1M ctx)",
+                    "GLM-Zero-Preview (Reasoning)",
+                    "CogView-3-Plus (Image Gen)",
+                ],
+                "concurrency": 10,
+                "context_window": "128K tokens",
+            }]
+        _GLM_QUOTA_CACHE["timestamp"] = now_ts_glm
+        _GLM_QUOTA_CACHE["data"] = glm_data
+
+    total_concurrency = sum(a.get("concurrency", 10) for a in glm_data)
     limits["glm"] = {
-        "title": "GLM Zhipu AI Limits",
-        "data": glm_limits,
+        "title": "GLM / Zhipu AI Account Pool",
+        "accounts_count": len(glm_data),
+        "accounts": glm_data,
+        "summary": {
+            "total_concurrency": total_concurrency,
+            "guest_mode": len(glm_accounts) == 0,
+            "auto_token_rotation": True,
+        },
     }
 
     return limits
