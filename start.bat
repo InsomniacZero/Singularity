@@ -64,6 +64,7 @@ exit /b 1
 
 :PYTHON_FOUND
 cd /d "%SING_DIR%"
+set "PYTHONPATH=%ROOT_DIR%;%SING_DIR%;%PYTHONPATH%"
 
 :: 2. Check / Setup Virtual Environment
 if not exist "%SING_DIR%\.venv\Scripts\python.exe" (

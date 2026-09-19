@@ -1715,7 +1715,7 @@ async def get_all_services_status() -> List[Dict[str, Any]]:
 
 
 def start_provider(provider_id: str) -> Dict[str, Any]:
-    """Start a provider service daemon natively."""
+    """Start a provider service daemon natively (in-process thread or headless background)."""
     if provider_id not in PROVIDERS_CONFIG:
         return {"status": "error", "message": f"Unknown provider: {provider_id}"}
 
@@ -1732,7 +1732,19 @@ def start_provider(provider_id: str) -> Dict[str, Any]:
             "pid": existing_pid,
         }
 
-    # 1. Custom external start script if explicitly present
+    # 1. Native Singularity In-Process Worker Thread (Zero Windows, Runs inside Main Gateway Terminal)
+    try:
+        try:
+            from singularity import worker
+        except ImportError:
+            import worker
+        res = worker.start_worker_in_thread(provider_id, host=host, port=port)
+        if res.get("status") == "ok":
+            return res
+    except Exception:
+        pass
+
+    # 2. Custom external start script if explicitly present
     script_candidates = [
         BASE_DIR / "scripts" / meta["start_script"],
         ROOT_DIR / meta["start_script"],
@@ -1763,7 +1775,7 @@ def start_provider(provider_id: str) -> Dict[str, Any]:
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    # 2. Native Singularity Worker Daemon (Windows, Linux, macOS, Android/Termux)
+    # 3. Headless Windowless Process Fallback (strictly no consoles on Windows)
     try:
         py_bin = get_python_executable()
         env = dict(os.environ)
@@ -1778,12 +1790,22 @@ def start_provider(provider_id: str) -> Dict[str, Any]:
         ]
 
         if sys.platform == "win32":
-            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+            pyw_cand = Path(py_bin).parent / "pythonw.exe"
+            if pyw_cand.exists():
+                cmd[0] = str(pyw_cand)
+
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            startupinfo.wShowWindow = 0  # SW_HIDE
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
             p = subprocess.Popen(
                 cmd,
                 cwd=str(ROOT_DIR),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                startupinfo=startupinfo,
                 creationflags=creationflags,
                 env=env,
             )
@@ -1797,7 +1819,6 @@ def start_provider(provider_id: str) -> Dict[str, Any]:
                 env=env,
             )
 
-        # Poll port until listening (up to 2 seconds)
         for _ in range(20):
             time.sleep(0.1)
             new_pid = get_pid_for_port(port)
@@ -1812,7 +1833,6 @@ def start_provider(provider_id: str) -> Dict[str, Any]:
                     "pid": new_pid,
                 }
 
-        # Fallback to process handle PID if port binding is slightly slower
         if p and p.pid:
             try:
                 db.set_setting(f"provider_{provider_id}_pid", str(p.pid))
@@ -1840,8 +1860,24 @@ def stop_provider(provider_id: str) -> Dict[str, Any]:
     meta = PROVIDERS_CONFIG[provider_id]
     port = meta["port"]
     host = meta.get("host", "127.0.0.1")
-    pid = get_pid_for_port(port) if host in ("127.0.0.1", "localhost") else None
 
+    # 1. Stop in-process background thread if running
+    try:
+        try:
+            from singularity import worker
+        except ImportError:
+            import worker
+        if worker.stop_worker_in_thread(provider_id):
+            try:
+                db.set_setting(f"provider_{provider_id}_pid", "")
+            except Exception:
+                pass
+            return {"status": "ok", "message": f"Stopped {meta['name']} (in-process backend)"}
+    except Exception:
+        pass
+
+    # 2. Check external process PID
+    pid = get_pid_for_port(port) if host in ("127.0.0.1", "localhost") else None
     if not pid:
         try:
             saved = db.get_setting(f"provider_{provider_id}_pid")

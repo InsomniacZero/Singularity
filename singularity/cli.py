@@ -361,6 +361,59 @@ def cmd_service(args):
     if pid in ("all", "*", "fleet"):
         pid = None
 
+    # If Singularity Gateway is running on port 9000, dispatch through it so workers run in-process
+    gateway_online = False
+    try:
+        import httpx
+        check = httpx.get("http://127.0.0.1:9000/healthz", timeout=1.0)
+        if check.status_code == 200:
+            gateway_online = True
+    except Exception:
+        gateway_online = False
+
+    if gateway_online:
+        import httpx
+        try:
+            if action == "start":
+                url = f"http://127.0.0.1:9000/api/services/{pid}/start" if pid else "http://127.0.0.1:9000/api/services/start_all"
+                resp = httpx.post(url, timeout=10.0)
+                data = resp.json()
+                if pid:
+                    print(f"[{data.get('status')}] {data.get('message')}")
+                else:
+                    print("[+] Started all services via Gateway backend:")
+                    for p, r in data.get("results", {}).items():
+                        print(f"    • {p.upper()}: [{r.get('status')}] {r.get('message')}")
+                return
+            elif action == "stop":
+                url = f"http://127.0.0.1:9000/api/services/{pid}/stop" if pid else "http://127.0.0.1:9000/api/services/stop_all"
+                resp = httpx.post(url, timeout=10.0)
+                data = resp.json()
+                if pid:
+                    print(f"[{data.get('status')}] {data.get('message')}")
+                else:
+                    print("[+] Stopped all services via Gateway backend:")
+                    for p, r in data.get("results", {}).items():
+                        print(f"    • {p.upper()}: [{r.get('status')}] {r.get('message')}")
+                return
+            elif action == "restart":
+                if pid:
+                    resp = httpx.post(f"http://127.0.0.1:9000/api/services/{pid}/restart", timeout=10.0)
+                    data = resp.json()
+                    print(f"[{data.get('status')}] {data.get('message')}")
+                else:
+                    httpx.post("http://127.0.0.1:9000/api/services/stop_all", timeout=10.0)
+                    time.sleep(1.0)
+                    resp = httpx.post("http://127.0.0.1:9000/api/services/start_all", timeout=10.0)
+                    data = resp.json()
+                    print("[+] Restarted all services via Gateway backend:")
+                    for p, r in data.get("results", {}).items():
+                        print(f"    • {p.upper()}: [{r.get('status')}] {r.get('message')}")
+                return
+        except Exception:
+            pass
+
+    # Gateway not running: direct provider start
     if action == "start":
         if pid:
             res = providers.start_provider(pid)

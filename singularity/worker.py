@@ -7,6 +7,8 @@ for each AI provider (Gemini, ChatGPT, Claude, Kimi, GLM, Grok) across Windows,
 Linux, macOS, and Android/Termux without requiring any legacy scripts or binaries.
 
 Supports:
+- Zero-Window in-process background threading mode (all in 1 terminal)
+- Standalone headless background mode (Windows pythonw / SW_HIDE)
 - /healthz and /v1/models (OpenAI format)
 - /v1/chat/completions (streaming SSE & standard JSON)
 - /v1/images/generations
@@ -14,14 +16,15 @@ Supports:
 """
 
 import argparse
-import asyncio
+import http.server
 import json
 import os
-import signal
+import socketserver
 import sys
+import threading
 import time
 import uuid
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 # Ensure Singularity root is in python path
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -31,8 +34,12 @@ if ROOT_DIR not in sys.path:
 if CURRENT_DIR not in sys.path:
     sys.path.insert(0, CURRENT_DIR)
 
-from singularity import db
-from singularity.providers import PROVIDERS_CONFIG, MODELS_CATALOG
+try:
+    from singularity import db
+    from singularity.providers import PROVIDERS_CONFIG, MODELS_CATALOG
+except ImportError:
+    import db
+    from providers import PROVIDERS_CONFIG, MODELS_CATALOG
 
 
 def generate_response_text(provider_id: str, model: str, prompt: str, accounts: list) -> str:
@@ -71,393 +78,322 @@ def generate_response_text(provider_id: str, model: str, prompt: str, accounts: 
 
 
 # ==============================================================================
-# Starlette / Uvicorn Server Implementation
+# Standard Library Threaded HTTP Worker (Zero Dependencies, Zero Terminal Windows)
 # ==============================================================================
 
-def create_starlette_app(provider_id: str, port: int):
-    from starlette.applications import Starlette
-    from starlette.middleware.cors import CORSMiddleware
-    from starlette.requests import Request
-    from starlette.responses import JSONResponse, Response, StreamingResponse
-    from starlette.routing import Route
+class WorkerHTTPHandler(http.server.BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass  # Completely quiet logging to keep main terminal clean
 
-    meta = PROVIDERS_CONFIG.get(provider_id, {
-        "id": provider_id,
-        "name": provider_id.title(),
-        "badge": "AI Provider",
-        "port": port,
-    })
+    @property
+    def provider_id(self) -> str:
+        return getattr(self.server, "provider_id", "gemini")
 
-    async def healthz(request: Request):
-        return JSONResponse({
-            "status": "ok",
-            "provider": provider_id,
-            "name": meta["name"],
-            "port": port,
-            "timestamp": int(time.time()),
+    @property
+    def port(self) -> int:
+        return getattr(self.server, "port", 8000)
+
+    @property
+    def meta(self) -> Dict[str, Any]:
+        return PROVIDERS_CONFIG.get(self.provider_id, {
+            "id": self.provider_id,
+            "name": self.provider_id.title(),
+            "badge": "AI Provider",
+            "port": self.port,
         })
 
-    async def models(request: Request):
-        matching = [
-            {
-                "id": m["id"],
-                "object": "model",
-                "created": int(time.time()),
-                "owned_by": provider_id,
-                "permission": [],
-                "root": m["id"],
-                "parent": None,
-            }
-            for m in MODELS_CATALOG
-            if m.get("provider") == provider_id
-        ]
-        if not matching:
-            matching = [{
-                "id": f"{provider_id}-default",
-                "object": "model",
-                "created": int(time.time()),
-                "owned_by": provider_id,
-                "permission": [],
-                "root": f"{provider_id}-default",
-                "parent": None,
-            }]
-        return JSONResponse({"object": "list", "data": matching})
+    def send_cors_headers(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "*")
 
-    async def chat_completions(request: Request):
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_cors_headers()
+        self.end_headers()
+
+    def do_GET(self):
+        path = self.path.split("?")[0]
+        pid = self.provider_id
+        meta = self.meta
+        port = self.port
+
+        if path in ("/healthz", "/health"):
+            payload = json.dumps({
+                "status": "ok",
+                "provider": pid,
+                "name": meta["name"],
+                "port": port,
+                "timestamp": int(time.time()),
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        elif path in ("/v1/models", "/models"):
+            matching = [
+                {
+                    "id": m["id"],
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": pid,
+                    "permission": [],
+                    "root": m["id"],
+                    "parent": None,
+                }
+                for m in MODELS_CATALOG
+                if m.get("provider") == pid
+            ]
+            if not matching:
+                matching = [{
+                    "id": f"{pid}-default",
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": pid,
+                    "permission": [],
+                    "root": f"{pid}-default",
+                    "parent": None,
+                }]
+            payload = json.dumps({"object": "list", "data": matching}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        else:
+            payload = json.dumps({
+                "service": f"Singularity {meta['name']} Worker",
+                "status": "online",
+                "provider": pid,
+                "port": port,
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+    def do_POST(self):
+        path = self.path.split("?")[0]
+        pid = self.provider_id
+        port = self.port
+
+        content_length = int(self.headers.get("Content-Length", 0))
+        raw_body = self.rfile.read(content_length).decode("utf-8", errors="ignore") if content_length > 0 else "{}"
         try:
-            body = await request.json()
+            body = json.loads(raw_body)
         except Exception:
-            return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+            body = {}
 
-        model = body.get("model", f"{provider_id}-default")
-        messages = body.get("messages", [])
-        is_stream = body.get("stream", False)
+        if path == "/v1/chat/completions":
+            model = body.get("model", f"{pid}-default")
+            messages = body.get("messages", [])
+            is_stream = body.get("stream", False)
 
-        prompt = ""
-        for m in reversed(messages):
-            if m.get("role") == "user":
-                prompt = m.get("content", "")
-                break
-        if not prompt and messages:
-            prompt = messages[-1].get("content", "")
+            prompt = ""
+            for m in reversed(messages):
+                if m.get("role") == "user":
+                    prompt = m.get("content", "")
+                    break
+            if not prompt and messages:
+                prompt = messages[-1].get("content", "")
 
-        # Check SQLite credentials vault
-        accounts = []
-        try:
-            accounts = db.get_accounts(provider_id)
-        except Exception:
-            pass
+            accounts = []
+            try:
+                accounts = db.get_accounts(pid)
+            except Exception:
+                pass
 
-        answer_text = generate_response_text(provider_id, model, prompt, accounts)
-        chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-        created_ts = int(time.time())
+            answer = generate_response_text(pid, model, prompt, accounts)
+            chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
+            created_ts = int(time.time())
 
-        if is_stream:
-            async def event_generator() -> AsyncIterator[bytes]:
-                # 1. Initial role chunk
-                chunk_role = {
+            if is_stream:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_cors_headers()
+                self.end_headers()
+
+                role_chunk = {
                     "id": chat_id,
                     "object": "chat.completion.chunk",
                     "created": created_ts,
                     "model": model,
                     "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
                 }
-                yield f"data: {json.dumps(chunk_role)}\n\n".encode("utf-8")
-                await asyncio.sleep(0.02)
+                self.wfile.write(f"data: {json.dumps(role_chunk)}\n\n".encode("utf-8"))
+                self.wfile.flush()
 
-                # 2. Content chunks
-                words = answer_text.split(" ")
-                for i, w in enumerate(words):
-                    content_piece = w if i == len(words) - 1 else w + " "
-                    chunk_c = {
+                for w in answer.split(" "):
+                    chunk = {
                         "id": chat_id,
                         "object": "chat.completion.chunk",
                         "created": created_ts,
                         "model": model,
-                        "choices": [{"index": 0, "delta": {"content": content_piece}, "finish_reason": None}],
+                        "choices": [{"index": 0, "delta": {"content": w + " "}, "finish_reason": None}],
                     }
-                    yield f"data: {json.dumps(chunk_c)}\n\n".encode("utf-8")
-                    await asyncio.sleep(0.015)
+                    self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode("utf-8"))
+                    self.wfile.flush()
+                    time.sleep(0.015)
 
-                # 3. Final stop chunk
-                chunk_stop = {
+                stop_chunk = {
                     "id": chat_id,
                     "object": "chat.completion.chunk",
                     "created": created_ts,
                     "model": model,
                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                 }
-                yield f"data: {json.dumps(chunk_stop)}\n\n".encode("utf-8")
-                yield b"data: [DONE]\n\n"
+                self.wfile.write(f"data: {json.dumps(stop_chunk)}\n\n".encode("utf-8"))
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+            else:
+                p_toks = len(prompt.split()) + 4
+                c_toks = len(answer.split())
+                payload = json.dumps({
+                    "id": chat_id,
+                    "object": "chat.completion",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "message": {"role": "assistant", "content": answer},
+                        "finish_reason": "stop",
+                    }],
+                    "usage": {
+                        "prompt_tokens": p_toks,
+                        "completion_tokens": c_toks,
+                        "total_tokens": p_toks + c_toks,
+                    },
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
 
-            return StreamingResponse(
-                event_generator(),
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "Connection": "keep-alive",
-                    "X-Accel-Buffering": "no",
-                    "X-Singularity-Provider": provider_id,
-                },
-            )
-
-        # Non-streaming response
-        p_toks = len(prompt.split()) + 4
-        c_toks = len(answer_text.split())
-        return JSONResponse({
-            "id": chat_id,
-            "object": "chat.completion",
-            "created": created_ts,
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": answer_text},
-                "finish_reason": "stop",
-            }],
-            "usage": {
-                "prompt_tokens": p_toks,
-                "completion_tokens": c_toks,
-                "total_tokens": p_toks + c_toks,
-            },
-        })
-
-    async def image_generations(request: Request):
-        try:
-            body = await request.json()
-        except Exception:
-            body = {}
-        prompt = body.get("prompt", "A high-fidelity rendering generated by Singularity")
-        return JSONResponse({
-            "created": int(time.time()),
-            "data": [{
-                "url": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1024&q=80",
-                "revised_prompt": prompt,
-            }],
-        })
-
-    async def index(request: Request):
-        return JSONResponse({
-            "service": f"Singularity {meta['name']} Worker",
-            "status": "online",
-            "provider": provider_id,
-            "port": port,
-        })
-
-    routes = [
-        Route("/", index, methods=["GET"]),
-        Route("/healthz", healthz, methods=["GET"]),
-        Route("/health", healthz, methods=["GET"]),
-        Route("/v1/models", models, methods=["GET"]),
-        Route("/models", models, methods=["GET"]),
-        Route("/v1/chat/completions", chat_completions, methods=["POST"]),
-        Route("/v1/images/generations", image_generations, methods=["POST"]),
-    ]
-
-    app = Starlette(routes=routes)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    return app
-
-
-# ==============================================================================
-# Standard Library ThreadingHTTPServer Fallback (Zero Dependencies)
-# ==============================================================================
-
-def run_stdlib_server(provider_id: str, host: str, port: int):
-    import http.server
-    import socketserver
-
-    meta = PROVIDERS_CONFIG.get(provider_id, {
-        "id": provider_id,
-        "name": provider_id.title(),
-        "badge": "AI Provider",
-        "port": port,
-    })
-
-    class WorkerHTTPHandler(http.server.BaseHTTPRequestHandler):
-        def log_message(self, format, *args):
-            pass  # Quiet logging
-
-        def send_cors_headers(self):
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-            self.send_header("Access-Control-Allow-Headers", "*")
-
-        def do_OPTIONS(self):
-            self.send_response(204)
+        elif path == "/v1/images/generations":
+            prompt = body.get("prompt", "Generated by Singularity")
+            payload = json.dumps({
+                "created": int(time.time()),
+                "data": [{
+                    "url": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1024&q=80",
+                    "revised_prompt": prompt,
+                }],
+            }).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
             self.send_cors_headers()
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        else:
+            self.send_response(404)
             self.end_headers()
 
-        def do_GET(self):
-            path = self.path.split("?")[0]
-            if path in ("/healthz", "/health"):
-                payload = json.dumps({
-                    "status": "ok",
-                    "provider": provider_id,
-                    "name": meta["name"],
-                    "port": port,
-                }).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_cors_headers()
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-            elif path in ("/v1/models", "/models"):
-                matching = [
-                    {
-                        "id": m["id"],
-                        "object": "model",
-                        "created": int(time.time()),
-                        "owned_by": provider_id,
-                        "permission": [],
-                        "root": m["id"],
-                        "parent": None,
-                    }
-                    for m in MODELS_CATALOG
-                    if m.get("provider") == provider_id
-                ]
-                payload = json.dumps({"object": "list", "data": matching}).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_cors_headers()
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-            else:
-                payload = json.dumps({
-                    "service": f"Singularity {meta['name']} Worker",
-                    "status": "online",
-                    "provider": provider_id,
-                    "port": port,
-                }).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_cors_headers()
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
 
-        def do_POST(self):
-            path = self.path.split("?")[0]
-            content_length = int(self.headers.get("Content-Length", 0))
-            raw_body = self.rfile.read(content_length).decode("utf-8", errors="ignore") if content_length > 0 else "{}"
-            try:
-                body = json.loads(raw_body)
-            except Exception:
-                body = {}
+class ThreadedWorkerServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
 
-            if path == "/v1/chat/completions":
-                model = body.get("model", f"{provider_id}-default")
-                messages = body.get("messages", [])
-                is_stream = body.get("stream", False)
-                prompt = messages[-1].get("content", "") if messages else ""
-                accounts = []
-                try:
-                    accounts = db.get_accounts(provider_id)
-                except Exception:
-                    pass
-
-                answer = generate_response_text(provider_id, model, prompt, accounts)
-                chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-                created_ts = int(time.time())
-
-                if is_stream:
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/event-stream")
-                    self.send_header("Cache-Control", "no-cache")
-                    self.send_cors_headers()
-                    self.end_headers()
-
-                    role_chunk = {
-                        "id": chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_ts,
-                        "model": model,
-                        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-                    }
-                    self.wfile.write(f"data: {json.dumps(role_chunk)}\n\n".encode("utf-8"))
-                    self.wfile.flush()
-
-                    for w in answer.split(" "):
-                        chunk = {
-                            "id": chat_id,
-                            "object": "chat.completion.chunk",
-                            "created": created_ts,
-                            "model": model,
-                            "choices": [{"index": 0, "delta": {"content": w + " "}, "finish_reason": None}],
-                        }
-                        self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode("utf-8"))
-                        self.wfile.flush()
-                        time.sleep(0.015)
-
-                    stop_chunk = {
-                        "id": chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_ts,
-                        "model": model,
-                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                    }
-                    self.wfile.write(f"data: {json.dumps(stop_chunk)}\n\n".encode("utf-8"))
-                    self.wfile.write(b"data: [DONE]\n\n")
-                    self.wfile.flush()
-                else:
-                    payload = json.dumps({
-                        "id": chat_id,
-                        "object": "chat.completion",
-                        "created": created_ts,
-                        "model": model,
-                        "choices": [{
-                            "index": 0,
-                            "message": {"role": "assistant", "content": answer},
-                            "finish_reason": "stop",
-                        }],
-                        "usage": {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30},
-                    }).encode("utf-8")
-                    self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_cors_headers()
-                    self.send_header("Content-Length", str(len(payload)))
-                    self.end_headers()
-                    self.wfile.write(payload)
-            elif path == "/v1/images/generations":
-                prompt = body.get("prompt", "Generated by Singularity")
-                payload = json.dumps({
-                    "created": int(time.time()),
-                    "data": [{
-                        "url": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1024&q=80",
-                        "revised_prompt": prompt,
-                    }],
-                }).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_cors_headers()
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
-            else:
-                self.send_response(404)
-                self.end_headers()
-
-    class ThreadedServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
-        daemon_threads = True
-        allow_reuse_address = True
-
-    server = ThreadedServer((host, port), WorkerHTTPHandler)
-    print(f"[+] Started Singularity {meta['name']} Stdlib Worker on {host}:{port}")
-    try:
-        server.serve_forever()
-    except (KeyboardInterrupt, SystemExit):
-        server.server_close()
+    def __init__(self, host: str, port: int, provider_id: str):
+        self.host = host
+        self.port = port
+        self.provider_id = provider_id
+        super().__init__((host, port), WorkerHTTPHandler)
 
 
 # ==============================================================================
-# Main Entry Point
+# In-Process Thread Management (Runs All Workers inside Main Server Terminal)
+# ==============================================================================
+
+_RUNNING_WORKERS: Dict[str, ThreadedWorkerServer] = {}
+_WORKER_LOCK = threading.Lock()
+
+
+def start_worker_in_thread(provider_id: str, host: str = "127.0.0.1", port: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Start a provider worker inside a background daemon thread.
+    This guarantees ZERO external terminal windows open on Windows or any OS.
+    Everything runs unified within the single main Singularity gateway terminal.
+    """
+    with _WORKER_LOCK:
+        if port is None:
+            port = PROVIDERS_CONFIG.get(provider_id, {}).get("port", 8000)
+
+        # Check if already running in-process
+        if provider_id in _RUNNING_WORKERS:
+            return {
+                "status": "ok",
+                "message": f"{provider_id.upper()} daemon already running (in-process backend)",
+                "pid": os.getpid(),
+                "in_process": True,
+            }
+
+        try:
+            server = ThreadedWorkerServer(host, port, provider_id)
+            thread = threading.Thread(
+                target=server.serve_forever,
+                daemon=True,
+                name=f"Worker-{provider_id}-{port}",
+            )
+            thread.start()
+            _RUNNING_WORKERS[provider_id] = server
+
+            # Save gateway PID
+            try:
+                db.init_db()
+                db.set_setting(f"provider_{provider_id}_pid", str(os.getpid()))
+            except Exception:
+                pass
+
+            meta = PROVIDERS_CONFIG.get(provider_id, {"name": provider_id.title()})
+            return {
+                "status": "ok",
+                "message": f"Started {meta['name']} background server on port {port} (in-process backend)",
+                "pid": os.getpid(),
+                "in_process": True,
+            }
+        except Exception as e:
+            return {"status": "error", "message": f"Failed to bind {provider_id} on port {port}: {str(e)}"}
+
+
+def stop_worker_in_thread(provider_id: str) -> bool:
+    """Stop an in-process worker thread and release the port."""
+    with _WORKER_LOCK:
+        server = _RUNNING_WORKERS.pop(provider_id, None)
+        if server:
+            try:
+                server.shutdown()
+                server.server_close()
+            except Exception:
+                pass
+            return True
+        return False
+
+
+def is_worker_in_thread(provider_id: str) -> bool:
+    """Check if worker is actively running in-process."""
+    with _WORKER_LOCK:
+        return provider_id in _RUNNING_WORKERS
+
+
+def get_running_thread_workers() -> List[str]:
+    """List of provider IDs running in-process."""
+    with _WORKER_LOCK:
+        return list(_RUNNING_WORKERS.keys())
+
+
+# ==============================================================================
+# Standalone CLI Entry Point
 # ==============================================================================
 
 def main():
@@ -471,21 +407,12 @@ def main():
     port = args.port
     host = args.host
 
-    # Write PID to database for reliable status tracking
+    server = ThreadedWorkerServer(host, port, pid)
+    print(f"[+] Singularity {pid.upper()} Worker listening on {host}:{port}")
     try:
-        db.init_db()
-        db.set_setting(f"provider_{pid}_pid", str(os.getpid()))
-    except Exception:
-        pass
-
-    # Try running via Starlette + Uvicorn
-    try:
-        import uvicorn
-        app = create_starlette_app(pid, port)
-        uvicorn.run(app, host=host, port=port, log_level="warning")
-    except Exception as e:
-        # Fallback to pure standard library server
-        run_stdlib_server(pid, host, port)
+        server.serve_forever()
+    except (KeyboardInterrupt, SystemExit):
+        server.server_close()
 
 
 if __name__ == "__main__":
