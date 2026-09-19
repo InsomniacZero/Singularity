@@ -40,6 +40,28 @@ PYTHON_VENV = LOCAL_VENV if LOCAL_VENV.exists() else Path(sys.executable)
 SYSTEM_PYTHON = sys.executable or ("python" if sys.platform == "win32" else "python3")
 
 
+def get_python_executable() -> str:
+    """Resolve the most appropriate Python executable (venv or system)."""
+    if sys.platform == "win32":
+        venv_py = BASE_DIR / ".venv" / "Scripts" / "python.exe"
+        if venv_py.exists():
+            return str(venv_py)
+        root_venv = ROOT_DIR / ".venv" / "Scripts" / "python.exe"
+        if root_venv.exists():
+            return str(root_venv)
+    else:
+        venv_py = BASE_DIR / ".venv" / "bin" / "python3"
+        if venv_py.exists():
+            return str(venv_py)
+        root_venv = ROOT_DIR / ".venv" / "bin" / "python3"
+        if root_venv.exists():
+            return str(root_venv)
+    if sys.executable:
+        return sys.executable
+    return "python" if sys.platform == "win32" else "python3"
+
+
+
 def is_simulation_active() -> bool:
     """Check if device simulation mode is active via env var or DB setting."""
     if os.getenv("SINGULARITY_SIMULATE", "0").lower() in ("1", "true", "yes", "on"):
@@ -1693,7 +1715,7 @@ async def get_all_services_status() -> List[Dict[str, Any]]:
 
 
 def start_provider(provider_id: str) -> Dict[str, Any]:
-    """Start a provider service daemon if local script is available."""
+    """Start a provider service daemon natively."""
     if provider_id not in PROVIDERS_CONFIG:
         return {"status": "error", "message": f"Unknown provider: {provider_id}"}
 
@@ -1710,13 +1732,12 @@ def start_provider(provider_id: str) -> Dict[str, Any]:
             "pid": existing_pid,
         }
 
-    # Search for start script
+    # 1. Custom external start script if explicitly present
     script_candidates = [
         BASE_DIR / "scripts" / meta["start_script"],
         ROOT_DIR / meta["start_script"],
     ]
     script_path = next((p for p in script_candidates if p.exists()), None)
-
     if script_path:
         try:
             p = subprocess.Popen(
@@ -1725,20 +1746,90 @@ def start_provider(provider_id: str) -> Dict[str, Any]:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            time.sleep(1.0)
-            new_pid = get_pid_for_port(port) or p.pid
+            for _ in range(15):
+                time.sleep(0.1)
+                new_pid = get_pid_for_port(port)
+                if new_pid:
+                    return {
+                        "status": "ok",
+                        "message": f"Started {meta['name']} on port {port} (PID: {new_pid})",
+                        "pid": new_pid,
+                    }
             return {
                 "status": "ok",
                 "message": f"Started {meta['name']} on port {port}",
-                "pid": new_pid,
+                "pid": p.pid,
             }
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
-    return {
-        "status": "ok",
-        "message": f"{meta['name']} gateway active on http://{host}:{port}. Run backend daemon or configure remote host.",
-    }
+    # 2. Native Singularity Worker Daemon (Windows, Linux, macOS, Android/Termux)
+    try:
+        py_bin = get_python_executable()
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(ROOT_DIR)
+
+        cmd = [
+            py_bin,
+            "-m", "singularity.worker",
+            "--provider", provider_id,
+            "--port", str(port),
+            "--host", host,
+        ]
+
+        if sys.platform == "win32":
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) | getattr(subprocess, "DETACHED_PROCESS", 0x00000008)
+            p = subprocess.Popen(
+                cmd,
+                cwd=str(ROOT_DIR),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=creationflags,
+                env=env,
+            )
+        else:
+            p = subprocess.Popen(
+                cmd,
+                cwd=str(ROOT_DIR),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                env=env,
+            )
+
+        # Poll port until listening (up to 2 seconds)
+        for _ in range(20):
+            time.sleep(0.1)
+            new_pid = get_pid_for_port(port)
+            if new_pid:
+                try:
+                    db.set_setting(f"provider_{provider_id}_pid", str(new_pid))
+                except Exception:
+                    pass
+                return {
+                    "status": "ok",
+                    "message": f"Started {meta['name']} daemon on port {port} (PID: {new_pid})",
+                    "pid": new_pid,
+                }
+
+        # Fallback to process handle PID if port binding is slightly slower
+        if p and p.pid:
+            try:
+                db.set_setting(f"provider_{provider_id}_pid", str(p.pid))
+            except Exception:
+                pass
+            return {
+                "status": "ok",
+                "message": f"Started {meta['name']} worker process (PID: {p.pid})",
+                "pid": p.pid,
+            }
+
+        return {
+            "status": "ok",
+            "message": f"Started {meta['name']} worker daemon on port {port}",
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to start {meta['name']}: {str(e)}"}
 
 
 def stop_provider(provider_id: str) -> Dict[str, Any]:
@@ -1750,6 +1841,14 @@ def stop_provider(provider_id: str) -> Dict[str, Any]:
     port = meta["port"]
     host = meta.get("host", "127.0.0.1")
     pid = get_pid_for_port(port) if host in ("127.0.0.1", "localhost") else None
+
+    if not pid:
+        try:
+            saved = db.get_setting(f"provider_{provider_id}_pid")
+            if saved and saved.isdigit():
+                pid = int(saved)
+        except Exception:
+            pass
 
     # Check for local stop script
     script_candidates = [
@@ -1771,10 +1870,19 @@ def stop_provider(provider_id: str) -> Dict[str, Any]:
                     check=False,
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
                 )
             else:
-                sig = getattr(signal, "SIGKILL", signal.SIGTERM)
-                os.kill(pid, sig)
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                    time.sleep(0.2)
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            try:
+                db.set_setting(f"provider_{provider_id}_pid", "")
+            except Exception:
+                pass
             return {"status": "ok", "message": f"Stopped {meta['name']} (PID: {pid})"}
         except Exception as e:
             return {"status": "error", "message": str(e)}

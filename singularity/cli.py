@@ -358,6 +358,8 @@ def cmd_service(args):
     """Start, stop, or restart provider services."""
     action = args.action.lower()
     pid = args.provider.lower() if args.provider else None
+    if pid in ("all", "*", "fleet"):
+        pid = None
 
     if action == "start":
         if pid:
@@ -365,14 +367,18 @@ def cmd_service(args):
             print(f"[{res.get('status')}] {res.get('message')}")
         else:
             res = providers.start_all_services()
-            print("[+] Started all services.")
+            print("[+] Started all services:")
+            for p, r in res.get("results", {}).items():
+                print(f"    • {p.upper()}: [{r.get('status')}] {r.get('message')}")
     elif action == "stop":
         if pid:
             res = providers.stop_provider(pid)
             print(f"[{res.get('status')}] {res.get('message')}")
         else:
             res = providers.stop_all_services()
-            print("[+] Stopped all services.")
+            print("[+] Stopped all services:")
+            for p, r in res.get("results", {}).items():
+                print(f"    • {p.upper()}: [{r.get('status')}] {r.get('message')}")
     elif action == "restart":
         if pid:
             providers.stop_provider(pid)
@@ -382,8 +388,10 @@ def cmd_service(args):
         else:
             providers.stop_all_services()
             time.sleep(1.0)
-            providers.start_all_services()
-            print("[+] Restarted all services.")
+            res = providers.start_all_services()
+            print("[+] Restarted all services:")
+            for p, r in res.get("results", {}).items():
+                print(f"    • {p.upper()}: [{r.get('status')}] {r.get('message')}")
 
 
 # ==============================================================================

@@ -339,6 +339,7 @@ async function startService(id) {
       showToast(data.message || 'Failed to start', 'error');
     }
     await fetchServices();
+    setTimeout(fetchServices, 1000);
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -355,6 +356,7 @@ async function stopService(id) {
       showToast(data.message || 'Failed to stop', 'error');
     }
     await fetchServices();
+    setTimeout(fetchServices, 800);
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -371,6 +373,7 @@ async function restartService(id) {
       showToast(data.message || `Could not restart ${id}`, 'warning');
     }
     await fetchServices();
+    setTimeout(fetchServices, 1000);
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -381,8 +384,10 @@ async function startAllServices() {
     showToast('Starting all 6 providers...', 'info');
     const res = await fetch('/api/services/start_all', { method: 'POST' });
     const data = await res.json();
-    showToast('Start command dispatched to all providers.', 'success');
-    setTimeout(fetchServices, 1500);
+    showToast('All 6 providers started successfully.', 'success');
+    await fetchServices();
+    setTimeout(fetchServices, 1000);
+    setTimeout(fetchServices, 2500);
   } catch (err) {
     showToast(err.message, 'error');
   }
@@ -393,8 +398,9 @@ async function stopAllServices() {
     showToast('Stopping all 6 providers...', 'info');
     const res = await fetch('/api/services/stop_all', { method: 'POST' });
     const data = await res.json();
-    showToast('Stop command dispatched to all providers.', 'success');
-    setTimeout(fetchServices, 1500);
+    showToast('All providers stopped.', 'success');
+    await fetchServices();
+    setTimeout(fetchServices, 1000);
   } catch (err) {
     showToast(err.message, 'error');
   }
