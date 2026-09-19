@@ -31,11 +31,13 @@ BASE_DIR = Path(__file__).resolve().parent
 ROOT_DIR = BASE_DIR.parent
 PROVIDER_HOST = os.getenv("SINGULARITY_PROVIDER_HOST", "127.0.0.1")
 
-# Self-contained interpreter resolution (singularity/.venv -> sys.executable -> python3)
-LOCAL_VENV = BASE_DIR / ".venv" / "bin" / "python3"
+# Self-contained interpreter resolution (singularity/.venv -> sys.executable -> python)
 import sys
+LOCAL_VENV_WIN = BASE_DIR / ".venv" / "Scripts" / "python.exe"
+LOCAL_VENV_NIX = BASE_DIR / ".venv" / "bin" / "python3"
+LOCAL_VENV = LOCAL_VENV_WIN if LOCAL_VENV_WIN.exists() else LOCAL_VENV_NIX
 PYTHON_VENV = LOCAL_VENV if LOCAL_VENV.exists() else Path(sys.executable)
-SYSTEM_PYTHON = sys.executable or "python3"
+SYSTEM_PYTHON = sys.executable or ("python" if sys.platform == "win32" else "python3")
 
 
 def is_simulation_active() -> bool:
@@ -1608,13 +1610,35 @@ def get_dynamic_models_catalog() -> List[Dict[str, Any]]:
 
 
 def get_pid_for_port(port: int) -> Optional[int]:
-    """Find PID listening on a given port."""
-    try:
-        res = subprocess.run(["lsof", f"-ti:{port}"], capture_output=True, text=True, timeout=2)
-        pids = [int(p.strip()) for p in res.stdout.strip().splitlines() if p.strip().isdigit()]
-        return pids[0] if pids else None
-    except Exception:
+    """Find PID listening on a given port across Linux, macOS, and Windows."""
+    if sys.platform == "win32":
+        try:
+            res = subprocess.run(
+                ["netstat", "-ano", "-p", "tcp"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            for line in res.stdout.splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 5 and parts[0].upper() == "TCP":
+                    local_addr = parts[1]
+                    state = parts[3]
+                    if (local_addr.endswith(f":{port}") or local_addr.endswith(f".{port}")) and state.upper() == "LISTENING":
+                        pid_str = parts[4]
+                        if pid_str.isdigit():
+                            return int(pid_str)
+        except Exception:
+            pass
         return None
+    else:
+        try:
+            res = subprocess.run(["lsof", f"-ti:{port}"], capture_output=True, text=True, timeout=2)
+            pids = [int(p.strip()) for p in res.stdout.strip().splitlines() if p.strip().isdigit()]
+            return pids[0] if pids else None
+        except Exception:
+            return None
 
 
 async def ping_service(port: int, health_path: str, auth_header: Optional[str] = None, host: str = "127.0.0.1") -> tuple[bool, float]:
@@ -1648,37 +1672,45 @@ async def get_all_services_status() -> List[Dict[str, Any]]:
         alive, latency = await ping_service(port, meta["health_path"], meta["auth_header"], host=host)
 
         is_running = bool(process_pid) or alive or sim
-        lat = latency if alive else (15.5 if sim else None)
+        lat = latency if alive else (15.0 if sim else None)
         results.append({
-            "id": meta["id"],
+            "id": pid,
             "name": meta["name"],
-            "badge": meta["badge"],
             "port": port,
             "host": host,
+            "badge": meta["badge"],
             "color": meta["color"],
-            "pid": process_pid or (8000 + port % 100 if sim else None),
+            "status": "online" if is_running else "offline",
             "running": is_running,
-            "simulated": sim and not alive,
+            "latency": lat,
             "latency_ms": lat,
-            "health_path": meta["health_path"],
-            "cookie_label": meta["cookie_label"],
+            "pid": process_pid or (8000 + port % 100 if sim else None),
+            "simulated": sim and not alive,
+            "health_path": meta.get("health_path", "/v1/models"),
+            "cookie_label": meta.get("cookie_label", ""),
         })
     return results
 
 
 def start_provider(provider_id: str) -> Dict[str, Any]:
-    """Start a provider daemon or report active status."""
+    """Start a provider service daemon if local script is available."""
     if provider_id not in PROVIDERS_CONFIG:
         return {"status": "error", "message": f"Unknown provider: {provider_id}"}
 
     meta = PROVIDERS_CONFIG[provider_id]
     port = meta["port"]
     host = meta.get("host", "127.0.0.1")
-    current_pid = get_pid_for_port(port) if host in ("127.0.0.1", "localhost") else None
-    if current_pid:
-        return {"status": "ok", "message": f"{meta['name']} is already running (PID: {current_pid})", "pid": current_pid}
 
-    # Check for local runner script in singularity/scripts or repo root
+    # Check if already running
+    existing_pid = get_pid_for_port(port)
+    if existing_pid:
+        return {
+            "status": "ok",
+            "message": f"{meta['name']} is already running on port {port} (PID: {existing_pid})",
+            "pid": existing_pid,
+        }
+
+    # Search for start script
     script_candidates = [
         BASE_DIR / "scripts" / meta["start_script"],
         ROOT_DIR / meta["start_script"],
@@ -1687,15 +1719,14 @@ def start_provider(provider_id: str) -> Dict[str, Any]:
 
     if script_path:
         try:
-            subprocess.Popen(
-                [str(script_path)],
+            p = subprocess.Popen(
+                ["bash", str(script_path)] if sys.platform != "win32" else [str(script_path)],
                 cwd=str(script_path.parent),
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                preexec_fn=os.setpgrp,
             )
-            time.sleep(1.2)
-            new_pid = get_pid_for_port(port)
+            time.sleep(1.0)
+            new_pid = get_pid_for_port(port) or p.pid
             return {
                 "status": "ok",
                 "message": f"Started {meta['name']} on port {port}",
@@ -1734,7 +1765,16 @@ def stop_provider(provider_id: str) -> Dict[str, Any]:
 
     if pid:
         try:
-            os.kill(pid, signal.SIGKILL)
+            if sys.platform == "win32":
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid), "/T"],
+                    check=False,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            else:
+                sig = getattr(signal, "SIGKILL", signal.SIGTERM)
+                os.kill(pid, sig)
             return {"status": "ok", "message": f"Stopped {meta['name']} (PID: {pid})"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
@@ -1756,6 +1796,146 @@ def stop_all_services() -> Dict[str, Any]:
     for pid in PROVIDERS_CONFIG:
         results[pid] = stop_provider(pid)
     return {"status": "ok", "results": results}
+
+
+_KIMI_QUOTA_CACHE: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
+_GROK_QUOTA_CACHE: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
+
+
+async def fetch_grok_account_quotas(account: Dict[str, Any]) -> Dict[str, Any]:
+    """Fetch live quotas and rate limits from grok.com for a stacked account."""
+    token = account.get("token", "").strip()
+    ident = account.get("identifier") or account.get("name") or "Grok Account"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Cookie": token,
+        "Referer": "https://grok.com/",
+        "Origin": "https://grok.com",
+        "Content-Type": "application/json",
+    }
+    
+    res: Dict[str, Any] = {
+        "account_uid": ident,
+        "rate_limits": {
+            "grok-3": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
+            "deepsearch": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
+            "reasoning": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
+        },
+        "imagine_quota": {
+            "imagePro": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
+            "video720p": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
+        },
+    }
+    
+    try:
+        async with httpx.AsyncClient(headers=headers, timeout=4.0) as client:
+            kinds = [
+                ("DEFAULT", "grok-3", "rate_limits", "grok-3"),
+                ("DEEPSEARCH", "grok-3", "rate_limits", "deepsearch"),
+                ("REASONING", "grok-3", "rate_limits", "reasoning"),
+                ("IMAGE_GENERATION", "grok-3", "imagine_quota", "imagePro"),
+                ("VIDEO_GENERATION", "grok-3", "imagine_quota", "video720p"),
+            ]
+            tasks = [
+                client.post("https://grok.com/rest/rate-limits", json={"requestKind": k, "modelName": m})
+                for k, m, _, _ in kinds
+            ]
+            responses = await asyncio.gather(*tasks, return_exceptions=True)
+            for (k, m, group, key), r in zip(kinds, responses):
+                if not isinstance(r, Exception) and r.status_code == 200:
+                    d = r.json()
+                    res[group][key] = {
+                        "remainingQueries": d.get("remainingQueries", 30),
+                        "totalQueries": d.get("totalQueries", 30),
+                        "windowSizeSeconds": d.get("windowSizeSeconds", 86400),
+                    }
+    except Exception:
+        pass
+        
+    return res
+
+
+async def fetch_kimi_account_quotas(account: Dict[str, Any]) -> Dict[str, Any]:
+    """Fetch live quotas and subscription details from Kimi web API for a stacked account."""
+    token = account.get("token", "").strip()
+    ident = account.get("identifier") or account.get("name") or "Kimi Account"
+    name = account.get("name") or f"Kimi ({ident[:8]})"
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Authorization": f"Bearer {token}",
+        "Origin": "https://www.kimi.com",
+        "Referer": "https://www.kimi.com/",
+        "X-Msh-Platform": "web",
+    }
+    
+    res_acc: Dict[str, Any] = {
+        "id": ident,
+        "name": name,
+        "plan": (account.get("plan") or "Free").title(),
+        "status": "Active" if account.get("status") == "active" else "Disabled",
+        "research_today": "50 / 50",
+        "research_remain": 50,
+        "research_total": 50,
+        "deep_research": "1 / 1 left",
+        "deep_research_left": 1,
+        "ok_computer": "3 / 3 left",
+        "ok_computer_left": 3,
+        "slides": "3 / 3 left",
+        "slides_left": 3,
+        "reset_date": "Active",
+    }
+    
+    try:
+        async with httpx.AsyncClient(timeout=4.0) as client:
+            ref_resp = await client.get("https://www.kimi.com/api/auth/token/refresh", headers=headers)
+            if ref_resp.status_code == 200:
+                acc_token = ref_resp.json().get("access_token")
+                if acc_token:
+                    h2 = dict(headers)
+                    h2["Authorization"] = f"Bearer {acc_token}"
+                    
+                    sub_task = client.post("https://www.kimi.com/apiv2/kimi.gateway.order.v1.SubscriptionService/GetSubscription", headers=h2, json={})
+                    usage_task = client.get("https://www.kimi.com/api/chat/research/usage", headers=h2)
+                    sub_res, usage_res = await asyncio.gather(sub_task, usage_task, return_exceptions=True)
+                    
+                    if not isinstance(usage_res, Exception) and usage_res.status_code == 200:
+                        u_data = usage_res.json()
+                        remain = u_data.get("remain", 50)
+                        total = u_data.get("total", 50)
+                        res_acc["research_today"] = f"{remain} / {total}"
+                        res_acc["research_remain"] = remain
+                        res_acc["research_total"] = total
+                    
+                    if not isinstance(sub_res, Exception) and sub_res.status_code == 200:
+                        s_data = sub_res.json()
+                        plan_level = s_data.get("currentMembershipLevel") or "LEVEL_FREE"
+                        plan_title = s_data.get("subscription", {}).get("goods", {}).get("title") or "Free"
+                        clean_level = plan_level.replace("LEVEL_", "").title()
+                        res_acc["plan"] = f"{clean_level} ({plan_title})"
+                        
+                        memberships = s_data.get("memberships", [])
+                        for m in memberships:
+                            feat = m.get("feature", "")
+                            left = m.get("leftCount", 0)
+                            tot = m.get("totalCount", 0)
+                            end_t = (m.get("endTime") or "")[:10]
+                            if end_t:
+                                res_acc["reset_date"] = end_t
+                            if feat == "FEATURE_DEEP_RESEARCH":
+                                res_acc["deep_research"] = f"{left} / {tot} left"
+                                res_acc["deep_research_left"] = left
+                            elif feat == "FEATURE_OK_COMPUTER":
+                                res_acc["ok_computer"] = f"{left} / {tot} left"
+                                res_acc["ok_computer_left"] = left
+                            elif feat == "FEATURE_NORMAL_SLIDES":
+                                res_acc["slides"] = f"{left} / {tot} left"
+                                res_acc["slides_left"] = left
+    except Exception:
+        pass
+        
+    return res_acc
 
 
 async def get_all_limits() -> Dict[str, Any]:
@@ -1790,24 +1970,36 @@ async def get_all_limits() -> Dict[str, Any]:
         "accounts": chatgpt_data,
     }
 
-    # 2. Grok quotas from port 8087 or SQLite DB
+    # 2. Grok quotas from grok.com live API, port 8087, or SQLite DB
     grok_accounts = db.get_accounts("grok")
     grok_meta = PROVIDERS_CONFIG["grok"]
     grok_host = grok_meta.get("host", "127.0.0.1")
     grok_limits = {}
+    
+    # Try port 8087 daemon first if active
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
+        async with httpx.AsyncClient(timeout=1.5) as client:
             resp = await client.get(f"http://{grok_host}:{grok_meta['port']}/api/quotas")
             if resp.status_code == 200:
                 grok_limits = resp.json()
     except Exception:
         pass
 
+    # If daemon not listening, query grok.com live directly with stacked cookie
+    if not grok_limits and grok_accounts:
+        now_ts = time.time()
+        if now_ts - _GROK_QUOTA_CACHE.get("timestamp", 0) < 45.0 and _GROK_QUOTA_CACHE.get("data"):
+            grok_limits = _GROK_QUOTA_CACHE["data"]
+        else:
+            grok_limits = await fetch_grok_account_quotas(grok_accounts[0])
+            _GROK_QUOTA_CACHE["timestamp"] = now_ts
+            _GROK_QUOTA_CACHE["data"] = grok_limits
+
     if not grok_limits:
         has_grok = len(grok_accounts) > 0
         grok_limits = {
             "account_uid": grok_accounts[0]["identifier"] if has_grok else "No Account Integrated",
-            "rate_limits": {"chat": "Active"} if has_grok else {},
+            "rate_limits": {"grok-3": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400}} if has_grok else {},
             "imagine_quota": {
                 "imagePro": {"remainingQueries": 20 * len(grok_accounts) if has_grok else 0},
                 "video720p": {"remainingQueries": 5 * len(grok_accounts) if has_grok else 0},
@@ -1818,44 +2010,49 @@ async def get_all_limits() -> Dict[str, Any]:
         "data": grok_limits,
     }
 
-    # 3. Kimi token and membership info from SQLite DB
+    # 3. Kimi token and live membership/feature limits across stacked accounts
     kimi_accounts = db.get_accounts("kimi")
+    now_ts = time.time()
+    
     if kimi_accounts:
-        first_token = kimi_accounts[0]["token"].strip()
-        parts = first_token.split(".")
-        exp_date = "Active"
-        membership = 10
-        if len(parts) >= 2:
-            try:
-                import base64
-                payload_b64 = parts[1] + "=="
-                payload_str = base64.urlsafe_b64decode(payload_b64.encode("utf-8")).decode("utf-8")
-                payload = json.loads(payload_str)
-                exp = payload.get("exp", 0)
-                if exp:
-                    exp_date = time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(exp))
-                membership = payload.get("membership", {}).get("level", 10)
-            except Exception:
-                pass
-        kimi_limits = {
-            "membership_level": f"Level {membership} ({len(kimi_accounts)} stacked in vault)",
-            "expires_at": exp_date,
-            "daily_research_quota": f"{50 * len(kimi_accounts)} queries / day",
-            "context_window": "200k / 500k tokens",
-            "status": "active",
-        }
+        if now_ts - _KIMI_QUOTA_CACHE.get("timestamp", 0) < 45.0 and _KIMI_QUOTA_CACHE.get("data"):
+            kimi_limits = _KIMI_QUOTA_CACHE["data"]
+        else:
+            acc_quotas = await asyncio.gather(*(fetch_kimi_account_quotas(acc) for acc in kimi_accounts))
+            total_research_remain = sum(a.get("research_remain", 50) for a in acc_quotas)
+            total_research_total = sum(a.get("research_total", 50) for a in acc_quotas)
+            total_deep_research = sum(a.get("deep_research_left", 1) for a in acc_quotas)
+            total_ok_computer = sum(a.get("ok_computer_left", 3) for a in acc_quotas)
+            total_slides = sum(a.get("slides_left", 3) for a in acc_quotas)
+            
+            kimi_limits = {
+                "title": "Kimi / Moonshot AI Account Pool",
+                "accounts_count": len(acc_quotas),
+                "accounts": acc_quotas,
+                "summary": {
+                    "research_queries": f"{total_research_remain} / {total_research_total}",
+                    "deep_research": total_deep_research,
+                    "ok_computer": total_ok_computer,
+                    "slides": total_slides,
+                },
+                "status": "active",
+            }
+            _KIMI_QUOTA_CACHE["timestamp"] = now_ts
+            _KIMI_QUOTA_CACHE["data"] = kimi_limits
     else:
         kimi_limits = {
+            "title": "Kimi / Moonshot AI Account Pool",
+            "accounts_count": 0,
+            "accounts": [],
+            "summary": {
+                "research_queries": "0 / 0",
+                "deep_research": 0,
+                "ok_computer": 0,
+                "slides": 0,
+            },
             "status": "none",
-            "membership_level": "No Token Configured",
-            "daily_research_quota": "—",
-            "context_window": "—",
-            "expires_at": "Not Configured",
         }
-    limits["kimi"] = {
-        "title": "Kimi / Moonshot AI Limits",
-        "data": kimi_limits,
-    }
+    limits["kimi"] = kimi_limits
 
     # 4. Claude sessions limit info from SQLite DB
     claude_accounts = db.get_accounts("claude")

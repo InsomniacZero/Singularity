@@ -12,6 +12,8 @@ from typing import Any, Dict, Optional
 
 import httpx
 
+import sys
+
 NGROK_INSPECT_URL = "http://127.0.0.1:4040/api/tunnels"
 DEFAULT_PORT = 9000
 
@@ -22,8 +24,20 @@ def check_ngrok_installed() -> bool:
 
 
 def get_ngrok_config_path() -> Path:
-    """Return the default path for ngrok.yml."""
-    return Path.home() / ".config" / "ngrok" / "ngrok.yml"
+    """Return the default path for ngrok.yml across platforms."""
+    candidates = []
+    if sys.platform == "win32":
+        local_app = os.environ.get("LOCALAPPDATA")
+        if local_app:
+            candidates.append(Path(local_app) / "ngrok" / "ngrok.yml")
+        candidates.append(Path.home() / "AppData" / "Local" / "ngrok" / "ngrok.yml")
+    candidates.append(Path.home() / ".config" / "ngrok" / "ngrok.yml")
+    candidates.append(Path.home() / ".ngrok2" / "ngrok.yml")
+
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
 
 
 def has_authtoken() -> bool:
@@ -43,31 +57,36 @@ def get_tunnel_status() -> Dict[str, Any]:
     installed = check_ngrok_installed()
     has_token = has_authtoken()
 
+    if not installed:
+        return {
+            "status": "not_installed",
+            "installed": False,
+            "url": None,
+            "public_url": None,
+            "api_url": None,
+            "has_authtoken": False,
+            "message": "ngrok is not installed. Download from https://ngrok.com/download",
+        }
+
     try:
-        r = httpx.get(NGROK_INSPECT_URL, timeout=1.5)
-        if r.status_code == 200:
-            data = r.json()
+        resp = httpx.get(NGROK_INSPECT_URL, timeout=1.5)
+        if resp.status_code == 200:
+            data = resp.json()
             tunnels = data.get("tunnels", [])
             if tunnels:
-                # Prefer https tunnel
                 https_tunnels = [t for t in tunnels if t.get("proto") == "https" or str(t.get("public_url", "")).startswith("https")]
                 t = https_tunnels[0] if https_tunnels else tunnels[0]
-                public_url = t.get("public_url") or ""
-                public_url = public_url.rstrip("/")
-
+                public_url = (t.get("public_url") or "").rstrip("/")
                 return {
                     "status": "online",
-                    "installed": installed,
-                    "has_authtoken": has_token,
+                    "installed": True,
+                    "has_authtoken": True,
+                    "url": public_url,
                     "public_url": public_url,
                     "api_url": f"{public_url}/v1",
                     "chat_completions_url": f"{public_url}/v1/chat/completions",
-                    "web_url": public_url,
                     "proto": t.get("proto", "https"),
-                    "tunnel_id": t.get("ID"),
-                    "name": t.get("name"),
-                    "local_addr": t.get("config", {}).get("addr", f"http://localhost:{DEFAULT_PORT}"),
-                    "metrics": t.get("metrics", {}),
+                    "name": t.get("name", "singularity-access"),
                 }
     except Exception:
         pass
@@ -76,15 +95,11 @@ def get_tunnel_status() -> Dict[str, Any]:
         "status": "offline",
         "installed": installed,
         "has_authtoken": has_token,
+        "url": None,
         "public_url": None,
         "api_url": None,
         "chat_completions_url": None,
-        "web_url": None,
-        "proto": None,
-        "tunnel_id": None,
-        "name": None,
-        "local_addr": f"http://localhost:{DEFAULT_PORT}",
-        "metrics": {},
+        "message": "Tunnel is offline. Click Start Tunnel to expose Singularity to the internet.",
     }
 
 
@@ -100,14 +115,19 @@ def start_tunnel(port: int = DEFAULT_PORT) -> Dict[str, Any]:
             "message": "ngrok is not installed on this system. Please install ngrok first.",
         }
 
-    # Launch ngrok process detached from parent
+    # Launch ngrok process detached from parent across Windows and Unix
     try:
-        subprocess.Popen(
-            ["ngrok", "http", str(port)],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            preexec_fn=os.setpgrp,
-        )
+        popen_kwargs: Dict[str, Any] = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL,
+        }
+        if sys.platform == "win32":
+            creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+            popen_kwargs["creationflags"] = creationflags
+        else:
+            popen_kwargs["preexec_fn"] = os.setpgrp
+
+        subprocess.Popen(["ngrok", "http", str(port)], **popen_kwargs)
     except Exception as e:
         return {
             "status": "error",
@@ -131,7 +151,15 @@ def start_tunnel(port: int = DEFAULT_PORT) -> Dict[str, Any]:
 def stop_tunnel() -> Dict[str, Any]:
     """Stop all active ngrok tunnels by terminating the process."""
     try:
-        subprocess.run(["pkill", "-x", "ngrok"], check=False)
+        if sys.platform == "win32":
+            subprocess.run(
+                ["taskkill", "/F", "/IM", "ngrok.exe", "/T"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        else:
+            subprocess.run(["pkill", "-x", "ngrok"], check=False)
         time.sleep(0.5)
     except Exception as e:
         return {"status": "error", "message": str(e)}

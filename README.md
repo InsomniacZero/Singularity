@@ -35,17 +35,44 @@ The Singularity dashboard runs at `http://localhost:9000` and provides:
 
 ## ⚡ Quick Start
 
-### 💻 Linux / macOS / Windows (Desktop)
+### 🪟 Windows (1-Click or Command Line)
+
+1. **Prerequisite:** Make sure [Python 3.10+](https://www.python.org/downloads/) is installed.
+   > ⚠️ **Important:** During Python setup, check the box: **"Add python.exe to PATH"**.
+
+2. **Download & Run:**
+   - **Option A (Zip Download):**
+     1. Click **`< > Code`** ➔ **[Download ZIP](https://github.com/InsomniacZero/Singularity/archive/refs/heads/main.zip)**.
+     2. Extract the ZIP file.
+     3. Double-click **`start.bat`**. (It auto-creates the virtualenv, installs required packages, and launches the gateway!).
+   - **Option B (Git):**
+     ```cmd
+     git clone https://github.com/InsomniacZero/Singularity.git
+     cd Singularity
+     start.bat
+     ```
+
+3. **Windows CLI:**
+   From Command Prompt or PowerShell, use `singular` or `start.bat`:
+   ```cmd
+   singular status      :: Inspect accounts and fleet status
+   singular limits      :: Live quotas for ChatGPT, Kimi, Grok, etc.
+   singular accounts    :: List stacked accounts in SQLite vault
+   singular chat "Hi"   :: Quick test inference
+   ```
+
+The dashboard opens at **`http://localhost:9000`** and the API is live at **`http://localhost:9000/v1`**.
+
+---
+
+### 🐧 Linux / macOS
 
 ```bash
 # Clone the repo
 git clone https://github.com/InsomniacZero/Singularity.git
 cd Singularity
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Start the gateway
+# Launch gateway (auto-detects python and dependencies)
 ./start.sh
 ```
 

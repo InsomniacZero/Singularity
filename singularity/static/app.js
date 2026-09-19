@@ -457,6 +457,23 @@ function renderLimits() {
     `;
   }).join('');
 
+  // Kimi Accounts Table and Quotas
+  const kimiSummary = kimi.summary || {};
+  const kimiRows = (kimi.accounts || []).map(acc => {
+    return `
+      <tr>
+        <td style="font-weight: 600; font-family: var(--font-mono);">${escapeHtml(acc.name || acc.id || 'Kimi Account')}</td>
+        <td><span class="brand-badge">${escapeHtml(acc.plan || 'Free')}</span></td>
+        <td><strong>${escapeHtml(acc.research_today || '50 / 50')}</strong></td>
+        <td>${escapeHtml(acc.deep_research || '1 / 1 left')}</td>
+        <td>${escapeHtml(acc.ok_computer || '3 / 3 left')}</td>
+        <td>${escapeHtml(acc.slides || '3 / 3 left')}</td>
+        <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">${escapeHtml(acc.reset_date || 'Active')}</td>
+        <td><span class="lock-badge ${acc.status === 'Active' ? 'unlocked' : 'locked'}">${escapeHtml(acc.status || 'Active')}</span></td>
+      </tr>
+    `;
+  }).join('');
+
   container.innerHTML = `
     <!-- ChatGPT Section -->
     <div class="limits-group">
@@ -527,31 +544,67 @@ function renderLimits() {
       </div>
     </div>
 
-    <!-- Kimi & Claude Grid -->
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 20px;">
-      <!-- Kimi -->
-      <div class="limits-group">
-        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Kimi / Moonshot AI Limits</h3>
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-            <span style="color: var(--text-secondary);">Membership Tier</span>
-            <span style="font-weight: 600; color: ${kimi.data?.status === 'active' ? 'var(--brand-primary)' : 'var(--text-muted)'};">${kimi.data?.membership_level || 'No Token'}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-            <span style="color: var(--text-secondary);">Deep Research Quota</span>
-            <span style="font-weight: 600;">${kimi.data?.daily_research_quota || '—'}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-            <span style="color: var(--text-secondary);">Context Capacity</span>
-            <span style="font-family: var(--font-mono);">${kimi.data?.context_window || '—'}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; padding-top: 2px;">
-            <span style="color: var(--text-secondary);">Token Expiry</span>
-            <span style="font-family: var(--font-mono); font-size: 12px; color: var(--text-muted);">${kimi.data?.expires_at || 'Not configured'}</span>
-          </div>
+    <!-- Kimi Section -->
+    <div class="limits-group">
+      <div class="limits-group-header">
+        <div>
+          <h3 style="font-size: 16px; font-weight: 700;">Kimi / Moonshot AI Live Limits & Feature Pool</h3>
+          <p style="font-size: 12px; color: var(--text-muted);">Introspected live from upstream tokens (${kimi.accounts_count || 0} accounts active)</p>
         </div>
       </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px;">
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">DAILY RESEARCH QUOTA</div>
+          <div style="font-size: 20px; font-weight: 700; color: var(--brand-primary); margin-top: 4px;">
+            ${kimiSummary.research_queries || '—'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Reset: Midnight CST</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">DEEP RESEARCH</div>
+          <div style="font-size: 20px; font-weight: 700; color: var(--color-success); margin-top: 4px;">
+            ${kimiSummary.deep_research ?? 0} Queries
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Multi-Step Synthesis</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">OK COMPUTER AGENT</div>
+          <div style="font-size: 20px; font-weight: 700; color: #38bdf8; margin-top: 4px;">
+            ${kimiSummary.ok_computer ?? 0} Tasks
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Autonomous Execution</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">SLIDES GENERATOR</div>
+          <div style="font-size: 20px; font-weight: 700; color: #a78bfa; margin-top: 4px;">
+            ${kimiSummary.slides ?? 0} Decks
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Presentation Maker</div>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table class="editorial-table">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Plan & Tier</th>
+              <th>Daily Research</th>
+              <th>Deep Research</th>
+              <th>Ok Computer</th>
+              <th>Slides Gen</th>
+              <th>Cycle Reset</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${kimiRows || '<tr><td colspan="8">No Kimi accounts active in vault</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
 
+    <!-- Claude, Gemini & GLM Grid -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
       <!-- Claude -->
       <div class="limits-group">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Claude / Anthropic Limits</h3>
@@ -574,10 +627,7 @@ function renderLimits() {
           </div>
         </div>
       </div>
-    </div>
 
-    <!-- Gemini & GLM Grid -->
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 20px;">
       <!-- Gemini -->
       <div class="limits-group">
         <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Gemini Limits</h3>

@@ -145,15 +145,43 @@ def cmd_limits(args):
         im = gr.get("imagine_quota", {})
         print(f"    Pro Images  : {im.get('imagePro', {}).get('remainingQueries', '—')} queries remaining")
         print(f"    Video 720p  : {im.get('video720p', {}).get('remainingQueries', '—')} queries remaining")
+        rl = gr.get("rate_limits", {})
+        if isinstance(rl, dict) and rl and any(isinstance(v, dict) for v in rl.values()):
+            rl_headers = ["Model / Mode", "Remaining", "Window", "Status"]
+            rl_rows = []
+            for mod, item in rl.items():
+                if isinstance(item, dict):
+                    rl_rows.append([
+                        mod,
+                        f"{item.get('remainingQueries', 0)} / {item.get('totalQueries', 0)}",
+                        f"{round((item.get('windowSizeSeconds', 0)) / 3600)}h",
+                        "Active",
+                    ])
+            if rl_rows:
+                print_table(rl_headers, rl_rows)
 
-    # 3. Kimi
-    km = data.get("kimi", {}).get("data", {})
-    print(f"\n[3] Kimi / Moonshot AI")
-    if km:
-        print(f"    Tier        : {km.get('membership_level', '—')}")
-        print(f"    Expiration  : {km.get('expires_at', '—')}")
-        print(f"    Daily Cap   : {km.get('daily_research_quota', '—')}")
-        print(f"    Context     : {km.get('context_window', '—')}")
+    # 3. Kimi / Moonshot AI
+    km = data.get("kimi", {})
+    km_accounts = km.get("accounts", [])
+    km_summary = km.get("summary", {})
+    print(f"\n[3] {km.get('title', 'Kimi / Moonshot AI Pool')} ({len(km_accounts)} accounts)")
+    if km_accounts:
+        headers = ["Account / UID", "Plan / Tier", "Research Today", "Deep Res", "Ok Computer", "Slides", "Cycle Reset"]
+        rows = []
+        for a in km_accounts:
+            rows.append([
+                a.get("name") or a.get("id") or "—",
+                a.get("plan", "Free"),
+                str(a.get("research_today", "50 / 50")),
+                str(a.get("deep_research", "1 / 1 left")),
+                str(a.get("ok_computer", "3 / 3 left")),
+                str(a.get("slides", "3 / 3 left")),
+                str(a.get("reset_date", "Active")),
+            ])
+        print_table(headers, rows)
+        print(f"    Pool Total: Research Today: {km_summary.get('research_queries', '—')} | Deep Res: {km_summary.get('deep_research', 0)} queries | Ok Computer: {km_summary.get('ok_computer', 0)} | Slides: {km_summary.get('slides', 0)}")
+    else:
+        print("    No Kimi accounts configured in vault.")
 
     # 4. Claude
     cl = data.get("claude", {}).get("data", {})

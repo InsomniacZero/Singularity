@@ -1,0 +1,119 @@
+@echo off
+setlocal enabledelayedexpansion
+title Singularity Unified AI Gateway
+
+:: Resolve root and singularity directories
+set "ROOT_DIR=%~dp0"
+set "SING_DIR=%ROOT_DIR%singularity"
+
+:: 1. Detect Python Executable
+set "PYTHON_BIN="
+
+if exist "%SING_DIR%\.venv\Scripts\python.exe" (
+    set "PYTHON_BIN=%SING_DIR%\.venv\Scripts\python.exe"
+    goto :PYTHON_FOUND
+)
+
+:: Try 'py -3' launcher
+py -3 --version >nul 2>&1
+if %errorlevel% equ 0 (
+    set "PYTHON_BIN=py -3"
+    goto :PYTHON_FOUND
+)
+
+:: Try system 'python'
+python --version >nul 2>&1
+if %errorlevel% equ 0 (
+    set "PYTHON_BIN=python"
+    goto :PYTHON_FOUND
+)
+
+:: Try common Windows install locations
+for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
+    if exist "%%D\python.exe" (
+        set "PYTHON_BIN=%%D\python.exe"
+        goto :PYTHON_FOUND
+    )
+)
+
+:PYTHON_NOT_FOUND
+echo ======================================================================
+echo  [ERROR] Python 3.10+ was not found on your Windows system!
+echo ======================================================================
+echo.
+echo  Singularity requires Python to run.
+echo  1. Download Python from: https://www.python.org/downloads/
+echo  2. IMPORTANT: During setup, check the box:
+echo     [x] "Add python.exe to PATH"
+echo  3. Restart Command Prompt or double-click start.bat again.
+echo.
+echo ======================================================================
+pause
+exit /b 1
+
+:PYTHON_FOUND
+cd /d "%SING_DIR%"
+
+:: 2. Check / Setup Virtual Environment and Dependencies
+if not exist "%SING_DIR%\.venv\Scripts\python.exe" (
+    echo [*] Initializing local virtual environment in singularity\.venv...
+    %PYTHON_BIN% -m venv "%SING_DIR%\.venv"
+    if exist "%SING_DIR%\.venv\Scripts\python.exe" (
+        set "PYTHON_BIN=%SING_DIR%\.venv\Scripts\python.exe"
+    )
+)
+
+:: Verify dependencies
+%PYTHON_BIN% -c "import starlette, uvicorn, httpx" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [*] Installing required Singularity dependencies from requirements.txt...
+    %PYTHON_BIN% -m pip install --upgrade pip >nul 2>&1
+    %PYTHON_BIN% -m pip install -r "%ROOT_DIR%requirements.txt"
+    if %errorlevel% neq 0 (
+        echo [!] Dependency installation failed. Please check your internet connection.
+        pause
+        exit /b 1
+    )
+)
+
+:: 3. Route CLI subcommands vs Gateway Server
+set "ARG1=%~1"
+
+if "%ARG1%"=="status" goto :RUN_CLI
+if "%ARG1%"=="limits" goto :RUN_CLI
+if "%ARG1%"=="accounts" goto :RUN_CLI
+if "%ARG1%"=="import" goto :RUN_CLI
+if "%ARG1%"=="export" goto :RUN_CLI
+if "%ARG1%"=="simulate" goto :RUN_CLI
+if "%ARG1%"=="host" goto :RUN_CLI
+if "%ARG1%"=="chat" goto :RUN_CLI
+if "%ARG1%"=="service" goto :RUN_CLI
+if "%ARG1%"=="-h" goto :RUN_CLI
+if "%ARG1%"=="--help" goto :RUN_CLI
+if "%ARG1%"=="help" goto :RUN_CLI
+
+:: Launch Gateway Server
+cls
+echo ======================================================================
+echo   SINGULARITY UNIFIED AI GATEWAY (Windows)
+echo ======================================================================
+echo   Dashboard:  http://localhost:9000
+echo   API Base:   http://localhost:9000/v1
+echo   Providers:  ChatGPT, Claude, Gemini, Grok, Kimi, GLM
+echo ======================================================================
+echo.
+
+%PYTHON_BIN% server.py %*
+goto :AFTER_RUN
+
+:RUN_CLI
+%PYTHON_BIN% cli.py %*
+
+:AFTER_RUN
+set "EXIT_CODE=%errorlevel%"
+if %EXIT_CODE% neq 0 (
+    echo.
+    echo [!] Singularity process ended with exit code %EXIT_CODE%.
+    echo %cmdcmdline% | findstr /i /c:"%~nx0" >nul && pause
+)
+exit /b %EXIT_CODE%
