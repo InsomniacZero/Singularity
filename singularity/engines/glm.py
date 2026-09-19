@@ -5,6 +5,8 @@ Singularity Native GLM (Zhipu AI) Engine
 Authentic, zero-legacy reverse-proxy driver for Zhipu AI GLM models (GLM-4, GLM-5.3, GLM-Zero).
 Supports:
 - Automatic Free Guest Token Generation (works out-of-the-box on ANY device with ZERO config)
+- Auto-healing on HTTP 429 / 10061 ("请等待其他对话生成完毕") with dynamic token renewal
+- Background conversation session cleanup (prevents lingering server busy locks)
 - User Refresh Token authentication from Singularity SQLite vault
 - Monotonic delta streaming (eliminates token stuttering, chunk duplication, and scrambled sentences)
 - Deep thinking / reasoning traces (reasoning_content)
@@ -71,7 +73,7 @@ def _format_messages_to_prompt(messages: List[Dict[str, Any]]) -> str:
     return "\n\n".join(transcript).strip()
 
 
-async def get_valid_access_token(raw_refresh_token: Optional[str] = None) -> str:
+async def get_valid_access_token(raw_refresh_token: Optional[str] = None, force_refresh: bool = False) -> str:
     """
     Acquire valid access token:
     1. If user provided a refresh token in vault, refresh user session.
@@ -83,7 +85,7 @@ async def get_valid_access_token(raw_refresh_token: Optional[str] = None) -> str
         cache_key = raw_refresh_token.strip() if raw_refresh_token and raw_refresh_token.strip() else "__guest__"
         cached = _TOKEN_CACHE.get(cache_key)
 
-        if cached and cached.get("expires_at", 0) > now + 60:
+        if not force_refresh and cached and cached.get("expires_at", 0) > now + 60:
             return cached["token"]
 
         t, n, s = build_sign()
@@ -141,6 +143,38 @@ async def get_valid_access_token(raw_refresh_token: Optional[str] = None) -> str
             return acc_token
 
 
+async def _delete_conversation(conversation_id: str, assistant_id: str, access_token: str) -> None:
+    """Clean up server session to release the busy lock immediately."""
+    if not conversation_id or not access_token:
+        return
+    try:
+        t, n, s = build_sign()
+        headers = {
+            "Accept": "application/json, text/plain, */*",
+            "App-Name": "chatglm",
+            "Origin": "https://chatglm.cn",
+            "Referer": "https://chatglm.cn/main/alltoolsdetail",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Authorization": f"Bearer {access_token}",
+            "X-Device-Id": uuid.uuid4().hex,
+            "X-Nonce": n,
+            "X-Request-Id": uuid.uuid4().hex,
+            "X-Sign": s,
+            "X-Timestamp": t,
+        }
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            await client.post(
+                f"{GLM_BASE_URL}/backend-api/assistant/conversation/delete",
+                headers=headers,
+                json={"assistant_id": assistant_id, "conversation_id": conversation_id},
+            )
+    except Exception:
+        pass
+
+
 async def stream_glm_chat(
     model: str,
     messages: List[Dict[str, Any]],
@@ -149,30 +183,14 @@ async def stream_glm_chat(
     **kwargs,
 ) -> AsyncIterator[Dict[str, Any]]:
     """
-    Stream chat completion directly from Zhipu GLM Web with clean monotonic deltas.
+    Stream chat completion directly from Zhipu GLM Web with clean monotonic deltas
+    and automatic retry/healing for HTTP 429 busy errors.
     Yields OpenAI-compatible chunks.
     """
     chat_id = f"chatcmpl-glm-{uuid.uuid4().hex[:12]}"
     created_ts = int(time.time())
 
-    # 1. Resolve Access Token
-    try:
-        access_token = await get_valid_access_token(raw_token)
-    except Exception as e:
-        yield {
-            "id": chat_id,
-            "object": "chat.completion.chunk",
-            "created": created_ts,
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "delta": {"content": f"GLM Auth Error: {str(e)}"},
-                "finish_reason": "error",
-            }],
-        }
-        return
-
-    # 2. Assistant & Chat Mode Resolution
+    # 1. Assistant & Chat Mode Resolution
     lower_model = (model or "").lower()
     if ASSISTANT_ID_PATTERN.fullmatch(model):
         assistant_id = model
@@ -188,7 +206,7 @@ async def stream_glm_chat(
     chat_mode = "zero" if is_reasoning else ""
     is_networking = bool(kwargs.get("web_search")) or "search" in lower_model or "online" in lower_model
 
-    # 3. Format Prompt
+    # 2. Format Prompt
     prompt = _format_messages_to_prompt(messages)
     glm_messages = [{"role": "user", "content": [{"type": "text", "text": prompt + "\n\nAssistant: "}]}]
 
@@ -212,144 +230,220 @@ async def stream_glm_chat(
         },
     }
 
-    t, n, s = build_sign()
-    stream_headers = {
-        "Accept": "text/event-stream",
-        "Accept-Encoding": "identity",  # Keep uncompressed for clean incremental SSE
-        "App-Name": "chatglm",
-        "Origin": "https://chatglm.cn",
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/131.0.0.0 Safari/537.36"
-        ),
-        "X-App-Fr": "browser_extension",
-        "X-App-Platform": "pc",
-        "X-App-Version": "0.0.1",
-        "Authorization": f"Bearer {access_token}",
-        "X-Device-Id": uuid.uuid4().hex,
-        "X-Nonce": n,
-        "X-Request-Id": uuid.uuid4().hex,
-        "X-Sign": s,
-        "X-Timestamp": t,
-    }
-
-    # First role chunk
-    yield {
-        "id": chat_id,
-        "object": "chat.completion.chunk",
-        "created": created_ts,
-        "model": model,
-        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-    }
-
     stream_url = f"{GLM_BASE_URL}/backend-api/assistant/stream"
     accumulated_text: Dict[str, str] = {}
     accumulated_think: Dict[str, str] = {}
+    started_streaming = False
+    conversation_id = ""
+    active_access_token = ""
 
-    try:
-        async with httpx.AsyncClient(timeout=90.0) as client:
-            async with client.stream("POST", stream_url, headers=stream_headers, json=request_body) as response:
-                if response.status_code != 200:
-                    err_msg = await response.aread()
-                    yield {
-                        "id": chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_ts,
-                        "model": model,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {"content": f"GLM Upstream HTTP {response.status_code}: {err_msg.decode('utf-8', errors='ignore')}"},
-                            "finish_reason": "error",
-                        }],
-                    }
-                    return
+    MAX_RETRIES = 3
 
-                async for line in response.aiter_lines():
-                    trimmed = line.strip()
-                    if not trimmed.startswith("data:"):
-                        continue
-                    payload = trimmed[5:].strip()
-                    if payload == "[DONE]":
-                        break
+    for attempt in range(MAX_RETRIES):
+        force_fresh_token = (attempt > 0)
+        try:
+            access_token = await get_valid_access_token(raw_token, force_refresh=force_fresh_token)
+            active_access_token = access_token
+        except Exception as e:
+            if attempt == MAX_RETRIES - 1:
+                yield {
+                    "id": chat_id,
+                    "object": "chat.completion.chunk",
+                    "created": created_ts,
+                    "model": model,
+                    "choices": [{
+                        "index": 0,
+                        "delta": {"content": f"GLM Auth Error: {str(e)}"},
+                        "finish_reason": "error",
+                    }],
+                }
+                return
+            await asyncio.sleep(0.6)
+            continue
 
-                    try:
-                        data = json.loads(payload)
-                    except Exception:
-                        continue
-
-                    parts = data.get("parts", [])
-                    for p in parts:
-                        lid = p.get("logic_id", "default")
-                        p_status = p.get("status")
-
-                        for c in p.get("content", []):
-                            c_type = c.get("type")
-                            c_text = c.get("text", "")
-                            if not c_text:
-                                continue
-
-                            # Text Content Processing (Monotonic Clean Slicing)
-                            if c_type == "text":
-                                if p_status == "init":
-                                    accumulated_text[lid] = accumulated_text.get(lid, "") + c_text
-                                    yield {
-                                        "id": chat_id,
-                                        "object": "chat.completion.chunk",
-                                        "created": created_ts,
-                                        "model": model,
-                                        "choices": [{"index": 0, "delta": {"content": c_text}, "finish_reason": None}],
-                                    }
-                                elif p_status == "finish":
-                                    cur = accumulated_text.get(lid, "")
-                                    if len(c_text) > len(cur):
-                                        delta = c_text[len(cur):]
-                                        accumulated_text[lid] = c_text
-                                        yield {
-                                            "id": chat_id,
-                                            "object": "chat.completion.chunk",
-                                            "created": created_ts,
-                                            "model": model,
-                                            "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
-                                        }
-
-                            # Reasoning / Thinking Processing
-                            elif c_type == "think":
-                                if p_status == "init":
-                                    accumulated_think[lid] = accumulated_think.get(lid, "") + c_text
-                                    yield {
-                                        "id": chat_id,
-                                        "object": "chat.completion.chunk",
-                                        "created": created_ts,
-                                        "model": model,
-                                        "choices": [{"index": 0, "delta": {"reasoning_content": c_text}, "finish_reason": None}],
-                                    }
-                                elif p_status == "finish":
-                                    cur = accumulated_think.get(lid, "")
-                                    if len(c_text) > len(cur):
-                                        delta = c_text[len(cur):]
-                                        accumulated_think[lid] = c_text
-                                        yield {
-                                            "id": chat_id,
-                                            "object": "chat.completion.chunk",
-                                            "created": created_ts,
-                                            "model": model,
-                                            "choices": [{"index": 0, "delta": {"reasoning_content": delta}, "finish_reason": None}],
-                                        }
-
-    except Exception as exc:
-        yield {
-            "id": chat_id,
-            "object": "chat.completion.chunk",
-            "created": created_ts,
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "delta": {"content": f"\n\n[GLM Stream Connection Error: {str(exc)}]"},
-                "finish_reason": "error",
-            }],
+        t, n, s = build_sign()
+        stream_headers = {
+            "Accept": "text/event-stream",
+            "Accept-Encoding": "identity",  # Keep uncompressed for clean incremental SSE
+            "App-Name": "chatglm",
+            "Origin": "https://chatglm.cn",
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "X-App-Fr": "browser_extension",
+            "X-App-Platform": "pc",
+            "X-App-Version": "0.0.1",
+            "Authorization": f"Bearer {access_token}",
+            "X-Device-Id": uuid.uuid4().hex,
+            "X-Nonce": n,
+            "X-Request-Id": uuid.uuid4().hex,
+            "X-Sign": s,
+            "X-Timestamp": t,
         }
-        return
+
+        try:
+            async with httpx.AsyncClient(timeout=90.0) as client:
+                async with client.stream("POST", stream_url, headers=stream_headers, json=request_body) as response:
+                    # Catch 429 busy error ("请等待其他对话生成完毕")
+                    if response.status_code == 429:
+                        err_bytes = await response.aread()
+                        err_text = err_bytes.decode("utf-8", errors="ignore")
+                        if attempt < MAX_RETRIES - 1:
+                            # Force token renewal to get an empty session slot
+                            async with _TOKEN_LOCK:
+                                _TOKEN_CACHE.pop("__guest__", None)
+                            await asyncio.sleep(0.7 * (attempt + 1))
+                            continue
+                        yield {
+                            "id": chat_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_ts,
+                            "model": model,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {"content": f"GLM Server Busy (429): Other conversation generating. Please retry shortly."},
+                                "finish_reason": "error",
+                            }],
+                        }
+                        return
+
+                    if response.status_code != 200:
+                        err_msg = await response.aread()
+                        yield {
+                            "id": chat_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_ts,
+                            "model": model,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {"content": f"GLM Upstream HTTP {response.status_code}: {err_msg.decode('utf-8', errors='ignore')}"},
+                                "finish_reason": "error",
+                            }],
+                        }
+                        return
+
+                    hit_busy_event = False
+                    async for line in response.aiter_lines():
+                        trimmed = line.strip()
+                        if not trimmed.startswith("data:"):
+                            continue
+                        payload = trimmed[5:].strip()
+                        if payload == "[DONE]":
+                            break
+
+                        try:
+                            data = json.loads(payload)
+                        except Exception:
+                            continue
+
+                        # Check for inline busy error status 10061
+                        if data.get("status") == 10061 or "请等待其他对话生成完毕" in str(data.get("message", "")):
+                            hit_busy_event = True
+                            break
+
+                        if not conversation_id and data.get("conversation_id"):
+                            conversation_id = str(data["conversation_id"])
+
+                        # Emit first role chunk upon receiving initial valid frame
+                        if not started_streaming:
+                            started_streaming = True
+                            yield {
+                                "id": chat_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_ts,
+                                "model": model,
+                                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                            }
+
+                        parts = data.get("parts", [])
+                        for p in parts:
+                            lid = p.get("logic_id", "default")
+                            p_status = p.get("status")
+
+                            for c in p.get("content", []):
+                                c_type = c.get("type")
+                                c_text = c.get("text", "")
+                                if not c_text:
+                                    continue
+
+                                # Text Content Processing (Monotonic Clean Slicing)
+                                if c_type == "text":
+                                    if p_status == "init":
+                                        accumulated_text[lid] = accumulated_text.get(lid, "") + c_text
+                                        yield {
+                                            "id": chat_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": created_ts,
+                                            "model": model,
+                                            "choices": [{"index": 0, "delta": {"content": c_text}, "finish_reason": None}],
+                                        }
+                                    elif p_status == "finish":
+                                        cur = accumulated_text.get(lid, "")
+                                        if len(c_text) > len(cur):
+                                            delta = c_text[len(cur):]
+                                            accumulated_text[lid] = c_text
+                                            yield {
+                                                "id": chat_id,
+                                                "object": "chat.completion.chunk",
+                                                "created": created_ts,
+                                                "model": model,
+                                                "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
+                                            }
+
+                                # Reasoning / Thinking Processing
+                                elif c_type == "think":
+                                    if p_status == "init":
+                                        accumulated_think[lid] = accumulated_think.get(lid, "") + c_text
+                                        yield {
+                                            "id": chat_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": created_ts,
+                                            "model": model,
+                                            "choices": [{"index": 0, "delta": {"reasoning_content": c_text}, "finish_reason": None}],
+                                        }
+                                    elif p_status == "finish":
+                                        cur = accumulated_think.get(lid, "")
+                                        if len(c_text) > len(cur):
+                                            delta = c_text[len(cur):]
+                                            accumulated_think[lid] = c_text
+                                            yield {
+                                                "id": chat_id,
+                                                "object": "chat.completion.chunk",
+                                                "created": created_ts,
+                                                "model": model,
+                                                "choices": [{"index": 0, "delta": {"reasoning_content": delta}, "finish_reason": None}],
+                                            }
+
+                    if hit_busy_event and attempt < MAX_RETRIES - 1:
+                        async with _TOKEN_LOCK:
+                            _TOKEN_CACHE.pop("__guest__", None)
+                        await asyncio.sleep(0.7 * (attempt + 1))
+                        continue
+
+            if started_streaming:
+                break
+
+        except Exception as exc:
+            if attempt < MAX_RETRIES - 1:
+                await asyncio.sleep(0.6 * (attempt + 1))
+                continue
+            yield {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": f"\n\n[GLM Stream Connection Error: {str(exc)}]"},
+                    "finish_reason": "error",
+                }],
+            }
+            return
+        finally:
+            if conversation_id and active_access_token:
+                asyncio.create_task(_delete_conversation(conversation_id, assistant_id, active_access_token))
 
     # Final stop chunk
     yield {
