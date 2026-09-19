@@ -638,17 +638,22 @@ button, a, select, input, textarea, [role="button"], .btn, .nav-item, .client-ch
 /* ===================================================================
    Limits Section
    =================================================================== */
-.limits-container {
+.limits-container,
+#limits-container,
+.limits-card-deck {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 32px;
+  padding-bottom: 24px;
 }
 
 .limits-group {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  padding: 20px;
+  padding: 24px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  margin-bottom: 4px;
 }
 
 .limits-group-header {
