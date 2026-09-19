@@ -2,36 +2,47 @@
 setlocal enabledelayedexpansion
 title Singularity Unified AI Gateway
 
-:: Resolve root and singularity directories
+:: Resolve root and singularity directories (always quoted)
 set "ROOT_DIR=%~dp0"
 set "SING_DIR=%ROOT_DIR%singularity"
 
 :: 1. Detect Python Executable
-set "PYTHON_BIN="
+set "PYTHON_EXE="
+set "PYTHON_ARGS="
 
+:: Check if local virtualenv python already exists
 if exist "%SING_DIR%\.venv\Scripts\python.exe" (
-    set "PYTHON_BIN=%SING_DIR%\.venv\Scripts\python.exe"
+    set "PYTHON_EXE=%SING_DIR%\.venv\Scripts\python.exe"
     goto :PYTHON_FOUND
 )
 
-:: Try 'py -3' launcher
+:: Check for 'py -3' Windows launcher
 py -3 --version >nul 2>&1
 if %errorlevel% equ 0 (
-    set "PYTHON_BIN=py -3"
+    set "PYTHON_EXE=py"
+    set "PYTHON_ARGS=-3"
     goto :PYTHON_FOUND
 )
 
-:: Try system 'python'
+:: Check for system 'python'
 python --version >nul 2>&1
 if %errorlevel% equ 0 (
-    set "PYTHON_BIN=python"
+    set "PYTHON_EXE=python"
     goto :PYTHON_FOUND
 )
 
-:: Try common Windows install locations
+:: Check standard Windows user installation directories
 for /d %%D in ("%LOCALAPPDATA%\Programs\Python\Python3*") do (
     if exist "%%D\python.exe" (
-        set "PYTHON_BIN=%%D\python.exe"
+        set "PYTHON_EXE=%%D\python.exe"
+        goto :PYTHON_FOUND
+    )
+)
+
+:: Check Program Files installation directories
+for /d %%D in ("%ProgramFiles%\Python3*") do (
+    if exist "%%D\python.exe" (
+        set "PYTHON_EXE=%%D\python.exe"
         goto :PYTHON_FOUND
     )
 )
@@ -54,23 +65,32 @@ exit /b 1
 :PYTHON_FOUND
 cd /d "%SING_DIR%"
 
-:: 2. Check / Setup Virtual Environment and Dependencies
+:: 2. Check / Setup Virtual Environment
 if not exist "%SING_DIR%\.venv\Scripts\python.exe" (
-    echo [*] Initializing local virtual environment in singularity\.venv...
-    %PYTHON_BIN% -m venv "%SING_DIR%\.venv"
+    echo [*] Initializing virtual environment in singularity\.venv...
+    "%PYTHON_EXE%" %PYTHON_ARGS% -m venv "%SING_DIR%\.venv"
     if exist "%SING_DIR%\.venv\Scripts\python.exe" (
-        set "PYTHON_BIN=%SING_DIR%\.venv\Scripts\python.exe"
+        set "PYTHON_EXE=%SING_DIR%\.venv\Scripts\python.exe"
+        set "PYTHON_ARGS="
     )
+) else (
+    set "PYTHON_EXE=%SING_DIR%\.venv\Scripts\python.exe"
+    set "PYTHON_ARGS="
 )
 
 :: Verify dependencies
-%PYTHON_BIN% -c "import starlette, uvicorn, httpx" >nul 2>&1
+"%PYTHON_EXE%" %PYTHON_ARGS% -c "import starlette, uvicorn, httpx" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [*] Installing required Singularity dependencies from requirements.txt...
-    %PYTHON_BIN% -m pip install --upgrade pip >nul 2>&1
-    %PYTHON_BIN% -m pip install -r "%ROOT_DIR%requirements.txt"
+    "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r "%ROOT_DIR%requirements.txt"
     if %errorlevel% neq 0 (
-        echo [!] Dependency installation failed. Please check your internet connection.
+        echo.
+        echo ======================================================================
+        echo  [!] Dependency installation failed.
+        echo  Please verify your internet connection or run:
+        echo  pip install -r requirements.txt
+        echo ======================================================================
+        echo.
         pause
         exit /b 1
     )
@@ -103,17 +123,17 @@ echo   Providers:  ChatGPT, Claude, Gemini, Grok, Kimi, GLM
 echo ======================================================================
 echo.
 
-%PYTHON_BIN% server.py %*
+"%PYTHON_EXE%" %PYTHON_ARGS% server.py %*
 goto :AFTER_RUN
 
 :RUN_CLI
-%PYTHON_BIN% cli.py %*
+"%PYTHON_EXE%" %PYTHON_ARGS% cli.py %*
 
 :AFTER_RUN
 set "EXIT_CODE=%errorlevel%"
 if %EXIT_CODE% neq 0 (
     echo.
     echo [!] Singularity process ended with exit code %EXIT_CODE%.
-    echo %cmdcmdline% | findstr /i /c:"%~nx0" >nul && pause
+    pause
 )
 exit /b %EXIT_CODE%

@@ -53,12 +53,12 @@ The Singularity dashboard runs at `http://localhost:9000` and provides:
      ```
 
 3. **Windows CLI:**
-   From Command Prompt or PowerShell, use `singular` or `start.bat`:
+   From Command Prompt or PowerShell, you can also pass CLI arguments to `start.bat`:
    ```cmd
-   singular status      :: Inspect accounts and fleet status
-   singular limits      :: Live quotas for ChatGPT, Kimi, Grok, etc.
-   singular accounts    :: List stacked accounts in SQLite vault
-   singular chat "Hi"   :: Quick test inference
+   start.bat status      :: Inspect accounts and fleet status
+   start.bat limits      :: Live quotas for ChatGPT, Kimi, Grok, etc.
+   start.bat accounts    :: List stacked accounts in SQLite vault
+   start.bat chat "Hi"   :: Quick test inference
    ```
 
 The dashboard opens at **`http://localhost:9000`** and the API is live at **`http://localhost:9000/v1`**.
