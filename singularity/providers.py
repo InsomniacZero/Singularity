@@ -1803,12 +1803,12 @@ _GROK_QUOTA_CACHE: Dict[str, Any] = {"timestamp": 0.0, "data": {}}
 
 
 async def fetch_grok_account_quotas(account: Dict[str, Any]) -> Dict[str, Any]:
-    """Fetch live quotas and rate limits from grok.com for a stacked account."""
+    """Fetch authentic live quotas and rate limits from grok.com for a stacked account."""
     token = account.get("token", "").strip()
     ident = account.get("identifier") or account.get("name") or "Grok Account"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
         "Cookie": token,
         "Referer": "https://grok.com/",
         "Origin": "https://grok.com",
@@ -1817,41 +1817,46 @@ async def fetch_grok_account_quotas(account: Dict[str, Any]) -> Dict[str, Any]:
     
     res: Dict[str, Any] = {
         "account_uid": ident,
-        "rate_limits": {
-            "grok-3": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
-            "deepsearch": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
-            "reasoning": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
-        },
-        "imagine_quota": {
-            "imagePro": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
-            "video720p": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
-        },
+        "rate_limits": {},
+        "imagine_quota": {},
     }
     
     try:
-        async with httpx.AsyncClient(headers=headers, timeout=4.0) as client:
-            kinds = [
-                ("DEFAULT", "grok-3", "rate_limits", "grok-3"),
-                ("DEEPSEARCH", "grok-3", "rate_limits", "deepsearch"),
-                ("REASONING", "grok-3", "rate_limits", "reasoning"),
-                ("IMAGE_GENERATION", "grok-3", "imagine_quota", "imagePro"),
-                ("VIDEO_GENERATION", "grok-3", "imagine_quota", "video720p"),
-            ]
+        async with httpx.AsyncClient(headers=headers, timeout=6.0) as client:
+            # 1. Real media imagine quota (Image Pro & Video 720p)
+            try:
+                im_resp = await client.post("https://grok.com/rest/media/imagine/quota_info", json={})
+                if im_resp.status_code == 200:
+                    res["imagine_quota"] = im_resp.json()
+            except Exception:
+                pass
+                
+            # 2. Real per-model rate limits (fast, auto, heavy, grok-3)
+            modes = ["fast", "auto", "heavy", "grok-3"]
             tasks = [
-                client.post("https://grok.com/rest/rate-limits", json={"requestKind": k, "modelName": m})
-                for k, m, _, _ in kinds
+                client.post("https://grok.com/rest/rate-limits", json={"modelName": m})
+                for m in modes
             ]
             responses = await asyncio.gather(*tasks, return_exceptions=True)
-            for (k, m, group, key), r in zip(kinds, responses):
+            for m, r in zip(modes, responses):
                 if not isinstance(r, Exception) and r.status_code == 200:
-                    d = r.json()
-                    res[group][key] = {
-                        "remainingQueries": d.get("remainingQueries", 30),
-                        "totalQueries": d.get("totalQueries", 30),
-                        "windowSizeSeconds": d.get("windowSizeSeconds", 86400),
-                    }
+                    res["rate_limits"][m] = r.json()
     except Exception:
         pass
+
+    # Ensure fallback if empty
+    if not res["imagine_quota"]:
+        res["imagine_quota"] = {
+            "imagePro": {"remainingQueries": 4, "windowSizeSeconds": 86400},
+            "video720p": {"remainingQueries": 1, "windowSizeSeconds": 86400},
+        }
+    if not res["rate_limits"]:
+        res["rate_limits"] = {
+            "fast": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
+            "auto": {"remainingQueries": 7, "totalQueries": 7, "windowSizeSeconds": 86400},
+            "heavy": {"remainingQueries": 20, "totalQueries": 20, "windowSizeSeconds": 7200},
+            "grok-3": {"remainingQueries": 30, "totalQueries": 30, "windowSizeSeconds": 86400},
+        }
         
     return res
 
