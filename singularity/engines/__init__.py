@@ -15,6 +15,8 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from .kimi import stream_kimi_chat
 from .gemini import stream_gemini_chat
 from .grok import stream_grok_chat
+from .glm import stream_glm_chat
+
 
 
 async def stream_chat(
@@ -98,6 +100,24 @@ async def stream_chat(
                 pass
 
         async for chunk in stream_grok_chat(model, messages, cookie_str=cookie_str, stream=stream, **kwargs):
+            yield chunk
+        return
+
+    # 4. Zhipu AI GLM
+    if pid in ("glm", "zhipu", "chatglm"):
+        token = ""
+        if accounts:
+            token = accounts[0].get("token", "")
+        if not token:
+            try:
+                from singularity import db
+                accs = db.get_accounts("glm")
+                if accs:
+                    token = accs[0].get("token", "")
+            except Exception:
+                pass
+
+        async for chunk in stream_glm_chat(model, messages, raw_token=token, stream=stream, **kwargs):
             yield chunk
         return
 
