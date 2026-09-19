@@ -16,6 +16,7 @@ Supports:
 """
 
 import argparse
+import asyncio
 import http.server
 import json
 import os
@@ -37,44 +38,11 @@ if CURRENT_DIR not in sys.path:
 try:
     from singularity import db
     from singularity.providers import PROVIDERS_CONFIG, MODELS_CATALOG
+    from singularity import engines
 except ImportError:
     import db
     from providers import PROVIDERS_CONFIG, MODELS_CATALOG
-
-
-def generate_response_text(provider_id: str, model: str, prompt: str, accounts: list) -> str:
-    """Generate an intelligent completion response."""
-    p_lower = prompt.lower().strip()
-
-    # Math answers
-    if "2+2" in p_lower or "2 + 2" in p_lower:
-        return "2 + 2 = 4"
-    if "3+3" in p_lower or "3 + 3" in p_lower:
-        return "3 + 3 = 6"
-
-    # Greetings
-    if p_lower in ("hello", "hi", "hey", "hello!", "hi!", "ping"):
-        return f"Hello! The Singularity {provider_id.upper()} daemon is online and operational on model `{model}`."
-
-    # Explanations
-    if "quantum computing" in p_lower:
-        return (
-            "Quantum computing utilizes the principles of quantum mechanics—such as superposition and entanglement—to "
-            "perform complex calculations exponentially faster than classical computers for specific problem spaces "
-            "including cryptography, material simulation, and mathematical optimization."
-        )
-
-    # General completion
-    meta = PROVIDERS_CONFIG.get(provider_id, {"name": provider_id.title()})
-    acc_info = f"vault: {len(accounts)} stacked account(s)" if accounts else "native standalone engine"
-    return (
-        f"⚡ **Singularity {meta['name']} Daemon**\n\n"
-        f"• **Model:** `{model}`\n"
-        f"• **Provider:** `{provider_id.upper()}`\n"
-        f"• **Status:** Active ({acc_info})\n\n"
-        f"Successfully processed your request:\n> {prompt}\n\n"
-        f"Singularity gateway routing and token streaming are functioning normally."
-    )
+    import engines
 
 
 # ==============================================================================
@@ -196,23 +164,16 @@ class WorkerHTTPHandler(http.server.BaseHTTPRequestHandler):
             messages = body.get("messages", [])
             is_stream = body.get("stream", False)
 
-            prompt = ""
-            for m in reversed(messages):
-                if m.get("role") == "user":
-                    prompt = m.get("content", "")
-                    break
-            if not prompt and messages:
-                prompt = messages[-1].get("content", "")
+            if not messages:
+                prompt_input = body.get("prompt", "")
+                if prompt_input:
+                    messages = [{"role": "user", "content": prompt_input}]
 
             accounts = []
             try:
                 accounts = db.get_accounts(pid)
             except Exception:
                 pass
-
-            answer = generate_response_text(pid, model, prompt, accounts)
-            chat_id = f"chatcmpl-{uuid.uuid4().hex[:12]}"
-            created_ts = int(time.time())
 
             if is_stream:
                 self.send_response(200)
@@ -221,63 +182,48 @@ class WorkerHTTPHandler(http.server.BaseHTTPRequestHandler):
                 self.send_cors_headers()
                 self.end_headers()
 
-                role_chunk = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": created_ts,
-                    "model": model,
-                    "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
-                }
-                self.wfile.write(f"data: {json.dumps(role_chunk)}\n\n".encode("utf-8"))
-                self.wfile.flush()
-
-                for w in answer.split(" "):
-                    chunk = {
-                        "id": chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_ts,
-                        "model": model,
-                        "choices": [{"index": 0, "delta": {"content": w + " "}, "finish_reason": None}],
-                    }
-                    self.wfile.write(f"data: {json.dumps(chunk)}\n\n".encode("utf-8"))
+                async def run_stream():
+                    async for chunk in engines.stream_chat(pid, model, messages, accounts=accounts, stream=True):
+                        line = f"data: {json.dumps(chunk)}\n\n"
+                        self.wfile.write(line.encode("utf-8"))
+                        self.wfile.flush()
+                    self.wfile.write(b"data: [DONE]\n\n")
                     self.wfile.flush()
-                    time.sleep(0.015)
 
-                stop_chunk = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": created_ts,
-                    "model": model,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                }
-                self.wfile.write(f"data: {json.dumps(stop_chunk)}\n\n".encode("utf-8"))
-                self.wfile.write(b"data: [DONE]\n\n")
-                self.wfile.flush()
+                try:
+                    asyncio.run(run_stream())
+                except Exception as e:
+                    err_chunk = {
+                        "id": f"chatcmpl-err",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model,
+                        "choices": [{"index": 0, "delta": {"content": f"\n\n[Worker Stream Error: {str(e)}]"}, "finish_reason": "error"}],
+                    }
+                    self.wfile.write(f"data: {json.dumps(err_chunk)}\n\n".encode("utf-8"))
+                    self.wfile.write(b"data: [DONE]\n\n")
+                    self.wfile.flush()
             else:
-                p_toks = len(prompt.split()) + 4
-                c_toks = len(answer.split())
-                payload = json.dumps({
-                    "id": chat_id,
-                    "object": "chat.completion",
-                    "created": created_ts,
-                    "model": model,
-                    "choices": [{
-                        "index": 0,
-                        "message": {"role": "assistant", "content": answer},
-                        "finish_reason": "stop",
-                    }],
-                    "usage": {
-                        "prompt_tokens": p_toks,
-                        "completion_tokens": c_toks,
-                        "total_tokens": p_toks + c_toks,
-                    },
-                }).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_cors_headers()
-                self.send_header("Content-Length", str(len(payload)))
-                self.end_headers()
-                self.wfile.write(payload)
+                async def run_gen():
+                    return await engines.generate_chat(pid, model, messages, accounts=accounts)
+
+                try:
+                    result = asyncio.run(run_gen())
+                    payload = json.dumps(result).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_cors_headers()
+                    self.send_header("Content-Length", str(len(payload)))
+                    self.end_headers()
+                    self.wfile.write(payload)
+                except Exception as e:
+                    err_payload = json.dumps({"error": str(e)}).encode("utf-8")
+                    self.send_response(500)
+                    self.send_header("Content-Type", "application/json")
+                    self.send_cors_headers()
+                    self.send_header("Content-Length", str(len(err_payload)))
+                    self.end_headers()
+                    self.wfile.write(err_payload)
 
         elif path == "/v1/images/generations":
             prompt = body.get("prompt", "Generated by Singularity")

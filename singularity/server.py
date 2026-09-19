@@ -111,6 +111,10 @@ import uvicorn
 import tunnel
 import db
 import providers
+try:
+    from singularity import engines
+except ImportError:
+    import engines
 from providers import (
     MODELS_CATALOG,
     PROVIDERS_CONFIG,
@@ -311,10 +315,17 @@ async def chat_completions(request: Request):
                         if chunk:
                             yield chunk
             except httpx.ConnectError:
-                p_name = meta.get("name", provider_id)
-                err_msg = f"Provider {p_name} is offline on {target_host}:{target_port}. Start it in Control Center or enable Device Simulation (./singular simulate on)."
-                yield f"data: {json.dumps({'error': err_msg})}\n\n".encode("utf-8")
-                yield b"data: [DONE]\n\n"
+                # Direct in-process native engine fallback
+                try:
+                    async for chunk in engines.stream_chat(provider_id, model_name, body.get("messages", []), stream=True):
+                        yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                    yield b"data: [DONE]\n\n"
+                    return
+                except Exception as inner_e:
+                    p_name = meta.get("name", provider_id)
+                    err_msg = f"Provider {p_name} error: {str(inner_e)}"
+                    yield f"data: {json.dumps({'error': err_msg})}\n\n".encode("utf-8")
+                    yield b"data: [DONE]\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'error': f'Singularity Gateway Error: {str(e)}'})}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
@@ -342,10 +353,14 @@ async def chat_completions(request: Request):
             except Exception:
                 return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
         except httpx.ConnectError:
-            raise HTTPException(
-                status_code=502,
-                detail=f"Provider {meta['name']} is offline on {target_host}:{target_port}. Start it in Control Center or enable device simulation (SINGULARITY_SIMULATE=1).",
-            )
+            try:
+                data = await engines.generate_chat(provider_id, model_name, body.get("messages", []))
+                return JSONResponse(status_code=200, content=data)
+            except Exception as inner_e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Provider {meta['name']} error: {str(inner_e)}",
+                )
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
 
