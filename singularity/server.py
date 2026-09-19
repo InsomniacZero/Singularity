@@ -38,13 +38,38 @@ except Exception:
     from starlette.staticfiles import StaticFiles
     from starlette.routing import Route, Mount
 
+    from contextlib import asynccontextmanager
+
     async def _http_exception_handler(request, exc):
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
+    @asynccontextmanager
+    async def _gateway_lifespan(gateway_app):
+        for handler in gateway_app._startup_handlers:
+            try:
+                if inspect.iscoroutinefunction(handler):
+                    await handler()
+                else:
+                    handler()
+            except Exception:
+                pass
+        yield
+        for handler in gateway_app._shutdown_handlers:
+            try:
+                if inspect.iscoroutinefunction(handler):
+                    await handler()
+                else:
+                    handler()
+            except Exception:
+                pass
+
     class StarletteGateway(Starlette):
         def __init__(self):
+            self._startup_handlers = []
+            self._shutdown_handlers = []
             super().__init__(
-                exception_handlers={HTTPException: _http_exception_handler}
+                exception_handlers={HTTPException: _http_exception_handler},
+                lifespan=_gateway_lifespan,
             )
             self.add_middleware(
                 CORSMiddleware,
@@ -93,6 +118,15 @@ except Exception:
         def head(self, path: str):
             return self._route_decorator(path, ["HEAD", "GET"])
 
+        def on_event(self, event_type: str):
+            def decorator(func):
+                if event_type == "startup":
+                    self._startup_handlers.append(func)
+                elif event_type == "shutdown":
+                    self._shutdown_handlers.append(func)
+                return func
+            return decorator
+
     app = StarletteGateway()
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -111,6 +145,10 @@ import uvicorn
 import tunnel
 import db
 import providers
+try:
+    from singularity import worker
+except ImportError:
+    import worker
 try:
     from singularity import engines
 except ImportError:
@@ -305,32 +343,27 @@ async def chat_completions(request: Request):
             client = httpx.AsyncClient(timeout=120.0)
             try:
                 async with client.stream("POST", target_url, json=body, headers=headers) as upstream:
-                    if upstream.status_code >= 400:
-                        err_content = await upstream.aread()
-                        yield f"data: {json.dumps({'error': err_content.decode('utf-8', errors='ignore')})}\n\n".encode("utf-8")
-                        yield b"data: [DONE]\n\n"
+                    if upstream.status_code < 400:
+                        async for chunk in upstream.aiter_bytes():
+                            if chunk:
+                                yield chunk
                         return
-
-                    async for chunk in upstream.aiter_bytes():
-                        if chunk:
-                            yield chunk
-            except httpx.ConnectError:
-                # Direct in-process native engine fallback
-                try:
-                    async for chunk in engines.stream_chat(provider_id, model_name, body.get("messages", []), stream=True):
-                        yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
-                    yield b"data: [DONE]\n\n"
-                    return
-                except Exception as inner_e:
-                    p_name = meta.get("name", provider_id)
-                    err_msg = f"Provider {p_name} error: {str(inner_e)}"
-                    yield f"data: {json.dumps({'error': err_msg})}\n\n".encode("utf-8")
-                    yield b"data: [DONE]\n\n"
-            except Exception as e:
-                yield f"data: {json.dumps({'error': f'Singularity Gateway Error: {str(e)}'})}\n\n".encode("utf-8")
-                yield b"data: [DONE]\n\n"
+            except Exception:
+                pass
             finally:
                 await client.aclose()
+
+            # Direct in-process native engine fallback (when upstream daemon is down or returned >= 400)
+            try:
+                async for chunk in engines.stream_chat(provider_id, model_name, body.get("messages", []), stream=True):
+                    yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                yield b"data: [DONE]\n\n"
+                return
+            except Exception as inner_e:
+                p_name = meta.get("name", provider_id)
+                err_msg = f"Provider {p_name} error: {str(inner_e)}"
+                yield f"data: {json.dumps({'error': err_msg})}\n\n".encode("utf-8")
+                yield b"data: [DONE]\n\n"
 
         return StreamingResponse(
             stream_generator(),
@@ -347,22 +380,24 @@ async def chat_completions(request: Request):
     async with httpx.AsyncClient(timeout=120.0) as client:
         try:
             resp = await client.post(target_url, json=body, headers=headers)
-            try:
-                data = resp.json()
-                return JSONResponse(status_code=resp.status_code, content=data)
-            except Exception:
-                return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
-        except httpx.ConnectError:
-            try:
-                data = await engines.generate_chat(provider_id, model_name, body.get("messages", []))
-                return JSONResponse(status_code=200, content=data)
-            except Exception as inner_e:
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Provider {meta['name']} error: {str(inner_e)}",
-                )
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            if resp.status_code < 400:
+                try:
+                    data = resp.json()
+                    return JSONResponse(status_code=resp.status_code, content=data)
+                except Exception:
+                    return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
+        except Exception:
+            pass
+
+    # Direct in-process native engine fallback
+    try:
+        data = await engines.generate_chat(provider_id, model_name, body.get("messages", []))
+        return JSONResponse(status_code=200, content=data)
+    except Exception as inner_e:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Provider {meta['name']} error: {str(inner_e)}",
+        )
 
 
 @app.post("/v1/images/generations")
@@ -627,9 +662,32 @@ async def serve_favicon():
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+@app.on_event("startup")
+async def on_startup():
+    """Start supervisor watchdog and auto-launch in-process workers (kimi, grok, glm) if offline."""
+    try:
+        worker.ensure_supervisor_running()
+        for p in ["kimi", "grok", "glm"]:
+            try:
+                start_provider(p)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def main():
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "9000"))
+    try:
+        worker.ensure_supervisor_running()
+        for p in ["kimi", "grok", "glm"]:
+            try:
+                start_provider(p)
+            except Exception:
+                pass
+    except Exception:
+        pass
     uvicorn.run(app, host=host, port=port)
 
 

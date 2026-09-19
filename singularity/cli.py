@@ -120,9 +120,9 @@ def cmd_limits(args):
     # 1. ChatGPT
     cg = data.get("chatgpt", {})
     accounts = cg.get("accounts", [])
-    print(f"\n[1] {cg.get('title', 'ChatGPT Pool')} ({len(accounts)} accounts)")
+    print(f"\n[1] {cg.get('title', 'ChatGPT Accounts')} ({len(accounts)} accounts)")
     if accounts:
-        headers = ["Account / Email", "Plan", "Status", "Images/Day", "Reasoning", "Deep Research"]
+        headers = ["Account / Email", "Plan", "Status", "Images/Day", "Reasoning", "Deep Res", "Uploads"]
         rows = []
         for a in accounts:
             rows.append([
@@ -132,6 +132,7 @@ def cmd_limits(args):
                 str(a.get("image_quota", "—")),
                 str(a.get("reason_remaining", "—")),
                 str(a.get("deep_research", "—")),
+                str(a.get("file_upload", "—")),
             ])
         print_table(headers, rows)
     else:
@@ -164,7 +165,7 @@ def cmd_limits(args):
     km = data.get("kimi", {})
     km_accounts = km.get("accounts", [])
     km_summary = km.get("summary", {})
-    print(f"\n[3] {km.get('title', 'Kimi / Moonshot AI Pool')} ({len(km_accounts)} accounts)")
+    print(f"\n[3] {km.get('title', 'Kimi / Moonshot AI Accounts')} ({len(km_accounts)} accounts)")
     if km_accounts:
         headers = ["Account / UID", "Plan / Tier", "Research Today", "Deep Res", "Ok Computer", "Slides", "Cycle Reset"]
         rows = []
@@ -179,76 +180,75 @@ def cmd_limits(args):
                 str(a.get("reset_date", "Active")),
             ])
         print_table(headers, rows)
-        print(f"    Pool Total: Research Today: {km_summary.get('research_queries', '—')} | Deep Res: {km_summary.get('deep_research', 0)} queries | Ok Computer: {km_summary.get('ok_computer', 0)} | Slides: {km_summary.get('slides', 0)}")
+        print(f"    Summary Total: Research Today: {km_summary.get('research_queries', '—')} | Deep Res: {km_summary.get('deep_research', 0)} queries | Ok Computer: {km_summary.get('ok_computer', 0)} | Slides: {km_summary.get('slides', 0)}")
     else:
         print("    No Kimi accounts configured in vault.")
 
     # 4. Claude / Anthropic
     cl = data.get("claude", {})
     cl_accounts = cl.get("accounts", [])
-    cl_summary = cl.get("summary", {})
-    print(f"\n[4] {cl.get('title', 'Claude / Anthropic Pool')} ({len(cl_accounts)} sessions)")
+    print(f"\n[4] {cl.get('title', 'Claude / Anthropic Account Quotas')} ({len(cl_accounts)} accounts)")
     if cl_accounts:
-        headers = ["Session / Name", "Plan", "Rolling Window", "Context Window", "Reasoning / CoT", "Opus Access", "Status"]
+        headers = ["Account / Session", "Plan", "Status", "Messages", "Reasoning / CoT", "Uploads", "Web Search", "Reset Window"]
         rows = []
         for a in cl_accounts:
             rows.append([
-                a.get("identifier", "—"),
-                a.get("plan", "PRO"),
-                str(a.get("rolling_window", "45 msgs / 5 hrs")),
-                str(a.get("context_window", "200,000 tokens")),
-                str(a.get("thinking_budget", "64K CoT")),
-                str(a.get("opus_access", "Unlocked")),
+                a.get("email", "—"),
+                a.get("type", "PRO"),
                 a.get("status", "Active"),
+                str(a.get("messages", "45 / 5 hrs")),
+                str(a.get("reasoning", "Included (5 hrs)")),
+                str(a.get("file_upload", "30MB / file")),
+                str(a.get("web_search", "Extended")),
+                str(a.get("restore_at", "Rolling (5 hrs)")),
             ])
         print_table(headers, rows)
-        print(f"    Pool Capacity: {cl_summary.get('rolling_capacity', '—')} | Max Depth: {cl_summary.get('context_depth', '200K')} | Reasoning: {cl_summary.get('thinking_budget', '64K')} | Opus Tier: {cl_summary.get('opus_tier', '—')}")
     else:
         print("    No Claude session keys configured in vault. Use Cookie Stacker to add sessionKey.")
 
     # 5. Gemini / Google DeepMind
     gm = data.get("gemini", {})
     gm_accounts = gm.get("accounts", [])
-    gm_summary = gm.get("summary", {})
-    print(f"\n[5] {gm.get('title', 'Google Gemini Engine Pool')} ({len(gm_accounts)} active engines)")
+    print(f"\n[5] {gm.get('title', 'Google Gemini Account Quotas')} ({len(gm_accounts)} accounts)")
     if gm_accounts:
-        headers = ["Engine / Session", "Tier / Mode", "Context Window", "Thinking / CoT", "Multimodal Ingestion", "Daily Quota", "Status"]
+        headers = ["Account / Session", "Plan", "Status", "Images/Day", "Hourly Rate", "Deep Res", "Uploads", "Reset Window"]
         rows = []
         for a in gm_accounts:
             rows.append([
-                a.get("identifier", "—"),
-                a.get("tier", "Universal High-Speed"),
-                str(a.get("context_window", "1,000,000 tokens")),
-                str(a.get("thinking_mode", "Dynamic CoT")),
-                str(a.get("multimodal", "Vision + Docs")),
-                str(a.get("daily_quota", "Unlimited")),
+                a.get("email", "—"),
+                a.get("type", "FREE"),
                 a.get("status", "Active"),
+                str(a.get("image_quota", "30")),
+                str(a.get("reason_remaining", "Standard (60/hr)")),
+                str(a.get("deep_research", "0 / day")),
+                str(a.get("file_upload", "10 / prompt")),
+                str(a.get("restore_at", "Daily (Midnight PST)")),
             ])
         print_table(headers, rows)
-        print(f"    Engine Architecture: {gm_summary.get('engine_architecture', 'Universal Web2API')} | Context Depth: {gm_summary.get('max_context', '1M')} | Thinking: {gm_summary.get('thinking_budget', 'Dynamic CoT')} | Image Gen: {gm_summary.get('image_gen', 'Imagen 3')}")
     else:
         print("    No Gemini engines loaded.")
 
     # 6. GLM / Zhipu AI
     glm_obj = data.get("glm", {})
     glm_accounts = glm_obj.get("accounts", [])
-    glm_summary = glm_obj.get("summary", {})
-    print(f"\n[6] {glm_obj.get('title', 'GLM / Zhipu AI Pool')} ({len(glm_accounts)} active engines)")
+    print(f"\n[6] {glm_obj.get('title', 'GLM / Zhipu AI Account Quotas')} ({len(glm_accounts)} accounts)")
     if glm_accounts:
-        headers = ["Account / Engine UID", "Mode / Tier", "Context Window", "Reasoning / CoT", "Web Grounding", "Concurrency", "Status"]
+        headers = ["Account / Session", "Plan", "Status", "Images/Day", "Video/Day", "Messages", "Web Search", "Uploads", "Concurrency", "Reset Window"]
         rows = []
         for a in glm_accounts:
             rows.append([
-                a.get("identifier", "—"),
-                a.get("tier", "Self-Healing Guest Pool"),
-                str(a.get("context_window", "128,000 tokens")),
-                str(a.get("reasoning", "GLM-Zero CoT")),
-                str(a.get("web_search", "Real-Time Search")),
-                str(a.get("concurrency", "50 Slots")),
+                a.get("email", "—"),
+                a.get("type", "FREE"),
                 a.get("status", "Active"),
+                str(a.get("image_quota", "10")),
+                str(a.get("video_quota", "2 / day")),
+                str(a.get("reason_remaining", "200 / day")),
+                str(a.get("deep_research", "100 / day")),
+                str(a.get("file_upload", "5 docs / day")),
+                str(a.get("concurrency", "2 requests")),
+                str(a.get("restore_at", "Daily (Midnight CST)")),
             ])
         print_table(headers, rows)
-        print(f"    Fleet Status: {glm_summary.get('pool_status', '—')} | Concurrency: {glm_summary.get('concurrency_slots', '50 Slots')} | Web Grounding: {glm_summary.get('web_grounding', 'Active')} | Auto-Heal: {glm_summary.get('auto_healing', 'Active')}")
     else:
         print("    No GLM engines configured.")
     print()
@@ -386,9 +386,20 @@ def cmd_chat(args):
                             break
                         try:
                             chunk = json.loads(raw)
-                            delta = chunk.get("choices", [{}])[0].get("delta", {}).get("content", "")
-                            sys.stdout.write(delta)
-                            sys.stdout.flush()
+                            choices = chunk.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                content = delta.get("content", "")
+                                reasoning = delta.get("reasoning_content", "")
+                                if reasoning:
+                                    sys.stdout.write(f"\033[90m{reasoning}\033[0m")
+                                    sys.stdout.flush()
+                                if content:
+                                    sys.stdout.write(content)
+                                    sys.stdout.flush()
+                            elif "error" in chunk:
+                                sys.stdout.write(f"\n[-] {chunk['error']}\n")
+                                sys.stdout.flush()
                         except Exception:
                             pass
                 print()

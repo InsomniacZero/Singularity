@@ -113,7 +113,7 @@ PROVIDERS_CONFIG = {
         "name": "ChatGPT",
         "port": 8000,
         "host": os.getenv("CHATGPT_HOST", PROVIDER_HOST),
-        "badge": "OpenAI Pool",
+        "badge": "OpenAI",
         "color": "#10A37F",
         "start_script": "start_chatgpt2api.sh",
         "stop_script": "stop_chatgpt2api.sh",
@@ -1672,7 +1672,7 @@ async def ping_service(port: int, health_path: str, auth_header: Optional[str] =
 
     start = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
+        async with httpx.AsyncClient(timeout=3.5) as client:
             resp = await client.get(url, headers=headers)
             latency = (time.perf_counter() - start) * 1000
             # 200, 401, 404 all indicate the daemon port is alive and listening
@@ -1899,6 +1899,14 @@ def stop_provider(provider_id: str) -> Dict[str, Any]:
             pass
 
     if pid:
+        if pid == os.getpid():
+            # In-process worker thread, NEVER kill the main gateway process!
+            try:
+                db.set_setting(f"provider_{provider_id}_pid", "")
+            except Exception:
+                pass
+            return {"status": "ok", "message": f"Stopped {meta['name']} (in-process backend)"}
+
         try:
             if sys.platform == "win32":
                 subprocess.run(
@@ -1928,6 +1936,15 @@ def stop_provider(provider_id: str) -> Dict[str, Any]:
 
 def start_all_services() -> Dict[str, Any]:
     """Start all 6 provider daemons."""
+    try:
+        try:
+            from singularity import worker
+        except ImportError:
+            import worker
+        worker.ensure_supervisor_running()
+    except Exception:
+        pass
+
     results = {}
     for pid in PROVIDERS_CONFIG:
         results[pid] = start_provider(pid)
@@ -2102,19 +2119,38 @@ async def get_all_limits() -> Dict[str, Any]:
 
         is_pro = plan in ["PLUS", "TEAM", "PRO", "ENTERPRISE", "GO"]
         default_quota = 120 if is_pro else 25
+
+        # Real reasoning query limits based on plan
+        if plan == "TEAM":
+            default_reason = "100 / 3 hrs"
+        elif is_pro:
+            default_reason = "50 / 3 hrs"
+        else:
+            default_reason = "10 / day"
+
+        # Real file upload limits based on plan
+        if plan in ["PRO", "ENTERPRISE"]:
+            default_upload = "Unlimited"
+        elif plan == "TEAM":
+            default_upload = "100 / 3 hrs"
+        elif is_pro:
+            default_upload = "80 / 3 hrs"
+        else:
+            default_upload = "3 / 3 hrs"
+
         chatgpt_data.append({
             "email": acc.get("identifier") or acc.get("name") or "ChatGPT Account",
             "type": plan,
             "status": "Normal" if acc.get("status") == "active" else "Disabled",
             "image_quota": meta.get("quota", default_quota),
-            "reason_remaining": features.get("reason", "50 / 3 hrs" if is_pro else "Standard"),
-            "deep_research": features.get("deep_research", "Available" if is_pro else "5 / day"),
-            "file_upload": features.get("file_upload", "Enabled"),
+            "reason_remaining": features.get("reason", default_reason),
+            "deep_research": features.get("deep_research", "25 / day" if is_pro else "5 / day"),
+            "file_upload": features.get("file_upload", default_upload),
             "restore_at": meta.get("restore_at", "Active"),
         })
 
     limits["chatgpt"] = {
-        "title": "ChatGPT Account Pool",
+        "title": "ChatGPT Account Quotas",
         "accounts_count": len(chatgpt_data),
         "accounts": chatgpt_data,
     }
@@ -2155,7 +2191,7 @@ async def get_all_limits() -> Dict[str, Any]:
             },
         }
     limits["grok"] = {
-        "title": "Grok / xAI Limits",
+        "title": "Grok / xAI Limits & Quotas",
         "data": grok_limits,
     }
 
@@ -2175,7 +2211,7 @@ async def get_all_limits() -> Dict[str, Any]:
             total_slides = sum(a.get("slides_left", 3) for a in acc_quotas)
             
             kimi_limits = {
-                "title": "Kimi / Moonshot AI Account Pool",
+                "title": "Kimi / Moonshot AI Accounts",
                 "accounts_count": len(acc_quotas),
                 "accounts": acc_quotas,
                 "summary": {
@@ -2190,7 +2226,7 @@ async def get_all_limits() -> Dict[str, Any]:
             _KIMI_QUOTA_CACHE["data"] = kimi_limits
     else:
         kimi_limits = {
-            "title": "Kimi / Moonshot AI Account Pool",
+            "title": "Kimi / Moonshot AI Accounts",
             "accounts_count": 0,
             "accounts": [],
             "summary": {
@@ -2218,39 +2254,20 @@ async def get_all_limits() -> Dict[str, Any]:
             masked_id = f"Claude ({raw_k[:10]}...{raw_k[-6:]})" if len(raw_k) > 16 else (name or "Claude Session")
 
         claude_data.append({
-            "identifier": masked_id,
-            "plan": plan,
-            "status": "Active" if acc.get("status") == "active" else "Disabled",
-            "rolling_window": "45 msgs / 5 hrs" if is_pro else "15 msgs / 5 hrs",
-            "context_window": "200,000 tokens",
-            "thinking_budget": "64K CoT (Extended Thinking)",
-            "opus_access": "Sonnet 5 & Opus 5 Unlocked" if is_pro else "Sonnet 3.5 / Haiku",
-            "artifacts": "Interactive Canvas & Sandbox Active",
-            "reset_cycle": "Dynamic 5-Hour Rolling",
+            "email": masked_id,
+            "type": plan,
+            "status": "Normal" if acc.get("status") == "active" else "Disabled",
+            "messages": "45 / 5 hrs" if is_pro else "15 / 5 hrs",
+            "reasoning": "Included (5 hrs)" if is_pro else "Unavailable",
+            "file_upload": "30MB / file" if is_pro else "5 files (10MB)",
+            "web_search": "Extended" if is_pro else "Standard",
+            "restore_at": "Rolling (5 hrs)",
         })
 
-    has_claude_pro = any(a["plan"] in ["PRO", "TEAM", "MAX"] for a in claude_data)
-    total_claude_cap = len(claude_data) * (45 if has_claude_pro else 15) if claude_data else 0
-
-    claude_summary = {
-        "active_sessions": f"{len(claude_data)} Connected" if claude_data else "0 Connected",
-        "rolling_capacity": f"{total_claude_cap} Msgs / 5h" if total_claude_cap > 0 else "No Session",
-        "context_depth": "200,000 Tokens",
-        "thinking_budget": "64K CoT Tokens",
-        "opus_tier": "Unlocked (Pro Pool)" if has_claude_pro else "Locked (Requires Pro)",
-    }
-
     limits["claude"] = {
-        "title": "Claude / Anthropic Session Quotas & Capacity",
+        "title": "Claude / Anthropic Account Quotas",
         "accounts_count": len(claude_data),
         "accounts": claude_data,
-        "summary": claude_summary,
-        "data": {
-            "active_sessions": len(claude_data),
-            "rolling_window": "5-hour dynamic context window" if claude_data else "None",
-            "free_tier_status": f"Active ({len(claude_data)} stacked session{'s' if len(claude_data) > 1 else ''})" if claude_data else "No Session Connected",
-            "pro_tier_models": "Unlocked" if has_claude_pro else "Standard Tier",
-        },
     }
 
     # 5. Gemini limits info from SQLite DB & Native Engine
@@ -2264,50 +2281,32 @@ async def get_all_limits() -> Dict[str, Any]:
         raw_t = acc.get("token") or ident
         masked_id = f"Gemini ({raw_t[:10]}...{raw_t[-6:]})" if len(raw_t) > 20 else ident
         gemini_data.append({
-            "identifier": masked_id,
-            "tier": "Gemini Advanced (Google One)" if is_adv else "Web2API Authenticated",
-            "status": "Active" if acc.get("status") == "active" else "Disabled",
-            "context_window": "1,000,000 tokens",
-            "thinking_mode": "Flash 3.8 & Pro 3.1 Thinking (CoT)",
-            "multimodal": "Vision, Audio, Video & Docs",
-            "image_gen": "Imagen 3 (Nano Banana Ultra)",
-            "daily_quota": "Unlimited High-Speed",
-            "quota_type": "Persistent Session Vault",
+            "email": masked_id,
+            "type": "ADVANCED" if is_adv else "FREE",
+            "status": "Normal" if acc.get("status") == "active" else "Disabled",
+            "image_quota": 1000 if is_adv else 30,
+            "reason_remaining": "High Rate (100+/hr)" if is_adv else "Standard (60/hr)",
+            "deep_research": "20 / day" if is_adv else "0 / day",
+            "file_upload": "100 / prompt" if is_adv else "10 / prompt",
+            "restore_at": "Daily (Midnight PST)",
         })
 
-    # Always include the universal zero-config high-speed web engine
-    gemini_data.append({
-        "identifier": "Universal Web Engine (Direct Batchexecute)",
-        "tier": "Universal High-Speed (Web2API)",
-        "status": "Active",
-        "context_window": "1,000,000 tokens",
-        "thinking_mode": "Dynamic CoT (Flash 3.8 & 3.1 Pro)",
-        "multimodal": "Native Multimodal Ingestion",
-        "image_gen": "Imagen 3 (Catbox CDN Sync)",
-        "daily_quota": "Unlimited High-Speed Web",
-        "quota_type": "Zero-Config Guest Pool",
-    })
-
-    gemini_summary = {
-        "engine_architecture": "Universal Web2API Pool",
-        "max_context": "1,000,000 Tokens",
-        "thinking_budget": "Dynamic CoT (Pro & Flash)",
-        "image_gen": "Imagen 3 Ultra (Active)",
-        "daily_quota": "Unlimited High-Speed",
-    }
+    if not gemini_data:
+        gemini_data.append({
+            "email": "Gemini Web (Guest)",
+            "type": "FREE",
+            "status": "Normal",
+            "image_quota": 30,
+            "reason_remaining": "Standard (60/hr)",
+            "deep_research": "0 / day",
+            "file_upload": "10 / prompt",
+            "restore_at": "Daily (Midnight PST)",
+        })
 
     limits["gemini"] = {
-        "title": "Google Gemini Live Quotas & Multi-Modal Engines",
+        "title": "Google Gemini Account Quotas",
         "accounts_count": len(gemini_data),
         "accounts": gemini_data,
-        "summary": gemini_summary,
-        "data": {
-            "status": f"Active ({len(gemini_accounts)} stacked accounts + Web Pool)" if gemini_accounts else "Universal High-Speed Web Pool Active",
-            "accounts_connected": len(gemini_accounts),
-            "thinking_budget": "Dynamic Reasoning (Flash 3.8 & 3.1 Pro)",
-            "image_generation": "Nano Banana Models Active (Catbox.moe CDN)",
-            "daily_cap": "Unlimited High-Speed",
-        },
     }
 
     # 6. GLM limits info from SQLite DB & Native Engine
@@ -2321,51 +2320,36 @@ async def get_all_limits() -> Dict[str, Any]:
         raw_t = acc.get("token") or ident
         masked_id = f"GLM ({raw_t[:10]}...{raw_t[-6:]})" if len(raw_t) > 18 else ident
         glm_data.append({
-            "identifier": masked_id,
-            "tier": "Zhipu VIP Member" if is_vip else "Vault Refresh Token",
-            "status": "Active" if acc.get("status") == "active" else "Disabled",
-            "context_window": "128,000 tokens",
-            "reasoning": "GLM-Zero CoT (Stepwise Thinking)",
-            "web_search": "Live Web Search Grounding",
-            "concurrency": "50 Concurrent Streams",
-            "auto_heal": "Auto-Refreshes On Expiration",
-            "token_type": "Stacked Vault Credential",
+            "email": masked_id,
+            "type": "VIP" if is_vip else "FREE",
+            "status": "Normal" if acc.get("status") == "active" else "Disabled",
+            "image_quota": 100 if is_vip else 10,
+            "video_quota": "20 / day" if is_vip else "2 / day",
+            "reason_remaining": "Unlimited" if is_vip else "200 / day",
+            "deep_research": "Unlimited" if is_vip else "100 / day",
+            "file_upload": "50 docs / day" if is_vip else "5 docs / day",
+            "concurrency": "10 requests" if is_vip else "2 requests",
+            "restore_at": "Daily (Midnight CST)",
         })
 
-    # Always include the native self-healing guest pool
-    glm_data.append({
-        "identifier": "Auto-Rotating Guest Engine (chatglm.cn)",
-        "tier": "Self-Healing Guest Pool",
-        "status": "Active",
-        "context_window": "128,000 tokens",
-        "reasoning": "GLM-Zero & GLM-5.3 Unlocked",
-        "web_search": "Real-Time Web Search & Citations",
-        "concurrency": "50 Slots / Dynamic Device Token",
-        "auto_heal": "Auto-Heals 10061 Busy Locks",
-        "token_type": "Auto-Generated Device Pool",
-    })
-
-    total_glm_slots = 50 * max(1, len(glm_accounts)) + 50
-    glm_summary = {
-        "pool_status": f"{len(glm_accounts)} Stacked + Self-Healing Pool" if glm_accounts else "Self-Healing Auto-Guest Pool",
-        "concurrency_slots": f"{total_glm_slots} Concurrent Requests",
-        "max_context": "128,000 Tokens",
-        "reasoning_engine": "GLM-Zero CoT",
-        "web_grounding": "Real-Time Search Grounding",
-        "auto_healing": "Zero 10061 Lock (Auto-Healed)",
-    }
+    if not glm_data:
+        glm_data.append({
+            "email": "GLM Web (chatglm.cn)",
+            "type": "FREE",
+            "status": "Normal",
+            "image_quota": 10,
+            "video_quota": "2 / day",
+            "reason_remaining": "200 / day",
+            "deep_research": "100 / day",
+            "file_upload": "5 docs / day",
+            "concurrency": "2 requests",
+            "restore_at": "Daily (Midnight CST)",
+        })
 
     limits["glm"] = {
-        "title": "GLM / Zhipu AI Concurrency Pool & Live Quotas",
+        "title": "GLM / Zhipu AI Account Quotas",
         "accounts_count": len(glm_data),
         "accounts": glm_data,
-        "summary": glm_summary,
-        "data": {
-            "concurrency_slots": f"{total_glm_slots} Concurrent Requests",
-            "guest_mode": "Auto-Guest Token Rotation Enabled",
-            "refresh_frequency": "Dynamic on token expiration",
-            "stacked_tokens": len(glm_accounts),
-        },
     }
 
     return limits

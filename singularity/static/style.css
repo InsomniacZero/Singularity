@@ -653,7 +653,7 @@ button, a, select, input, textarea, [role="button"], .btn, .nav-item, .client-ch
   border-radius: var(--radius-lg);
   padding: 24px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
-  margin-bottom: 4px;
+  margin-bottom: 32px;
 }
 
 .limits-group-header {

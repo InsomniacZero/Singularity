@@ -50,6 +50,8 @@ except ImportError:
 # ==============================================================================
 
 class WorkerHTTPHandler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, format, *args):
         pass  # Completely quiet logging to keep main terminal clean
 
@@ -76,179 +78,207 @@ class WorkerHTTPHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "*")
 
     def do_OPTIONS(self):
-        self.send_response(204)
-        self.send_cors_headers()
-        self.end_headers()
+        try:
+            self.send_response(204)
+            self.send_cors_headers()
+            self.end_headers()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
 
     def do_GET(self):
-        path = self.path.split("?")[0]
-        pid = self.provider_id
-        meta = self.meta
-        port = self.port
+        try:
+            path = self.path.split("?")[0]
+            pid = self.provider_id
+            meta = self.meta
+            port = self.port
 
-        if path in ("/healthz", "/health"):
-            payload = json.dumps({
-                "status": "ok",
-                "provider": pid,
-                "name": meta["name"],
-                "port": port,
-                "timestamp": int(time.time()),
-            }).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_cors_headers()
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            if path in ("/healthz", "/health"):
+                payload = json.dumps({
+                    "status": "ok",
+                    "provider": pid,
+                    "name": meta["name"],
+                    "port": port,
+                    "timestamp": int(time.time()),
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(payload)
 
-        elif path in ("/v1/models", "/models"):
-            matching = [
-                {
-                    "id": m["id"],
-                    "object": "model",
-                    "created": int(time.time()),
-                    "owned_by": pid,
-                    "permission": [],
-                    "root": m["id"],
-                    "parent": None,
-                }
-                for m in MODELS_CATALOG
-                if m.get("provider") == pid
-            ]
-            if not matching:
-                matching = [{
-                    "id": f"{pid}-default",
-                    "object": "model",
-                    "created": int(time.time()),
-                    "owned_by": pid,
-                    "permission": [],
-                    "root": f"{pid}-default",
-                    "parent": None,
-                }]
-            payload = json.dumps({"object": "list", "data": matching}).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_cors_headers()
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            elif path in ("/v1/models", "/models"):
+                matching = [
+                    {
+                        "id": m["id"],
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": pid,
+                        "permission": [],
+                        "root": m["id"],
+                        "parent": None,
+                    }
+                    for m in MODELS_CATALOG
+                    if m.get("provider") == pid
+                ]
+                if not matching:
+                    matching = [{
+                        "id": f"{pid}-default",
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": pid,
+                        "permission": [],
+                        "root": f"{pid}-default",
+                        "parent": None,
+                    }]
+                payload = json.dumps({"object": "list", "data": matching}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(payload)
 
-        else:
-            payload = json.dumps({
-                "service": f"Singularity {meta['name']} Worker",
-                "status": "online",
-                "provider": pid,
-                "port": port,
-            }).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_cors_headers()
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            else:
+                payload = json.dumps({
+                    "service": f"Singularity {meta['name']} Worker",
+                    "status": "online",
+                    "provider": pid,
+                    "port": port,
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
 
     def do_POST(self):
-        path = self.path.split("?")[0]
-        pid = self.provider_id
-        port = self.port
-
-        content_length = int(self.headers.get("Content-Length", 0))
-        raw_body = self.rfile.read(content_length).decode("utf-8", errors="ignore") if content_length > 0 else "{}"
         try:
-            body = json.loads(raw_body)
-        except Exception:
-            body = {}
+            path = self.path.split("?")[0]
+            pid = self.provider_id
+            port = self.port
 
-        if path == "/v1/chat/completions":
-            model = body.get("model", f"{pid}-default")
-            messages = body.get("messages", [])
-            is_stream = body.get("stream", False)
-
-            if not messages:
-                prompt_input = body.get("prompt", "")
-                if prompt_input:
-                    messages = [{"role": "user", "content": prompt_input}]
-
-            accounts = []
+            content_length = int(self.headers.get("Content-Length", 0))
+            raw_body = self.rfile.read(content_length).decode("utf-8", errors="ignore") if content_length > 0 else "{}"
             try:
-                accounts = db.get_accounts(pid)
+                body = json.loads(raw_body)
             except Exception:
-                pass
+                body = {}
 
-            if is_stream:
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Cache-Control", "no-cache")
-                self.send_cors_headers()
-                self.end_headers()
+            if path == "/v1/chat/completions":
+                model = body.get("model", f"{pid}-default")
+                messages = body.get("messages", [])
+                is_stream = body.get("stream", False)
 
-                async def run_stream():
-                    async for chunk in engines.stream_chat(pid, model, messages, accounts=accounts, stream=True):
-                        line = f"data: {json.dumps(chunk)}\n\n"
-                        self.wfile.write(line.encode("utf-8"))
-                        self.wfile.flush()
-                    self.wfile.write(b"data: [DONE]\n\n")
-                    self.wfile.flush()
+                if not messages:
+                    prompt_input = body.get("prompt", "")
+                    if prompt_input:
+                        messages = [{"role": "user", "content": prompt_input}]
 
+                accounts = []
                 try:
-                    asyncio.run(run_stream())
-                except Exception as e:
-                    err_chunk = {
-                        "id": f"chatcmpl-err",
-                        "object": "chat.completion.chunk",
-                        "created": int(time.time()),
-                        "model": model,
-                        "choices": [{"index": 0, "delta": {"content": f"\n\n[Worker Stream Error: {str(e)}]"}, "finish_reason": "error"}],
-                    }
-                    self.wfile.write(f"data: {json.dumps(err_chunk)}\n\n".encode("utf-8"))
-                    self.wfile.write(b"data: [DONE]\n\n")
-                    self.wfile.flush()
-            else:
-                async def run_gen():
-                    return await engines.generate_chat(pid, model, messages, accounts=accounts)
+                    accounts = db.get_accounts(pid)
+                except Exception:
+                    pass
 
-                try:
-                    result = asyncio.run(run_gen())
-                    payload = json.dumps(result).encode("utf-8")
+                if is_stream:
                     self.send_response(200)
-                    self.send_header("Content-Type", "application/json")
+                    self.send_header("Content-Type", "text/event-stream")
+                    self.send_header("Cache-Control", "no-cache")
                     self.send_cors_headers()
-                    self.send_header("Content-Length", str(len(payload)))
                     self.end_headers()
-                    self.wfile.write(payload)
-                except Exception as e:
-                    err_payload = json.dumps({"error": str(e)}).encode("utf-8")
-                    self.send_response(500)
-                    self.send_header("Content-Type", "application/json")
-                    self.send_cors_headers()
-                    self.send_header("Content-Length", str(len(err_payload)))
-                    self.end_headers()
-                    self.wfile.write(err_payload)
 
-        elif path == "/v1/images/generations":
-            prompt = body.get("prompt", "Generated by Singularity")
-            payload = json.dumps({
-                "created": int(time.time()),
-                "data": [{
-                    "url": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1024&q=80",
-                    "revised_prompt": prompt,
-                }],
-            }).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_cors_headers()
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+                    async def run_stream():
+                        try:
+                            async for chunk in engines.stream_chat(pid, model, messages, accounts=accounts, stream=True):
+                                line = f"data: {json.dumps(chunk)}\n\n"
+                                try:
+                                    self.wfile.write(line.encode("utf-8"))
+                                    self.wfile.flush()
+                                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                                    break
+                            try:
+                                self.wfile.write(b"data: [DONE]\n\n")
+                                self.wfile.flush()
+                            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                                pass
+                        except Exception as inner_err:
+                            try:
+                                err_chunk = {
+                                    "id": f"chatcmpl-err",
+                                    "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": model,
+                                    "choices": [{"index": 0, "delta": {"content": f"\n\n[Worker Stream Error: {str(inner_err)}]"}, "finish_reason": "error"}],
+                                }
+                                self.wfile.write(f"data: {json.dumps(err_chunk)}\n\n".encode("utf-8"))
+                                self.wfile.write(b"data: [DONE]\n\n")
+                                self.wfile.flush()
+                            except Exception:
+                                pass
 
-        else:
-            self.send_response(404)
-            self.end_headers()
+                    try:
+                        asyncio.run(run_stream())
+                    except Exception:
+                        pass
+                else:
+                    async def run_gen():
+                        return await engines.generate_chat(pid, model, messages, accounts=accounts)
+
+                    try:
+                        result = asyncio.run(run_gen())
+                        payload = json.dumps(result).encode("utf-8")
+                        self.send_response(200)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_cors_headers()
+                        self.send_header("Content-Length", str(len(payload)))
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        self.wfile.write(payload)
+                    except Exception as e:
+                        err_payload = json.dumps({"error": str(e)}).encode("utf-8")
+                        self.send_response(500)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_cors_headers()
+                        self.send_header("Content-Length", str(len(err_payload)))
+                        self.send_header("Connection", "close")
+                        self.end_headers()
+                        self.wfile.write(err_payload)
+
+            elif path == "/v1/images/generations":
+                prompt = body.get("prompt", "Generated by Singularity")
+                payload = json.dumps({
+                    "created": int(time.time()),
+                    "data": [{
+                        "url": "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1024&q=80",
+                        "revised_prompt": prompt,
+                    }],
+                }).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(payload)
+
+            else:
+                self.send_response(404)
+                self.end_headers()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
 
 
 class ThreadedWorkerServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = 128
 
     def __init__(self, host: str, port: int, provider_id: str):
         self.host = host
@@ -256,45 +286,146 @@ class ThreadedWorkerServer(socketserver.ThreadingMixIn, http.server.HTTPServer):
         self.provider_id = provider_id
         super().__init__((host, port), WorkerHTTPHandler)
 
+    def handle_error(self, request, client_address):
+        # Gracefully suppress broken pipes and client resets
+        exctype, value, tb = sys.exc_info()
+        if exctype in (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError):
+            return
+        super().handle_error(request, client_address)
+
 
 # ==============================================================================
-# In-Process Thread Management (Runs All Workers inside Main Server Terminal)
+# In-Process Thread Management & Auto-Healing Watchdog
 # ==============================================================================
 
-_RUNNING_WORKERS: Dict[str, ThreadedWorkerServer] = {}
+# Structure: { provider_id: { "server": server, "thread": thread, "host": host, "port": port, "active": True } }
+_RUNNING_WORKERS: Dict[str, Dict[str, Any]] = {}
 _WORKER_LOCK = threading.Lock()
+_WATCHDOG_THREAD: Optional[threading.Thread] = None
+_WATCHDOG_ACTIVE = False
+
+
+def _server_worker_loop(server_info: Dict[str, Any]):
+    """Keep worker HTTP server running continuously with auto-restart on socket errors."""
+    server = server_info.get("server")
+    pid = server_info.get("provider_id", "worker")
+    port = server_info.get("port", 0)
+
+    while server_info.get("active", True):
+        try:
+            if server:
+                server.serve_forever(poll_interval=0.5)
+        except Exception:
+            if not server_info.get("active", True):
+                break
+            time.sleep(0.5)
+
+
+def _watchdog_loop():
+    """Background supervisor thread that ensures all active workers stay alive and heals any drops."""
+    global _WATCHDOG_ACTIVE
+    while _WATCHDOG_ACTIVE:
+        try:
+            time.sleep(5.0)
+            with _WORKER_LOCK:
+                for pid, info in list(_RUNNING_WORKERS.items()):
+                    if not info.get("active", False):
+                        continue
+                    thread = info.get("thread")
+                    port = info.get("port")
+                    host = info.get("host", "127.0.0.1")
+
+                    # Check if thread died or server is closed
+                    if thread is None or not thread.is_alive():
+                        try:
+                            old_srv = info.get("server")
+                            if old_srv:
+                                try:
+                                    old_srv.shutdown()
+                                    old_srv.server_close()
+                                except Exception:
+                                    pass
+                            new_server = ThreadedWorkerServer(host, port, pid)
+                            info["server"] = new_server
+                            new_thread = threading.Thread(
+                                target=_server_worker_loop,
+                                args=(info,),
+                                daemon=True,
+                                name=f"Worker-{pid}-{port}",
+                            )
+                            info["thread"] = new_thread
+                            new_thread.start()
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+
+def ensure_supervisor_running():
+    """Start the background self-healing watchdog thread if not already running."""
+    global _WATCHDOG_THREAD, _WATCHDOG_ACTIVE
+    with _WORKER_LOCK:
+        if not _WATCHDOG_ACTIVE or _WATCHDOG_THREAD is None or not _WATCHDOG_THREAD.is_alive():
+            _WATCHDOG_ACTIVE = True
+            _WATCHDOG_THREAD = threading.Thread(
+                target=_watchdog_loop,
+                daemon=True,
+                name="Singularity-Worker-Watchdog",
+            )
+            _WATCHDOG_THREAD.start()
 
 
 def start_worker_in_thread(provider_id: str, host: str = "127.0.0.1", port: Optional[int] = None) -> Dict[str, Any]:
     """
-    Start a provider worker inside a background daemon thread.
-    This guarantees ZERO external terminal windows open on Windows or any OS.
-    Everything runs unified within the single main Singularity gateway terminal.
+    Start a provider worker inside a background daemon thread with supervisor monitoring.
+    Guarantees ZERO external terminal windows open on Windows or any OS.
+    Automatically monitored and auto-healed by the supervisor watchdog.
     """
+    ensure_supervisor_running()
     with _WORKER_LOCK:
         if port is None:
             port = PROVIDERS_CONFIG.get(provider_id, {}).get("port", 8000)
 
-        # Check if already running in-process
-        if provider_id in _RUNNING_WORKERS:
+        # Check if actively running in-process
+        existing = _RUNNING_WORKERS.get(provider_id)
+        if existing and existing.get("active") and existing.get("thread") and existing["thread"].is_alive():
             return {
                 "status": "ok",
                 "message": f"{provider_id.upper()} daemon already running (in-process backend)",
                 "pid": os.getpid(),
                 "in_process": True,
             }
+        elif existing:
+            # Thread died or inactive; cleanly close old socket
+            try:
+                old_srv = existing.get("server")
+                if old_srv:
+                    old_srv.shutdown()
+                    old_srv.server_close()
+            except Exception:
+                pass
+            _RUNNING_WORKERS.pop(provider_id, None)
 
         try:
             server = ThreadedWorkerServer(host, port, provider_id)
+            info = {
+                "server": server,
+                "provider_id": provider_id,
+                "host": host,
+                "port": port,
+                "active": True,
+            }
             thread = threading.Thread(
-                target=server.serve_forever,
+                target=_server_worker_loop,
+                args=(info,),
                 daemon=True,
                 name=f"Worker-{provider_id}-{port}",
             )
+            info["thread"] = thread
             thread.start()
-            _RUNNING_WORKERS[provider_id] = server
+            _RUNNING_WORKERS[provider_id] = info
 
-            # Save gateway PID
+            # Save gateway PID for status checks
             try:
                 db.init_db()
                 db.set_setting(f"provider_{provider_id}_pid", str(os.getpid()))
@@ -315,13 +446,16 @@ def start_worker_in_thread(provider_id: str, host: str = "127.0.0.1", port: Opti
 def stop_worker_in_thread(provider_id: str) -> bool:
     """Stop an in-process worker thread and release the port."""
     with _WORKER_LOCK:
-        server = _RUNNING_WORKERS.pop(provider_id, None)
-        if server:
-            try:
-                server.shutdown()
-                server.server_close()
-            except Exception:
-                pass
+        info = _RUNNING_WORKERS.pop(provider_id, None)
+        if info:
+            info["active"] = False
+            server = info.get("server")
+            if server:
+                try:
+                    server.shutdown()
+                    server.server_close()
+                except Exception:
+                    pass
             return True
         return False
 
@@ -329,13 +463,17 @@ def stop_worker_in_thread(provider_id: str) -> bool:
 def is_worker_in_thread(provider_id: str) -> bool:
     """Check if worker is actively running in-process."""
     with _WORKER_LOCK:
-        return provider_id in _RUNNING_WORKERS
+        info = _RUNNING_WORKERS.get(provider_id)
+        return bool(info and info.get("active") and info.get("thread") and info["thread"].is_alive())
 
 
 def get_running_thread_workers() -> List[str]:
     """List of provider IDs running in-process."""
     with _WORKER_LOCK:
-        return list(_RUNNING_WORKERS.keys())
+        return [
+            pid for pid, info in _RUNNING_WORKERS.items()
+            if info.get("active") and info.get("thread") and info["thread"].is_alive()
+        ]
 
 
 # ==============================================================================

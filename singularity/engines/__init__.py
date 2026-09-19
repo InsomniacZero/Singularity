@@ -16,7 +16,8 @@ from .kimi import stream_kimi_chat
 from .gemini import stream_gemini_chat
 from .grok import stream_grok_chat
 from .glm import stream_glm_chat
-
+from .chatgpt import stream_chatgpt_chat
+from .claude import stream_claude_chat
 
 
 async def stream_chat(
@@ -33,7 +34,19 @@ async def stream_chat(
     """
     pid = provider_id.lower().strip()
 
-    # 1. Kimi / Moonshot AI
+    # 1. ChatGPT / OpenAI
+    if pid in ("chatgpt", "openai"):
+        async for chunk in stream_chatgpt_chat(model, messages, accounts=accounts, stream=stream, **kwargs):
+            yield chunk
+        return
+
+    # 2. Claude / Anthropic
+    if pid in ("claude", "anthropic"):
+        async for chunk in stream_claude_chat(model, messages, accounts=accounts, stream=stream, **kwargs):
+            yield chunk
+        return
+
+    # 3. Kimi / Moonshot AI
     if pid in ("kimi", "moonshot"):
         token = ""
         if accounts:
