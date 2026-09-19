@@ -480,6 +480,60 @@ function renderLimits() {
     `;
   }).join('');
 
+  // Claude Accounts & Quotas
+  const claudeSummary = claude.summary || {};
+  const claudeAccounts = claude.accounts || [];
+  const claudeRows = claudeAccounts.map(acc => {
+    return `
+      <tr>
+        <td style="font-weight: 600; font-family: var(--font-mono);">${escapeHtml(acc.identifier || 'Claude Session')}</td>
+        <td><span class="brand-badge">${escapeHtml(acc.plan || 'PRO')}</span></td>
+        <td><strong>${escapeHtml(acc.rolling_window || '45 msgs / 5 hrs')}</strong></td>
+        <td>${escapeHtml(acc.context_window || '200,000 tokens')}</td>
+        <td>${escapeHtml(acc.thinking_budget || '64K CoT')}</td>
+        <td><span class="lock-badge ${acc.opus_access && acc.opus_access.includes('Unlocked') ? 'unlocked' : 'locked'}">${escapeHtml(acc.opus_access || 'Locked')}</span></td>
+        <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">${escapeHtml(acc.reset_cycle || '5-Hour Rolling')}</td>
+        <td><span class="lock-badge ${acc.status === 'Active' ? 'unlocked' : 'locked'}">${escapeHtml(acc.status || 'Active')}</span></td>
+      </tr>
+    `;
+  }).join('');
+
+  // Gemini Engines & Quotas
+  const geminiSummary = gemini.summary || {};
+  const geminiAccounts = gemini.accounts || [];
+  const geminiRows = geminiAccounts.map(acc => {
+    return `
+      <tr>
+        <td style="font-weight: 600; font-family: var(--font-mono);">${escapeHtml(acc.identifier || 'Gemini Engine')}</td>
+        <td><span class="brand-badge" style="background: rgba(66, 133, 244, 0.15); color: #4285F4; border: 1px solid rgba(66, 133, 244, 0.3);">${escapeHtml(acc.tier || 'Universal High-Speed')}</span></td>
+        <td><strong>${escapeHtml(acc.context_window || '1,000,000 tokens')}</strong></td>
+        <td>${escapeHtml(acc.thinking_mode || 'Dynamic CoT')}</td>
+        <td>${escapeHtml(acc.multimodal || 'Vision, Audio & Docs')}</td>
+        <td>${escapeHtml(acc.image_gen || 'Imagen 3')}</td>
+        <td><span style="font-weight: 600; color: var(--color-success);">${escapeHtml(acc.daily_quota || 'Unlimited')}</span></td>
+        <td><span class="lock-badge ${acc.status === 'Active' ? 'unlocked' : 'locked'}">${escapeHtml(acc.status || 'Active')}</span></td>
+      </tr>
+    `;
+  }).join('');
+
+  // GLM Engines & Concurrency Pool
+  const glmSummary = glm.summary || {};
+  const glmAccounts = glm.accounts || [];
+  const glmRows = glmAccounts.map(acc => {
+    return `
+      <tr>
+        <td style="font-weight: 600; font-family: var(--font-mono);">${escapeHtml(acc.identifier || 'GLM Engine')}</td>
+        <td><span class="brand-badge" style="background: rgba(74, 114, 255, 0.15); color: #4A72FF; border: 1px solid rgba(74, 114, 255, 0.3);">${escapeHtml(acc.tier || 'Self-Healing Guest Pool')}</span></td>
+        <td><strong>${escapeHtml(acc.context_window || '128,000 tokens')}</strong></td>
+        <td>${escapeHtml(acc.reasoning || 'GLM-Zero CoT')}</td>
+        <td>${escapeHtml(acc.web_search || 'Live Web Grounding')}</td>
+        <td><strong>${escapeHtml(acc.concurrency || '50 Slots')}</strong></td>
+        <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">${escapeHtml(acc.auto_heal || 'Auto-Healed')}</td>
+        <td><span class="lock-badge ${acc.status === 'Active' ? 'unlocked' : 'locked'}">${escapeHtml(acc.status || 'Active')}</span></td>
+      </tr>
+    `;
+  }).join('');
+
   container.innerHTML = `
     <!-- ChatGPT Section -->
     <div class="limits-group">
@@ -609,67 +663,180 @@ function renderLimits() {
       </div>
     </div>
 
-    <!-- Claude, Gemini & GLM Grid -->
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
-      <!-- Claude -->
-      <div class="limits-group">
-        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Claude / Anthropic Limits</h3>
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-            <span style="color: var(--text-secondary);">Active Sessions</span>
-            <span style="font-weight: 600; color: ${(claude.data?.active_sessions || 0) > 0 ? 'var(--brand-primary)' : 'var(--text-muted)'};">${claude.data?.active_sessions ?? 0} Connected</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-            <span style="color: var(--text-secondary);">Message Context Limit</span>
-            <span style="font-weight: 600;">${(claude.data?.active_sessions || 0) > 0 ? (claude.data?.rolling_window || '5-hour window') : 'No session'}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-            <span style="color: var(--text-secondary);">Standard Models</span>
-            <span class="lock-badge ${(claude.data?.active_sessions || 0) > 0 ? 'unlocked' : 'locked'}">${(claude.data?.active_sessions || 0) > 0 ? 'Sonnet 5 & 4.6 Unlocked' : 'No Session Stacked'}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; padding-top: 2px;">
-            <span style="color: var(--text-secondary);">Opus 5 Status</span>
-            <span class="lock-badge locked">Locked (Requires Pro)</span>
-          </div>
+    <!-- Claude Section -->
+    <div class="limits-group">
+      <div class="limits-group-header">
+        <div>
+          <h3 style="font-size: 16px; font-weight: 700;">Claude / Anthropic Session Quotas & Capacity</h3>
+          <p style="font-size: 12px; color: var(--text-muted);">Dynamic 5-hour rolling context pool (${claude.accounts_count || claudeAccounts.length} active session${(claude.accounts_count || claudeAccounts.length) === 1 ? '' : 's'})</p>
         </div>
       </div>
-
-      <!-- Gemini -->
-      <div class="limits-group">
-        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Gemini Limits</h3>
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-            <span style="color: var(--text-secondary);">RPM Free Tier</span>
-            <span style="font-weight: 600;">${gemini.data?.rpm_limit || '15 RPM'}</span>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px;">
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">ACTIVE SESSIONS</div>
+          <div style="font-size: 20px; font-weight: 700; color: var(--brand-primary); margin-top: 4px;">
+            ${claudeSummary.active_sessions || (claudeAccounts.length ? claudeAccounts.length + ' Connected' : '0 Connected')}
           </div>
-          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-            <span style="color: var(--text-secondary);">Daily Limit (RPD)</span>
-            <span style="font-weight: 600;">${gemini.data?.rpd_limit || '1,500 RPD'}</span>
+          <div style="font-size: 11px; color: var(--text-muted);">Vault Session Pool</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">5-HR ROLLING CAPACITY</div>
+          <div style="font-size: 20px; font-weight: 700; color: var(--color-success); margin-top: 4px;">
+            ${claudeSummary.rolling_capacity || '—'}
           </div>
-          <div style="display: flex; justify-content: space-between; padding-top: 2px;">
-            <span style="color: var(--text-secondary);">Portrait Pipeline</span>
-            <span class="lock-badge unlocked">Auto-Crop Active</span>
+          <div style="font-size: 11px; color: var(--text-muted);">Sliding Context Window</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">MAX CONTEXT DEPTH</div>
+          <div style="font-size: 20px; font-weight: 700; color: #38bdf8; margin-top: 4px;">
+            ${claudeSummary.context_depth || '200,000 Tokens'}
           </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Sonnet 5 & Opus 5</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">EXTENDED THINKING</div>
+          <div style="font-size: 20px; font-weight: 700; color: #a78bfa; margin-top: 4px;">
+            ${claudeSummary.thinking_budget || '64K Tokens CoT'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Opus: ${claudeSummary.opus_tier || 'Pro Pool'}</div>
         </div>
       </div>
+      <div class="table-wrapper">
+        <table class="editorial-table">
+          <thead>
+            <tr>
+              <th>Session / Name</th>
+              <th>Plan</th>
+              <th>Rolling Window</th>
+              <th>Context Depth</th>
+              <th>Reasoning / CoT</th>
+              <th>Opus Access</th>
+              <th>Reset Cycle</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${claudeRows || '<tr><td colspan="8">No Claude session keys configured in vault. Stack a sessionKey in the Control Center.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
 
-      <!-- GLM -->
-      <div class="limits-group">
-        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">GLM Zhipu AI Limits</h3>
-        <div style="display: flex; flex-direction: column; gap: 10px;">
-          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-            <span style="color: var(--text-secondary);">Concurrency Slots</span>
-            <span style="font-weight: 600;">${glm.data?.concurrency_slots || '50 Slots'}</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 8px;">
-            <span style="color: var(--text-secondary);">Guest Mode</span>
-            <span class="lock-badge unlocked">Auto-Rotating</span>
-          </div>
-          <div style="display: flex; justify-content: space-between; padding-top: 2px;">
-            <span style="color: var(--text-secondary);">Image Gen (CogView-4)</span>
-            <span class="lock-badge unlocked">Available</span>
-          </div>
+    <!-- Gemini Section -->
+    <div class="limits-group">
+      <div class="limits-group-header">
+        <div>
+          <h3 style="font-size: 16px; font-weight: 700;">Google Gemini Live Quotas & Multi-Modal Engines</h3>
+          <p style="font-size: 12px; color: var(--text-muted);">Universal Web2API reverse-proxy engine (${gemini.accounts_count || geminiAccounts.length} active engines loaded)</p>
         </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px;">
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">ENGINE ARCHITECTURE</div>
+          <div style="font-size: 20px; font-weight: 700; color: #4285F4; margin-top: 4px;">
+            ${geminiSummary.engine_architecture || 'Universal Web2API'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Direct Batchexecute</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">MAX CONTEXT DEPTH</div>
+          <div style="font-size: 20px; font-weight: 700; color: var(--color-success); margin-top: 4px;">
+            ${geminiSummary.max_context || '1,000,000 Tokens'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">1M Massive Window</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">THINKING BUDGET</div>
+          <div style="font-size: 20px; font-weight: 700; color: #a78bfa; margin-top: 4px;">
+            ${geminiSummary.thinking_budget || 'Dynamic CoT'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Flash 3.8 & 3.1 Pro</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">IMAGE GENERATION</div>
+          <div style="font-size: 20px; font-weight: 700; color: var(--brand-primary); margin-top: 4px;">
+            ${geminiSummary.image_gen || 'Imagen 3 Ultra'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Nano Banana Pipeline</div>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table class="editorial-table">
+          <thead>
+            <tr>
+              <th>Engine / Session</th>
+              <th>Tier / Mode</th>
+              <th>Context Window</th>
+              <th>Thinking / CoT</th>
+              <th>Multimodal Ingestion</th>
+              <th>Image Gen (Imagen)</th>
+              <th>Daily Quota</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${geminiRows || '<tr><td colspan="8">No Gemini engines active</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- GLM Section -->
+    <div class="limits-group">
+      <div class="limits-group-header">
+        <div>
+          <h3 style="font-size: 16px; font-weight: 700;">GLM / Zhipu AI Concurrency Pool & Live Quotas</h3>
+          <p style="font-size: 12px; color: var(--text-muted);">Self-healing auto-rotating guest pool & stacked member tokens (${glm.accounts_count || glmAccounts.length} active engines)</p>
+        </div>
+      </div>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 16px;">
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">POOL ARCHITECTURE</div>
+          <div style="font-size: 20px; font-weight: 700; color: #4A72FF; margin-top: 4px;">
+            ${glmSummary.pool_status || 'Self-Healing Pool'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">${glmSummary.auto_healing || 'Zero 10061 Busy Locks'}</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">MAX CONTEXT DEPTH</div>
+          <div style="font-size: 20px; font-weight: 700; color: var(--brand-primary); margin-top: 4px;">
+            ${glmSummary.max_context || '128,000 Tokens'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">GLM-5.3 & GLM-4-Plus</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">REASONING ENGINE</div>
+          <div style="font-size: 20px; font-weight: 700; color: #38bdf8; margin-top: 4px;">
+            ${glmSummary.reasoning_engine || 'GLM-Zero CoT'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Stepwise Deduction</div>
+        </div>
+        <div class="card" style="padding: 14px;">
+          <div style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">CONCURRENCY SLOTS</div>
+          <div style="font-size: 20px; font-weight: 700; color: var(--color-success); margin-top: 4px;">
+            ${glmSummary.concurrency_slots || '50 Slots'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">${glmSummary.web_grounding || 'Real-Time Search'}</div>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table class="editorial-table">
+          <thead>
+            <tr>
+              <th>Account / Engine UID</th>
+              <th>Mode / Tier</th>
+              <th>Context Window</th>
+              <th>Reasoning Engine</th>
+              <th>Web Search Grounding</th>
+              <th>Concurrency Capacity</th>
+              <th>Token Lifecycle & Health</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${glmRows || '<tr><td colspan="8">No GLM engines active</td></tr>'}
+          </tbody>
+        </table>
       </div>
     </div>
   `;

@@ -183,87 +183,74 @@ def cmd_limits(args):
     else:
         print("    No Kimi accounts configured in vault.")
 
-    # 4. Claude
-    claude_block = data.get("claude", {})
-    claude_accounts_disp = claude_block.get("accounts", [])
-    claude_summary = claude_block.get("summary", {})
-    print(f"\n[4] {claude_block.get('title', 'Claude / Anthropic Account Pool')} ({claude_block.get('accounts_count', 0)} sessions)")
-    if claude_accounts_disp:
-        headers = ["Account / Org", "Plan", "Status", "Models Unlocked", "Tokens Used", "Token Limit", "Reset"]
+    # 4. Claude / Anthropic
+    cl = data.get("claude", {})
+    cl_accounts = cl.get("accounts", [])
+    cl_summary = cl.get("summary", {})
+    print(f"\n[4] {cl.get('title', 'Claude / Anthropic Pool')} ({len(cl_accounts)} sessions)")
+    if cl_accounts:
+        headers = ["Session / Name", "Plan", "Rolling Window", "Context Window", "Reasoning / CoT", "Opus Access", "Status"]
         rows = []
-        for a in claude_accounts_disp:
-            models = a.get("models_unlocked", [])
-            model_str = models[0] if len(models) == 1 else (f"{models[0]}+{len(models)-1}" if models else "—")
+        for a in cl_accounts:
             rows.append([
-                (a.get("org_name") or a.get("name") or "—")[:28],
-                a.get("plan", "Free"),
+                a.get("identifier", "—"),
+                a.get("plan", "PRO"),
+                str(a.get("rolling_window", "45 msgs / 5 hrs")),
+                str(a.get("context_window", "200,000 tokens")),
+                str(a.get("thinking_budget", "64K CoT")),
+                str(a.get("opus_access", "Unlocked")),
                 a.get("status", "Active"),
-                model_str,
-                a.get("usage_tokens", "—"),
-                a.get("limit_tokens", "—"),
-                a.get("reset_date", "Rolling 5h"),
             ])
         print_table(headers, rows)
-        print(f"    Context Window: {claude_summary.get('context_window', '200K tokens')} | "
-              f"Extended Thinking: {'Yes' if claude_summary.get('has_extended_thinking') else 'No'} | "
-              f"Pro Sessions: {claude_summary.get('pro_sessions', 0)}")
+        print(f"    Pool Capacity: {cl_summary.get('rolling_capacity', '—')} | Max Depth: {cl_summary.get('context_depth', '200K')} | Reasoning: {cl_summary.get('thinking_budget', '64K')} | Opus Tier: {cl_summary.get('opus_tier', '—')}")
     else:
-        print("    No Claude sessions in vault. Use './singular import' or Cookie Stacker.")
+        print("    No Claude session keys configured in vault. Use Cookie Stacker to add sessionKey.")
 
-    # 5. Gemini
-    gemini_block = data.get("gemini", {})
-    gemini_accounts_disp = gemini_block.get("accounts", [])
-    gemini_summary = gemini_block.get("summary", {})
-    guest_label = " [GUEST MODE]" if gemini_summary.get("guest_mode") else ""
-    print(f"\n[5] {gemini_block.get('title', 'Gemini / Google Account Pool')} ({gemini_block.get('accounts_count', 0)} accounts){guest_label}")
-    if gemini_accounts_disp:
-        headers = ["Account", "Plan", "Status", "Context", "Daily Messages", "Image Gen"]
+    # 5. Gemini / Google DeepMind
+    gm = data.get("gemini", {})
+    gm_accounts = gm.get("accounts", [])
+    gm_summary = gm.get("summary", {})
+    print(f"\n[5] {gm.get('title', 'Google Gemini Engine Pool')} ({len(gm_accounts)} active engines)")
+    if gm_accounts:
+        headers = ["Engine / Session", "Tier / Mode", "Context Window", "Thinking / CoT", "Multimodal Ingestion", "Daily Quota", "Status"]
         rows = []
-        for a in gemini_accounts_disp:
-            models_list = a.get("models_available", [])
+        for a in gm_accounts:
             rows.append([
-                a.get("name", "—")[:24],
-                a.get("plan", "Free")[:26],
+                a.get("identifier", "—"),
+                a.get("tier", "Universal High-Speed"),
+                str(a.get("context_window", "1,000,000 tokens")),
+                str(a.get("thinking_mode", "Dynamic CoT")),
+                str(a.get("multimodal", "Vision + Docs")),
+                str(a.get("daily_quota", "Unlimited")),
                 a.get("status", "Active"),
-                a.get("context_window", "1M tokens"),
-                a.get("daily_messages", "—"),
-                "Imagen 3" if a.get("image_generation") else "—",
             ])
         print_table(headers, rows)
-        # Models line
-        all_models = set()
-        for a in gemini_accounts_disp:
-            all_models.update(a.get("models_available", []))
-        if all_models:
-            print(f"    Models: {' | '.join(sorted(all_models))}")
-        print(f"    Image CDN: {gemini_summary.get('image_generation', 'Imagen 3 (Catbox CDN)')}")
+        print(f"    Engine Architecture: {gm_summary.get('engine_architecture', 'Universal Web2API')} | Context Depth: {gm_summary.get('max_context', '1M')} | Thinking: {gm_summary.get('thinking_budget', 'Dynamic CoT')} | Image Gen: {gm_summary.get('image_gen', 'Imagen 3')}")
+    else:
+        print("    No Gemini engines loaded.")
 
-    # 6. GLM
-    glm_block = data.get("glm", {})
-    glm_accounts_disp = glm_block.get("accounts", [])
-    glm_summary = glm_block.get("summary", {})
-    guest_label_glm = " [GUEST AUTO-TOKEN]" if glm_summary.get("guest_mode") else ""
-    print(f"\n[6] {glm_block.get('title', 'GLM / Zhipu AI Account Pool')} ({glm_block.get('accounts_count', 0)} accounts){guest_label_glm}")
-    if glm_accounts_disp:
-        headers = ["Account", "Plan", "Token Status", "Concurrency", "Context"]
+    # 6. GLM / Zhipu AI
+    glm_obj = data.get("glm", {})
+    glm_accounts = glm_obj.get("accounts", [])
+    glm_summary = glm_obj.get("summary", {})
+    print(f"\n[6] {glm_obj.get('title', 'GLM / Zhipu AI Pool')} ({len(glm_accounts)} active engines)")
+    if glm_accounts:
+        headers = ["Account / Engine UID", "Mode / Tier", "Context Window", "Reasoning / CoT", "Web Grounding", "Concurrency", "Status"]
         rows = []
-        for a in glm_accounts_disp:
+        for a in glm_accounts:
             rows.append([
-                a.get("name", "—")[:22],
-                a.get("plan", "—"),
-                a.get("token_status", "—"),
-                str(a.get("concurrency", 10)),
-                a.get("context_window", "128K tokens"),
+                a.get("identifier", "—"),
+                a.get("tier", "Self-Healing Guest Pool"),
+                str(a.get("context_window", "128,000 tokens")),
+                str(a.get("reasoning", "GLM-Zero CoT")),
+                str(a.get("web_search", "Real-Time Search")),
+                str(a.get("concurrency", "50 Slots")),
+                a.get("status", "Active"),
             ])
         print_table(headers, rows)
-        # Models line
-        all_glm_models = set()
-        for a in glm_accounts_disp:
-            all_glm_models.update(a.get("models_available", []))
-        if all_glm_models:
-            print(f"    Models: {' | '.join(sorted(all_glm_models))}")
-        print(f"    Total Concurrency: {glm_summary.get('total_concurrency', '—')} slots | "
-              f"Auto-Token Rotation: {'On' if glm_summary.get('auto_token_rotation') else 'Off'}")
+        print(f"    Fleet Status: {glm_summary.get('pool_status', '—')} | Concurrency: {glm_summary.get('concurrency_slots', '50 Slots')} | Web Grounding: {glm_summary.get('web_grounding', 'Active')} | Auto-Heal: {glm_summary.get('auto_healing', 'Active')}")
+    else:
+        print("    No GLM engines configured.")
     print()
 
 
