@@ -14,6 +14,8 @@ const state = {
   selectedModel: 'gpt-5-6-mini',
   chatMessages: [],
   isStreaming: false,
+  playgroundModality: 'all',
+  selectedAspectRatio: '1:1',
   tunnel: { status: 'offline', public_url: null, has_authtoken: false },
 };
 
@@ -252,7 +254,8 @@ function renderServices() {
   if (!container) return;
 
   const onlineCount = state.services.filter(s => s.running).length;
-  document.getElementById('nav-active-count').textContent = `${onlineCount}/6 Active`;
+  const totalCount = state.services.length || 8;
+  document.getElementById('nav-active-count').textContent = `${onlineCount}/${totalCount} Active`;
 
   container.innerHTML = state.services.map(srv => {
     const isOnline = srv.running;
@@ -266,6 +269,8 @@ function renderServices() {
       kimi: '/static/icons/kimi.svg',
       glm: '/static/icons/glm.svg',
       grok: '/static/icons/grok.svg',
+      deepseek: '/static/icons/deepseek.svg',
+      qwen: '/static/icons/qwen.svg',
     };
     const iconUrl = providerIcons[srv.id] || '/logo.svg';
 
@@ -381,10 +386,10 @@ async function restartService(id) {
 
 async function startAllServices() {
   try {
-    showToast('Starting all 6 providers...', 'info');
+    showToast('Starting all 7 providers...', 'info');
     const res = await fetch('/api/services/start_all', { method: 'POST' });
     const data = await res.json();
-    showToast('All 6 providers started successfully.', 'success');
+    showToast('All 7 providers started successfully.', 'success');
     await fetchServices();
     setTimeout(fetchServices, 1000);
     setTimeout(fetchServices, 2500);
@@ -395,7 +400,7 @@ async function startAllServices() {
 
 async function stopAllServices() {
   try {
-    showToast('Stopping all 6 providers...', 'info');
+    showToast('Stopping all 7 providers...', 'info');
     const res = await fetch('/api/services/stop_all', { method: 'POST' });
     const data = await res.json();
     showToast('All providers stopped.', 'success');
@@ -432,6 +437,8 @@ function renderLimits() {
   const claude = state.limits.claude || {};
   const gemini = state.limits.gemini || {};
   const glm = state.limits.glm || {};
+  const deepseek = state.limits.deepseek || {};
+  const qwen = state.limits.qwen || {};
 
   // ChatGPT Accounts Table
   const chatgptRows = (chatgpt.accounts || []).map(acc => {
@@ -525,6 +532,46 @@ function renderLimits() {
         <td>${escapeHtml(acc.deep_research || '100 / day')}</td>
         <td>${escapeHtml(acc.file_upload || '5 docs / day')}</td>
         <td>${escapeHtml(acc.concurrency || '2 requests')}</td>
+        <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">${escapeHtml(acc.restore_at || 'Daily (Midnight CST)')}</td>
+      </tr>
+    `;
+  }).join('');
+
+  // DeepSeek Accounts & Quotas
+  const deepseekAccounts = deepseek.accounts || [];
+  const deepseekRows = deepseekAccounts.map(acc => {
+    return `
+      <tr>
+        <td style="font-weight: 600; font-family: var(--font-mono);">${escapeHtml(acc.email || acc.identifier || 'DeepSeek Account')}</td>
+        <td><span class="brand-badge">${escapeHtml(acc.type || acc.plan || 'FREE')}</span></td>
+        <td><strong>${escapeHtml(acc.image_quota !== undefined ? String(acc.image_quota) : '—')}</strong></td>
+        <td>${escapeHtml(acc.reason_remaining || '50 / day')}</td>
+        <td>${escapeHtml(acc.deep_research || '50 / day')}</td>
+        <td>${escapeHtml(acc.web_search || '200 / day')}</td>
+        <td>${escapeHtml(acc.file_upload || '5 files (100MB)')}</td>
+        <td>${escapeHtml(acc.concurrency || '1 request (5/min)')}</td>
+        <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">${escapeHtml(acc.restore_at || 'Daily (Midnight CST)')}</td>
+      </tr>
+    `;
+  }).join('');
+
+  // Qwen Accounts & Quotas
+  const qwenAccounts = qwen.accounts || [];
+  const qwenRows = qwenAccounts.map(acc => {
+    let accountName = acc.email || acc.identifier || 'user_766931c8';
+    if (accountName.startsWith('qwen_ey')) {
+      accountName = 'user_766931c8';
+    }
+    return `
+      <tr>
+        <td style="font-weight: 600; font-family: var(--font-mono);">${escapeHtml(accountName)}</td>
+        <td><span class="brand-badge">${escapeHtml(acc.type || acc.plan || 'FREE')}</span></td>
+        <td><strong>${escapeHtml(acc.image_quota !== undefined ? String(acc.image_quota) : '30 / day')}</strong></td>
+        <td>${escapeHtml(acc.reason_remaining || '100 / day')}</td>
+        <td>${escapeHtml(acc.deep_research || '10 / day')}</td>
+        <td>${escapeHtml(acc.web_search || '500 / day')}</td>
+        <td>${escapeHtml(acc.file_upload || '50 files (100MB)')}</td>
+        <td>${escapeHtml(acc.concurrency || '2 requests (10/min)')}</td>
         <td style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">${escapeHtml(acc.restore_at || 'Daily (Midnight CST)')}</td>
       </tr>
     `;
@@ -738,6 +785,64 @@ function renderLimits() {
         </table>
       </div>
     </div>
+
+    <!-- DeepSeek Section -->
+    <div class="limits-group">
+      <div class="limits-group-header">
+        <div>
+          <h3 style="font-size: 16px; font-weight: 700;">DeepSeek AI Account Quotas</h3>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table class="editorial-table">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Plan</th>
+              <th>Image Quota</th>
+              <th>Reasoning / CoT</th>
+              <th>Deep Research</th>
+              <th>Web Search</th>
+              <th>Uploads</th>
+              <th>Concurrency</th>
+              <th>Quota Reset</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${deepseekRows || '<tr><td colspan="9">No DeepSeek accounts active in vault</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Qwen Section -->
+    <div class="limits-group">
+      <div class="limits-group-header">
+        <div>
+          <h3 style="font-size: 16px; font-weight: 700;">Qwen / Alibaba Cloud Account Quotas</h3>
+        </div>
+      </div>
+      <div class="table-wrapper">
+        <table class="editorial-table">
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Plan</th>
+              <th>Image Quota</th>
+              <th>Reasoning / CoT</th>
+              <th>Deep Research</th>
+              <th>Web Search</th>
+              <th>Uploads</th>
+              <th>Concurrency</th>
+              <th>Quota Reset</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${qwenRows || '<tr><td colspan="9">No Qwen accounts active in vault</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </div>
   `;
 }
 
@@ -765,6 +870,8 @@ const PROVIDER_METAS = {
   kimi: { name: 'Kimi', icon: '/static/icons/kimi.svg' },
   glm: { name: 'GLM', icon: '/static/icons/glm.svg' },
   grok: { name: 'Grok', icon: '/static/icons/grok.svg' },
+  deepseek: { name: 'DeepSeek', icon: '/static/icons/deepseek.svg' },
+  qwen: { name: 'Qwen', icon: '/static/icons/qwen.svg' },
 };
 
 let isScrollSpyLocked = false;
@@ -779,7 +886,7 @@ function initModelFilters() {
       pills.forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
-      if (['chatgpt', 'claude', 'gemini', 'kimi', 'glm', 'grok'].includes(filter)) {
+      if (['chatgpt', 'claude', 'gemini', 'kimi', 'glm', 'grok', 'deepseek', 'qwen'].includes(filter)) {
         const sec = document.getElementById(`models-section-${filter}`);
         const viewport = document.querySelector('.panel-viewport');
         if (sec && viewport) {
@@ -935,7 +1042,7 @@ function renderModels() {
     return true;
   });
 
-  const providerOrder = ['chatgpt', 'claude', 'gemini', 'kimi', 'glm', 'grok'];
+  const providerOrder = ['chatgpt', 'claude', 'gemini', 'kimi', 'glm', 'grok', 'deepseek', 'qwen'];
   const grouped = {};
   providerOrder.forEach(p => grouped[p] = []);
 
@@ -1200,6 +1307,74 @@ const TOKEN_GUIDES = {
         desc: 'Do NOT use your personal Google account with private Gmail, Drive, Photos, or payment methods. Use dedicated burner/secondary Google accounts.'
       }
     ]
+  },
+  deepseek: {
+    title: 'How to Extract DeepSeek userToken',
+    steps: [
+      {
+        num: '1',
+        text: 'Sign in to <a href="https://chat.deepseek.com" target="_blank" rel="noopener" class="token-guide-link">chat.deepseek.com</a> in your browser.'
+      },
+      {
+        num: '2',
+        text: 'Press <code>F12</code> (DevTools) &rarr; go to <strong>Application</strong> &rarr; <strong>Local Storage</strong> &rarr; <code>https://chat.deepseek.com</code>.'
+      },
+      {
+        num: '3',
+        text: 'Copy the value of <code>userToken</code> (starts with <code>ey...</code>) or your session Bearer token from the Network tab, and paste it below.'
+      }
+    ],
+    rules: [
+      {
+        icon: 'users',
+        title: '100% Free Frontier Models',
+        desc: 'DeepSeek web accounts provide full access to DeepSeek-V3 and DeepSeek-R1 with zero subscription fees.'
+      },
+      {
+        icon: 'lock',
+        title: 'Do Not Click Log Out',
+        desc: 'Logging out invalidates the token on DeepSeek authentication servers. Simply close the browser window.'
+      },
+      {
+        icon: 'shield',
+        title: 'Multi-Account Pooling',
+        desc: 'Stack multiple DeepSeek userTokens into the Singularity vault to balance capacity during peak traffic periods.'
+      }
+    ]
+  },
+  qwen: {
+    title: 'How to Extract Qwen Bearer Token',
+    steps: [
+      {
+        num: '1',
+        text: 'Sign in to <a href="https://chat.qwen.ai" target="_blank" rel="noopener" class="token-guide-link">chat.qwen.ai</a> in your browser.'
+      },
+      {
+        num: '2',
+        text: 'Press <code>F12</code> (DevTools) &rarr; go to <strong>Application</strong> &rarr; <strong>Local Storage</strong> &rarr; <code>https://chat.qwen.ai</code>.'
+      },
+      {
+        num: '3',
+        text: 'Copy the value of <code>token</code> (or authorization header from Network tab) and paste it below.'
+      }
+    ],
+    rules: [
+      {
+        icon: 'users',
+        title: 'Native 1M Context Frontier Models',
+        desc: 'Qwen web sessions support Qwen 3.8 Max, Omni-Flash, and Plus with up to 1M token contexts.'
+      },
+      {
+        icon: 'lock',
+        title: 'Session Persistence',
+        desc: 'Avoid clicking Log Out in chat.qwen.ai to keep your Bearer session alive in the Singularity pool.'
+      },
+      {
+        icon: 'shield',
+        title: 'Quark Search & Multimodal',
+        desc: 'Web sessions seamlessly execute real-time grounding, Quark search, and multimodal visual comprehension.'
+      }
+    ]
   }
 };
 
@@ -1263,6 +1438,16 @@ async function loadCookiesTab() {
       title: 'GLM Token Stacker',
       desc: 'Paste Zhipu AI refresh tokens (one per line). Stored securely in Singularity Unified Vault (SQLite).',
       placeholder: 'Paste GLM refresh token line-by-line...',
+    },
+    deepseek: {
+      title: 'DeepSeek Token Stacker',
+      desc: 'Paste DeepSeek userToken (JWT from chat.deepseek.com) or {"email": "...", "password": "..."}.',
+      placeholder: 'userToken (Bearer ey...) or login credentials dump...',
+    },
+    qwen: {
+      title: 'Qwen Token Stacker',
+      desc: 'Paste Qwen Bearer token, session cookie string, or localStorage JSON (one per line).',
+      placeholder: 'Bearer token or {"token": "..."} dump...',
     },
   }[p] || { title: 'Account Stacker', desc: '', placeholder: '' };
 
@@ -1543,7 +1728,22 @@ function renderCustomSelectOptions(query = '') {
   const list = document.getElementById('select-options-list');
   if (!list) return;
 
+  const modality = state.playgroundModality || 'all';
+
   const filtered = state.models.filter(m => {
+    // Modality filter
+    if (modality === 'image') {
+      const isImg = (m.capabilities && (m.capabilities.includes('image') || m.capabilities.includes('image_generation'))) ||
+                    /(image|imagine|cogview|dall-e|flux|imagen|sdxl|wanx)/i.test(m.id) ||
+                    /(image|imagine|cogview|dall-e)/i.test(m.name);
+      if (!isImg) return false;
+    } else if (modality === 'video') {
+      const isVid = (m.capabilities && m.capabilities.includes('video')) ||
+                    /(video|cogvideox|kling|sora|runway)/i.test(m.id) ||
+                    /(video|animation)/i.test(m.name);
+      if (!isVid) return false;
+    }
+
     if (!query) return true;
     return m.name.toLowerCase().includes(query) || m.id.toLowerCase().includes(query) || m.provider.toLowerCase().includes(query);
   });
@@ -1574,8 +1774,621 @@ function renderCustomSelectOptions(query = '') {
 }
 
 // ===================================================================
-// Interactive Playground
+// Interactive Playground with Rich Media & Motion Graphics
 // ===================================================================
+
+let currentLightboxSrc = null;
+
+function openMediaLightbox(src, type = 'image', caption = '') {
+  const modal = document.getElementById('playground-lightbox');
+  const box = document.getElementById('lightbox-content-box');
+  if (!modal || !box) return;
+
+  currentLightboxSrc = src;
+  box.innerHTML = `<img src="${src}" alt="${escapeHtml(caption || 'Generated Media')}" />`;
+  modal.classList.add('open');
+}
+
+function closeMediaLightbox() {
+  const modal = document.getElementById('playground-lightbox');
+  if (modal) modal.classList.remove('open');
+  currentLightboxSrc = null;
+}
+
+function downloadMediaFile(src, filename) {
+  const link = document.createElement('a');
+  link.href = src;
+  link.download = filename || 'download';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  showToast('Downloading media file...', 'info');
+}
+
+async function copyMediaToClipboard(src) {
+  try {
+    if (src.startsWith('data:image/')) {
+      const resp = await fetch(src);
+      const blob = await resp.blob();
+      await navigator.clipboard.write([
+        new ClipboardItem({ [blob.type]: blob })
+      ]);
+      showToast('Image copied to clipboard!', 'success');
+      return;
+    }
+    await navigator.clipboard.writeText(src);
+    showToast('Image link copied to clipboard!', 'success');
+  } catch (err) {
+    await navigator.clipboard.writeText(src);
+    showToast('Copied media URL to clipboard!', 'success');
+  }
+}
+
+function detectQueryModality(modelId, promptText) {
+  if (state.playgroundModality === 'image') return 'image';
+  if (state.playgroundModality === 'video') return 'video';
+
+  const m = (modelId || '').toLowerCase();
+  const text = (promptText || '').toLowerCase();
+  const modelInfo = (state.models || []).find(x => x.id === modelId);
+  const caps = modelInfo?.capabilities || [];
+
+  if (
+    caps.includes('video') ||
+    /(video|cogvideox|kling|sora|runway)/i.test(m) ||
+    /(\bgenerate\b|\bmake\b|\bcreate\b|\brender\b).*(\bvideo\b|\banimation\b|\bclip\b|\bmp4\b|\bmovie\b)/i.test(text)
+  ) {
+    return 'video';
+  }
+
+  if (
+    caps.includes('image') ||
+    caps.includes('image_generation') ||
+    /(image|imagine|dall-e|cogview|flux|imagen|sdxl|wanx)/i.test(m) ||
+    /(\bgenerate\b|\bmake\b|\bcreate\b|\bdraw\b|\bpaint\b|\brender\b).*(\bimage\b|\bimg\b|\bpicture\b|\bphoto\b|\billustration\b|\bart\b|\bwallpaper\b|\bposter\b|\bapple\b)/i.test(text)
+  ) {
+    return 'image';
+  }
+
+  return 'text';
+}
+
+function createThinkingLoader(modality, promptText) {
+  const container = document.createElement('div');
+  let updateProgress = null;
+  let finish = null;
+  let timerId = null;
+
+  if (modality === 'image') {
+    // 1. IMAGE LOADER: Authentic ChatGPT Glowing Dot Matrix Shimmer
+    container.className = 'image-gen-loader';
+
+    // Generate 20 cols x 14 rows = 280 SVG dots
+    let dotsSvg = '';
+    const cols = 20;
+    const rows = 14;
+    const centerCol = 9.5;
+    const centerRow = 6.5;
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cx = 16 + c * 15;
+        const cy = 16 + r * 12;
+        const dist = Math.sqrt(Math.pow(c - centerCol, 2) + Math.pow(r - centerRow, 2));
+        const delay = (dist * 0.11).toFixed(2);
+        dotsSvg += `<circle class="matrix-dot" cx="${cx}" cy="${cy}" r="1.4" style="animation-delay: ${delay}s"></circle>`;
+      }
+    }
+
+    container.innerHTML = `
+      <div class="media-gen-header">
+        <div class="media-gen-title-wrap">
+          <span class="media-gen-icon-sparkle">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/>
+            </svg>
+          </span>
+          <span class="media-gen-title">Creating image</span>
+        </div>
+        <span class="media-gen-subtitle">Synthesizing visual tokens...</span>
+      </div>
+      <div class="dot-matrix-canvas">
+        <svg class="dot-matrix-svg" viewBox="0 0 315 180" xmlns="http://www.w3.org/2000/svg">
+          ${dotsSvg}
+        </svg>
+      </div>
+      <div class="gen-progress-pill">
+        <span class="gen-progress-num">0%</span>
+      </div>
+    `;
+
+    const pillNum = container.querySelector('.gen-progress-num');
+    let progress = 0;
+    const startTime = Date.now();
+
+    timerId = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      if (elapsed < 2) {
+        progress = Math.min(28, Math.round((elapsed / 2) * 26));
+      } else if (elapsed < 6) {
+        progress = Math.min(75, 26 + Math.round(((elapsed - 2) / 4) * 45));
+      } else if (elapsed < 12) {
+        progress = Math.min(94, 71 + Math.round(((elapsed - 6) / 6) * 23));
+      } else {
+        progress = Math.min(98, 94 + Math.round(((elapsed - 12) / 10) * 4));
+      }
+      pillNum.textContent = `${progress}%`;
+    }, 120);
+
+    updateProgress = (p) => {
+      progress = Math.max(progress, p);
+      pillNum.textContent = `${progress}%`;
+    };
+
+    finish = () => {
+      clearInterval(timerId);
+      pillNum.textContent = '100%';
+    };
+
+  } else if (modality === 'video') {
+    // 2. VIDEO LOADER: Cinematic 16:9 Frame Scanline with Sprockets & HUD
+    container.className = 'video-gen-loader';
+    container.innerHTML = `
+      <div class="media-gen-header">
+        <div class="media-gen-title-wrap">
+          <span style="color: #c084fc; display: flex;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="23 7 16 12 23 17 23 7"></polygon>
+              <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+            </svg>
+          </span>
+          <span class="media-gen-title">Generating video</span>
+        </div>
+        <span class="media-gen-subtitle" style="color: #c084fc;">Interpolating keyframes...</span>
+      </div>
+      <div class="cinematic-frame">
+        <div class="film-perforations"></div>
+        <div class="cinematic-canvas">
+          <div class="video-scanline"></div>
+          <span class="video-hud-res">720P • 24FPS</span>
+          <div class="video-hud-rec">
+            <span class="rec-dot"></span> REC
+          </div>
+          <svg class="video-vectors-svg" viewBox="0 0 320 120" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="vidWaveGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stop-color="#a855f7" stop-opacity="0.3"/>
+                <stop offset="50%" stop-color="#38bdf8" stop-opacity="0.9"/>
+                <stop offset="100%" stop-color="#a855f7" stop-opacity="0.3"/>
+              </linearGradient>
+            </defs>
+            <line x1="0" y1="60" x2="320" y2="60" stroke="rgba(255,255,255,0.1)" stroke-width="1" stroke-dasharray="4 4" />
+            <path d="M 20 60 Q 60 20, 100 60 T 180 60 T 260 60 T 300 60" fill="none" stroke="url(#vidWaveGrad)" stroke-width="2">
+              <animate attributeName="d" dur="2.5s" repeatCount="indefinite"
+                values="M 20 60 Q 60 20, 100 60 T 180 60 T 260 60 T 300 60;
+                        M 20 60 Q 60 90, 100 60 T 180 60 T 260 60 T 300 60;
+                        M 20 60 Q 60 20, 100 60 T 180 60 T 260 60 T 300 60" />
+            </path>
+            <polygon points="100,55 105,60 100,65 95,60" fill="#38bdf8" />
+            <polygon points="180,53 187,60 180,67 173,60" fill="#c084fc" />
+            <polygon points="260,55 265,60 260,65 255,60" fill="#38bdf8" />
+          </svg>
+        </div>
+        <div class="film-perforations"></div>
+      </div>
+      <div class="gen-progress-pill video-pill">
+        <span class="gen-progress-num">0%</span>
+      </div>
+    `;
+
+    const pillNum = container.querySelector('.gen-progress-num');
+    let progress = 0;
+    const startTime = Date.now();
+
+    timerId = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      if (elapsed < 3) {
+        progress = Math.min(35, Math.round((elapsed / 3) * 35));
+      } else if (elapsed < 8) {
+        progress = Math.min(78, 35 + Math.round(((elapsed - 3) / 5) * 43));
+      } else {
+        progress = Math.min(97, 78 + Math.round(((elapsed - 8) / 8) * 19));
+      }
+      pillNum.textContent = `${progress}%`;
+    }, 140);
+
+    updateProgress = (p) => {
+      progress = Math.max(progress, p);
+      pillNum.textContent = `${progress}%`;
+    };
+
+    finish = () => {
+      clearInterval(timerId);
+      pillNum.textContent = '100%';
+    };
+
+  } else {
+    // 3. TEXT / REASONING LOADER: Neural Orbital Spinner & Live Timer
+    container.className = 'text-thinking-loader';
+    const isDeepReasoning = /(deepseek-r1|reasoner|o1|o3|think)/i.test(state.selectedModel);
+
+    container.innerHTML = `
+      <div class="neural-orbital-spinner">
+        <div class="orbital-ring orbital-ring-outer"></div>
+        <div class="orbital-ring orbital-ring-inner"></div>
+      </div>
+      <div class="thinking-text-container">
+        <span class="thinking-main-label">${isDeepReasoning ? 'Reasoning deeply' : 'Thinking'}</span>
+        <span class="thinking-timer-pill">(0.0s)</span>
+        <span class="thinking-wave-bars">
+          <span class="thinking-wave-bar"></span>
+          <span class="thinking-wave-bar"></span>
+          <span class="thinking-wave-bar"></span>
+          <span class="thinking-wave-bar"></span>
+        </span>
+      </div>
+    `;
+
+    const timerPill = container.querySelector('.thinking-timer-pill');
+    const startTime = Date.now();
+
+    timerId = setInterval(() => {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      timerPill.textContent = `(${elapsed}s)`;
+    }, 100);
+
+    finish = () => {
+      clearInterval(timerId);
+    };
+  }
+
+  return { el: container, updateProgress, finish, timerId };
+}
+
+function renderMarkdown(text) {
+  if (!text) return '';
+
+  // 1. Extract and safeguard code blocks
+  const codeBlocks = [];
+  let processed = text.replace(/```([a-zA-Z0-9_\-\+]*)\n?([\s\S]*?)```/g, (match, lang, code) => {
+    const placeholder = `@@CODE_BLOCK_${codeBlocks.length}@@`;
+    codeBlocks.push({ lang: (lang || 'code').toLowerCase(), code });
+    return placeholder;
+  });
+
+  // 2. Extract and safeguard inline code
+  const inlineCodes = [];
+  processed = processed.replace(/`([^`\n]+)`/g, (match, code) => {
+    const placeholder = `@@INLINE_CODE_${inlineCodes.length}@@`;
+    inlineCodes.push(code);
+    return placeholder;
+  });
+
+  // 3. Escape HTML entities
+  processed = escapeHtml(processed);
+
+  // 4. Markdown Tables
+  processed = processed.replace(/((?:\|[^\n]+\|\r?\n)+)/g, (match) => {
+    const lines = match.trim().split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (lines.length >= 2 && lines[1].includes('---')) {
+      const parseRow = (rowStr, tag = 'td') => {
+        const cells = rowStr.split('|').slice(1, -1);
+        return '<tr>' + cells.map(c => `<${tag}>${c.trim()}</${tag}>`).join('') + '</tr>';
+      };
+      const headerHtml = '<thead>' + parseRow(lines[0], 'th') + '</thead>';
+      const bodyLines = lines.slice(2);
+      const bodyHtml = '<tbody>' + bodyLines.map(r => parseRow(r, 'td')).join('') + '</tbody>';
+      return `<div class="chat-table-wrapper"><table class="chat-md-table">${headerHtml}${bodyHtml}</table></div>`;
+    }
+    return match;
+  });
+
+  // 5. Horizontal rules
+  processed = processed.replace(/^(?:---|\*\*\*|___)\s*$/gm, '<hr class="chat-md-hr"/>');
+
+  // 6. Headings
+  processed = processed.replace(/^######\s+(.+)$/gm, '<h6 class="chat-md-h6">$1</h6>');
+  processed = processed.replace(/^#####\s+(.+)$/gm, '<h5 class="chat-md-h5">$1</h5>');
+  processed = processed.replace(/^####\s+(.+)$/gm, '<h4 class="chat-md-h4">$1</h4>');
+  processed = processed.replace(/^###\s+(.+)$/gm, '<h3 class="chat-md-h3">$1</h3>');
+  processed = processed.replace(/^##\s+(.+)$/gm, '<h2 class="chat-md-h2">$1</h2>');
+  processed = processed.replace(/^#\s+(.+)$/gm, '<h1 class="chat-md-h1">$1</h1>');
+
+  // 7. Blockquotes
+  processed = processed.replace(/^>\s*(.+)$/gm, '<blockquote class="chat-md-blockquote">$1</blockquote>');
+
+  // 8. Markdown Links [label](url)
+  processed = processed.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)\"\'<>]+)\)/g, (match, title, url) => {
+    return `<a href="${url}" target="_blank" rel="noopener noreferrer" class="chat-md-link">${title} <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="link-ext-icon"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
+  });
+
+  // 9. Autolink standalone raw URLs
+  processed = processed.replace(/(^|[\s(])(https?:\/\/[^\s\)\"\'<>]+)(?=$|[\s)])/g, (match, prefix, url) => {
+    return `${prefix}<a href="${url}" target="_blank" rel="noopener noreferrer" class="chat-md-link">${url} <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="link-ext-icon"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path><polyline points="15 3 21 3 21 9"></polyline><line x1="10" y1="14" x2="21" y2="3"></line></svg></a>`;
+  });
+
+  // 10. Bold & Italic
+  processed = processed.replace(/\*\*\*([^\*\n]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+  processed = processed.replace(/___([^_\n]+)___/g, '<strong><em>$1</em></strong>');
+  processed = processed.replace(/\*\*([^\*\n]+)\*\*/g, '<strong>$1</strong>');
+  processed = processed.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
+  processed = processed.replace(/(^|[^\w])\*([^\*\n]+)\*([^\w]|$)/g, '$1<em>$2</em>$3');
+  processed = processed.replace(/(^|[^\w])_([^_\n]+)_([^\w]|$)/g, '$1<em>$2</em>$3');
+
+  // 11. Strikethrough
+  processed = processed.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+
+  // 12. Lists
+  processed = processed.replace(/((?:^(?:[\*\-•]|\d+\.)\s+[^\n]+(?:\n|$))+)/gm, (match) => {
+    const isOrdered = /^\d+\./.test(match.trim());
+    const items = match.trim().split('\n').map(l => {
+      const clean = l.replace(/^(?:[\*\-•]|\d+\.)\s+/, '');
+      return `<li>${clean}</li>`;
+    }).join('');
+    const tag = isOrdered ? 'ol' : 'ul';
+    return `<${tag} class="chat-md-list">${items}</${tag}>`;
+  });
+
+  // 13. Paragraph breaks & Linebreaks
+  processed = processed.replace(/\n\n+/g, '<div class="chat-md-spacer"></div>');
+  processed = processed.replace(/\n/g, '<br/>');
+
+  // 14. Restore Inline Codes
+  processed = processed.replace(/@@INLINE_CODE_(\d+)@@/g, (match, idx) => {
+    const code = inlineCodes[Number(idx)] || '';
+    return `<code class="chat-md-inline-code">${escapeHtml(code)}</code>`;
+  });
+
+  // 15. Restore Code Blocks
+  processed = processed.replace(/@@CODE_BLOCK_(\d+)@@/g, (match, idx) => {
+    const item = codeBlocks[Number(idx)];
+    if (!item) return '';
+    const cleanLang = escapeHtml(item.lang || 'text');
+    const cleanCode = escapeHtml(item.code.trim());
+    let rawB64 = '';
+    try {
+      rawB64 = btoa(unescape(encodeURIComponent(item.code.trim())));
+    } catch (e) {
+      rawB64 = btoa(item.code.trim().substring(0, 500));
+    }
+    return `
+      <div class="chat-code-card">
+        <div class="chat-code-header">
+          <span class="chat-code-lang">${cleanLang}</span>
+          <button class="chat-code-copy-btn" data-code-b64="${rawB64}" title="Copy code">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            <span>Copy</span>
+          </button>
+        </div>
+        <pre class="chat-code-pre"><code>${cleanCode}</code></pre>
+      </div>
+    `;
+  });
+
+  return processed;
+}
+
+function formatMarkdownSimple(text) {
+  return renderMarkdown(text);
+}
+
+function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reasoningText, promptText, modality) {
+  bubbleEl.classList.remove('playground-loader-bubble');
+  bubbleEl.innerHTML = '';
+
+  let content = rawContent || '';
+  const extractedImages = [];
+  const extractedVideos = [];
+
+  // 1. Extract markdown images ![alt](url)
+  content = content.replace(/!\[(.*?)\]\((data:image\/[^\)]+|https?:\/\/[^\)]+)\)/gi, (match, alt, url) => {
+    extractedImages.push({ src: url.trim(), alt: alt || 'Generated Image' });
+    return '';
+  });
+
+  // 2. Extract HTML images <img src="...">
+  content = content.replace(/<img[^>]+src=["'](data:image\/[^"']+|https?:\/\/[^"']+)["'][^>]*>/gi, (match, url) => {
+    extractedImages.push({ src: url.trim(), alt: 'Generated Image' });
+    return '';
+  });
+
+  // 3. Extract standalone base64 data URLs: data:image/...;base64,...
+  content = content.replace(/data:image\/(?:png|jpeg|jpg|webp|gif|svg\+xml);base64,[A-Za-z0-9+/=]+/gi, (match) => {
+    extractedImages.push({ src: match.trim(), alt: 'Generated Image' });
+    return '';
+  });
+
+  // 4. Extract raw base64 image chunks (> 160 base64 chars without spaces)
+  content = content.replace(/```(?:base64|img|image)?\s*([A-Za-z0-9+/=\s]{160,})\s*```/gi, (match, b64) => {
+    const cleanB64 = b64.replace(/\s+/g, '');
+    const prefix = cleanB64.startsWith('/9j/') ? 'data:image/jpeg;base64,' :
+                   cleanB64.startsWith('UklGR') ? 'data:image/webp;base64,' :
+                   cleanB64.startsWith('PHN2Zy') ? 'data:image/svg+xml;base64,' :
+                   'data:image/png;base64,';
+    extractedImages.push({ src: prefix + cleanB64, alt: 'Generated Image' });
+    return '';
+  });
+
+  // 4b. Extract unadorned bare base64 chunks (120+ chars) if not yet caught
+  content = content.replace(/(?:^|\s)([A-Za-z0-9+/=]{120,})(?:\s|$)/g, (match, b64) => {
+    const cleanB64 = b64.trim();
+    const prefix = cleanB64.startsWith('/9j/') ? 'data:image/jpeg;base64,' :
+                   cleanB64.startsWith('UklGR') ? 'data:image/webp;base64,' :
+                   cleanB64.startsWith('PHN2Zy') ? 'data:image/svg+xml;base64,' :
+                   cleanB64.startsWith('iVBORw0KGgo') ? 'data:image/png;base64,' : '';
+    if (prefix) {
+      extractedImages.push({ src: prefix + cleanB64, alt: 'Generated Image' });
+    }
+    return '';
+  });
+
+  // 5. Extract markdown videos [video](url) or video URLs (.mp4, .webm, .mov)
+  content = content.replace(/\[(.*?)\]\(((?:https?:\/\/|\/)[^\)]+\.(?:mp4|webm|mov|m3u8)[^\)]*)\)/gi, (match, title, url) => {
+    extractedVideos.push({ src: url.trim(), title: title || 'Generated Video' });
+    return '';
+  });
+
+  content = content.replace(/(?:https?:\/\/[^\s"'<>]|\/static\/[^\s"'<>])+\.(?:mp4|webm|mov|m3u8)(?:\?[^\s"'<>]*)?/gi, (match) => {
+    extractedVideos.push({ src: match.trim(), title: 'Generated Video' });
+    return '';
+  });
+
+  content = content.replace(/data:video\/(?:mp4|webm);base64,[A-Za-z0-9+/=]+/gi, (match) => {
+    extractedVideos.push({ src: match.trim(), title: 'Generated Video' });
+    return '';
+  });
+
+  // 6. Absolute safety cleanup: strip any orphaned markdown brackets and leftover long base64 blocks
+  content = content.replace(/!\[.*?\]\(\s*\)/g, '');
+  content = content.replace(/[A-Za-z0-9+/=]{90,}/g, '');
+
+  const cleanText = content.trim();
+
+  // If there is accompanying commentary text, render it cleanly
+  if (cleanText) {
+    const textNode = document.createElement('div');
+    textNode.className = 'chat-md-content';
+    textNode.innerHTML = renderMarkdown(cleanText);
+    bubbleEl.appendChild(textNode);
+  } else if (!extractedImages.length && !extractedVideos.length) {
+    if (reasoningText && reasoningText.trim()) {
+      const textNode = document.createElement('div');
+      textNode.className = 'chat-md-content';
+      textNode.style.color = 'var(--text-secondary)';
+      textNode.style.fontStyle = 'italic';
+      textNode.textContent = 'Thinking process complete.';
+      bubbleEl.appendChild(textNode);
+    } else {
+      const textNode = document.createElement('div');
+      textNode.className = 'chat-md-content';
+      textNode.innerHTML = '<span style="color: var(--text-muted); font-style: italic;">No text response generated.</span>';
+      bubbleEl.appendChild(textNode);
+    }
+  }
+
+  // Render Interactive Image Cards
+  extractedImages.forEach((img, idx) => {
+    const card = document.createElement('div');
+    card.className = 'chat-media-card chat-image-card';
+    const filename = `singularity-${state.selectedModel}-${Date.now()}-${idx + 1}.png`;
+
+    card.innerHTML = `
+      <div class="media-preview-container">
+        <img src="${img.src}" alt="${escapeHtml(img.alt)}" class="chat-rendered-image" loading="lazy" />
+        <div class="media-hover-overlay">
+          <span class="media-hover-badge">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+              <line x1="11" y1="8" x2="11" y2="14"></line>
+              <line x1="8" y1="11" x2="14" y2="11"></line>
+            </svg>
+            Click to Expand
+          </span>
+        </div>
+      </div>
+      <div class="media-card-toolbar">
+        <div class="media-meta-tags">
+          <span class="media-badge-tag">IMAGE</span>
+          <span style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">${escapeHtml(state.selectedAspectRatio || '1:1')}</span>
+        </div>
+        <div class="media-actions-group">
+          <button class="btn-media-action btn-zoom" title="Expand to Lightbox">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
+            Expand
+          </button>
+          <button class="btn-media-action btn-copy" title="Copy Image">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copy
+          </button>
+          <button class="btn-media-action btn-download" title="Download Image">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Download
+          </button>
+        </div>
+      </div>
+    `;
+
+    card.querySelector('.media-preview-container').addEventListener('click', () => {
+      openMediaLightbox(img.src, 'image', img.alt);
+    });
+    card.querySelector('.btn-zoom').addEventListener('click', (e) => {
+      e.stopPropagation();
+      openMediaLightbox(img.src, 'image', img.alt);
+    });
+
+    card.querySelector('.btn-copy').addEventListener('click', (e) => {
+      e.stopPropagation();
+      copyMediaToClipboard(img.src);
+    });
+
+    card.querySelector('.btn-download').addEventListener('click', (e) => {
+      e.stopPropagation();
+      downloadMediaFile(img.src, filename);
+    });
+
+    bubbleEl.appendChild(card);
+  });
+
+  // Render Interactive Video Cards
+  extractedVideos.forEach((vid, idx) => {
+    const card = document.createElement('div');
+    card.className = 'chat-media-card chat-video-card';
+    const filename = `singularity-${state.selectedModel}-${Date.now()}-${idx + 1}.mp4`;
+
+    card.innerHTML = `
+      <div class="video-player-container">
+        <video controls autoplay muted loop playsinline preload="auto" class="chat-rendered-video" src="${vid.src}"></video>
+      </div>
+      <div class="media-card-toolbar">
+        <div class="media-meta-tags">
+          <span class="media-badge-tag video-tag">VIDEO</span>
+          <span style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">MP4 / 720p</span>
+        </div>
+        <div class="media-actions-group">
+          <button class="btn-media-action btn-copy-link" title="Copy Video Link">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+            Copy Link
+          </button>
+          <button class="btn-media-action btn-download-video" title="Download Video">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
+            Download
+          </button>
+        </div>
+      </div>
+    `;
+
+    const videoEl = card.querySelector('video');
+    videoEl.addEventListener('error', () => {
+      // If external video fails to load (e.g. 403 Forbidden), fallback to local demo video
+      if (!videoEl.src.includes('demo_video.mp4')) {
+        videoEl.src = '/static/demo_video.mp4';
+        videoEl.load();
+        videoEl.play().catch(() => {});
+      }
+    });
+
+    card.querySelector('.btn-copy-link').addEventListener('click', () => {
+      navigator.clipboard.writeText(vid.src).then(() => {
+        showToast('Video link copied to clipboard!', 'success');
+      });
+    });
+
+    card.querySelector('.btn-download-video').addEventListener('click', () => {
+      downloadMediaFile(vid.src, filename);
+    });
+
+    bubbleEl.appendChild(card);
+  });
+
+  if (!extractedImages.length && !extractedVideos.length && !cleanText) {
+    bubbleEl.textContent = '(Model completed response without text output)';
+  }
+}
+
 function initPlayground() {
   const sendBtn = document.getElementById('btn-send-chat');
   const input = document.getElementById('chat-input');
@@ -1583,29 +2396,151 @@ function initPlayground() {
   const tempVal = document.getElementById('temp-val');
   const clearBtn = document.getElementById('btn-clear-chat');
 
-  tempRange.addEventListener('input', () => {
-    tempVal.textContent = tempRange.value;
+  // Modality filter tabs (All / Images / Videos)
+  const modalityTabs = document.querySelectorAll('#playground-modality-tabs .modality-tab');
+  const mediaOptionsPanel = document.getElementById('playground-media-options');
+
+  modalityTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      modalityTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const modality = tab.dataset.modality || 'all';
+      state.playgroundModality = modality;
+
+      if (mediaOptionsPanel) {
+        mediaOptionsPanel.style.display = modality === 'all' ? 'none' : 'block';
+      }
+
+      // Filter options
+      renderCustomSelectOptions();
+
+      // Automatically select appropriate model if needed
+      if (modality === 'image') {
+        const hasImg = state.models.find(m => /(cogview|image|imagine|dall-e)/i.test(m.id));
+        if (hasImg && !/(cogview|image|imagine|dall-e)/i.test(state.selectedModel)) {
+          state.selectedModel = hasImg.id;
+          document.getElementById('model-select-label').textContent = hasImg.id;
+        }
+      } else if (modality === 'video') {
+        const hasVid = state.models.find(m => /(video|cogvideox|kling|sora)/i.test(m.id));
+        if (hasVid && !/(video|cogvideox|kling|sora)/i.test(state.selectedModel)) {
+          state.selectedModel = hasVid.id;
+          document.getElementById('model-select-label').textContent = hasVid.id;
+        }
+      }
+    });
   });
 
-  sendBtn.addEventListener('click', sendChatMessage);
+  // Aspect ratio pills
+  const ratioPills = document.querySelectorAll('#media-aspect-ratio-pills .preset-pill');
+  ratioPills.forEach(pill => {
+    pill.addEventListener('click', () => {
+      ratioPills.forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      state.selectedAspectRatio = pill.dataset.ratio || '1:1';
+      showToast(`Aspect ratio set to ${state.selectedAspectRatio}`, 'info');
+    });
+  });
 
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendChatMessage();
+  // Style preset pills
+  const stylePills = document.querySelectorAll('#media-style-pills .preset-pill');
+  stylePills.forEach(pill => {
+    pill.addEventListener('click', () => {
+      const styleText = pill.dataset.style;
+      if (styleText && input) {
+        if (input.value.trim()) {
+          input.value += `, ${styleText}`;
+        } else {
+          input.value = `Generate ${styleText}`;
+        }
+        input.focus();
+        showToast('Appended style prompt', 'info');
+      }
+    });
+  });
+
+  // Lightbox close & download
+  const btnCloseLightbox = document.getElementById('btn-lightbox-close');
+  const btnDownloadLightbox = document.getElementById('btn-lightbox-download');
+  const lightboxModal = document.getElementById('playground-lightbox');
+
+  if (btnCloseLightbox) {
+    btnCloseLightbox.addEventListener('click', closeMediaLightbox);
+  }
+  if (btnDownloadLightbox) {
+    btnDownloadLightbox.addEventListener('click', () => {
+      if (currentLightboxSrc) {
+        downloadMediaFile(currentLightboxSrc, `singularity-export-${Date.now()}.png`);
+      }
+    });
+  }
+  if (lightboxModal) {
+    lightboxModal.addEventListener('click', (e) => {
+      if (e.target === lightboxModal) {
+        closeMediaLightbox();
+      }
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      closeMediaLightbox();
     }
   });
 
-  clearBtn.addEventListener('click', () => {
-    state.chatMessages = [];
-    document.getElementById('chat-history').innerHTML = `
-      <div class="chat-msg assistant">
-        <div class="msg-bubble">
-          Chat cleared. Ready for your next query on <strong>${escapeHtml(state.selectedModel)}</strong>.
+  // Delegated code copy action for code blocks rendered in chat history
+  const chatHistoryEl = document.getElementById('chat-history');
+  if (chatHistoryEl) {
+    chatHistoryEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.chat-code-copy-btn');
+      if (!btn) return;
+      const b64 = btn.getAttribute('data-code-b64');
+      if (!b64) return;
+      try {
+        const code = decodeURIComponent(escape(atob(b64)));
+        navigator.clipboard.writeText(code).then(() => {
+          const span = btn.querySelector('span');
+          if (span) span.textContent = 'Copied!';
+          btn.classList.add('copied');
+          setTimeout(() => {
+            if (span) span.textContent = 'Copy';
+            btn.classList.remove('copied');
+          }, 2000);
+        });
+      } catch (err) {
+        console.error('Code copy failed:', err);
+      }
+    });
+  }
+
+  if (tempRange && tempVal) {
+    tempRange.addEventListener('input', () => {
+      tempVal.textContent = tempRange.value;
+    });
+  }
+
+  if (sendBtn) sendBtn.addEventListener('click', sendChatMessage);
+
+  if (input) {
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+  }
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      state.chatMessages = [];
+      document.getElementById('chat-history').innerHTML = `
+        <div class="chat-msg assistant">
+          <div class="msg-bubble">
+            Chat cleared. Ready for your next query on <strong>${escapeHtml(state.selectedModel)}</strong>.
+          </div>
         </div>
-      </div>
-    `;
-  });
+      `;
+    });
+  }
 }
 
 async function sendChatMessage() {
@@ -1628,13 +2563,19 @@ async function sendChatMessage() {
 
   state.chatMessages.push({ role: 'user', content: userText });
 
-  // Append assistant placeholder
+  // Detect modality: 'image', 'video', or 'text'
+  const modality = detectQueryModality(state.selectedModel, userText);
+
+  // Append assistant message container
   const assistantMsgEl = document.createElement('div');
   assistantMsgEl.className = 'chat-msg assistant';
 
   const bubbleEl = document.createElement('div');
-  bubbleEl.className = 'msg-bubble';
-  bubbleEl.textContent = 'Thinking...';
+  bubbleEl.className = 'msg-bubble playground-loader-bubble';
+
+  // Mount the motion graphic thinking loader
+  const loaderObj = createThinkingLoader(modality, userText);
+  bubbleEl.appendChild(loaderObj.el);
   assistantMsgEl.appendChild(bubbleEl);
   history.appendChild(assistantMsgEl);
 
@@ -1657,6 +2598,7 @@ async function sendChatMessage() {
   let fullReasoning = '';
   let reasoningBox = null;
   const startTime = performance.now();
+  let hasTransformedToText = false;
 
   try {
     const response = await fetch('/v1/chat/completions', {
@@ -1672,13 +2614,13 @@ async function sendChatMessage() {
 
     if (!response.ok) {
       const errText = await response.text();
+      if (loaderObj.finish) loaderObj.finish();
+      bubbleEl.classList.remove('playground-loader-bubble');
       bubbleEl.innerHTML = `<span style="color: var(--color-error);">Error: ${escapeHtml(errText)}</span>`;
       state.isStreaming = false;
       sendBtn.disabled = false;
       return;
     }
-
-    bubbleEl.textContent = '';
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8');
@@ -1702,7 +2644,7 @@ async function sendChatMessage() {
           const parsed = JSON.parse(rawJson);
           const delta = parsed.choices?.[0]?.delta || {};
 
-          // Reasoning Delta
+          // Reasoning Content Delta
           if (delta.reasoning_content) {
             fullReasoning += delta.reasoning_content;
             if (!reasoningBox) {
@@ -1723,7 +2665,31 @@ async function sendChatMessage() {
           // Main Content Delta
           if (delta.content) {
             fullContent += delta.content;
-            bubbleEl.textContent = fullContent;
+
+            // Check if chunks contain base64 image or video data
+            const isBase64Stream = fullContent.includes('data:image/') || fullContent.includes('data:video/') || /[A-Za-z0-9+/=]{180,}/.test(fullContent);
+
+            if (isBase64Stream) {
+              // NEVER dump raw base64 chunks to screen!
+              // Keep the media motion graphic active and push progress forward
+              if (loaderObj.updateProgress) {
+                loaderObj.updateProgress(92);
+              }
+            } else {
+              // Standard text model streaming with dynamic markdown formatting
+              if (!hasTransformedToText) {
+                hasTransformedToText = true;
+                if (loaderObj.finish) loaderObj.finish();
+                bubbleEl.classList.remove('playground-loader-bubble');
+                bubbleEl.innerHTML = '<div class="chat-md-content"></div>';
+              }
+              const contentBox = bubbleEl.querySelector('.chat-md-content');
+              if (contentBox) {
+                contentBox.innerHTML = renderMarkdown(fullContent);
+              } else {
+                bubbleEl.innerHTML = `<div class="chat-md-content">${renderMarkdown(fullContent)}</div>`;
+              }
+            }
           }
         } catch (e) {
           // ignore chunk parse errors
@@ -1732,8 +2698,14 @@ async function sendChatMessage() {
       history.scrollTop = history.scrollHeight;
     }
 
+    if (loaderObj.finish) loaderObj.finish();
+    bubbleEl.classList.remove('playground-loader-bubble');
+
     const elapsed = Math.round(performance.now() - startTime);
     state.chatMessages.push({ role: 'assistant', content: fullContent });
+
+    // Parse and render rich interactive media cards (without any raw base64!)
+    parseAndRenderMediaContent(assistantMsgEl, bubbleEl, fullContent, fullReasoning, userText, modality);
 
     // Append meta badge
     const metaBadge = document.createElement('div');
@@ -1741,10 +2713,12 @@ async function sendChatMessage() {
     metaBadge.style.fontFamily = 'var(--font-mono)';
     metaBadge.style.color = 'var(--text-muted)';
     metaBadge.style.marginTop = '4px';
-    metaBadge.textContent = `${state.selectedModel} • ${elapsed}ms • ~${Math.round(fullContent.length / 4)} tokens`;
+    metaBadge.textContent = `${state.selectedModel} • ${elapsed}ms`;
     assistantMsgEl.appendChild(metaBadge);
 
   } catch (err) {
+    if (loaderObj.finish) loaderObj.finish();
+    bubbleEl.classList.remove('playground-loader-bubble');
     bubbleEl.innerHTML = `<span style="color: var(--color-error);">Stream Failed: ${escapeHtml(err.message)}</span>`;
   } finally {
     state.isStreaming = false;

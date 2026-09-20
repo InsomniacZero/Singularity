@@ -18,6 +18,8 @@ from .grok import stream_grok_chat
 from .glm import stream_glm_chat
 from .chatgpt import stream_chatgpt_chat
 from .claude import stream_claude_chat
+from .deepseek import stream_deepseek_chat, generate_deepseek_chat
+from .qwen import stream_qwen_chat, generate_qwen_chat
 
 
 async def stream_chat(
@@ -46,37 +48,21 @@ async def stream_chat(
             yield chunk
         return
 
-    # 3. Kimi / Moonshot AI
+    # 3. DeepSeek AI
+    if pid in ("deepseek", "deepseek-ai"):
+        async for chunk in stream_deepseek_chat(model, messages, accounts=accounts, stream=stream, **kwargs):
+            yield chunk
+        return
+
+    # 4. Alibaba Qwen
+    if pid in ("qwen", "qwen-ai", "tongyi"):
+        async for chunk in stream_qwen_chat(model, messages, accounts=accounts, stream=stream, **kwargs):
+            yield chunk
+        return
+
+    # 5. Kimi / Moonshot AI
     if pid in ("kimi", "moonshot"):
-        token = ""
-        if accounts:
-            # Pick first active account or rotate
-            token = accounts[0].get("token", "")
-        if not token:
-            # Try loading from db
-            try:
-                from singularity import db
-                accs = db.get_accounts("kimi")
-                if accs:
-                    token = accs[0].get("token", "")
-            except Exception:
-                pass
-
-        if not token:
-            yield {
-                "id": f"chatcmpl-kimi-err",
-                "object": "chat.completion.chunk",
-                "created": int(time.time()),
-                "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": "Error: No Kimi account found in Singularity database vault. Please add your Kimi refresh token in the Control Center or via './singular import'."},
-                    "finish_reason": "error",
-                }],
-            }
-            return
-
-        async for chunk in stream_kimi_chat(model, messages, raw_token=token, stream=stream, **kwargs):
+        async for chunk in stream_kimi_chat(model, messages, accounts=accounts, stream=stream, **kwargs):
             yield chunk
         return
 

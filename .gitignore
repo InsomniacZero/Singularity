@@ -21,6 +21,8 @@ glm2api/token.txt
 *.db
 *.sqlite
 *.sqlite3
-singularity/data/
+singularity/data/*
+!singularity/data/*.wasm
 singularity/credentials_export*.json
 legacy/
+.vscode/

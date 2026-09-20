@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Singularity Provider Engine
-Manages status, lifecycle, limits, models, and cookie storage for all 6 providers:
-ChatGPT (8000), Claude (8080), Gemini (8084), GLM (8085), Kimi (8086), Grok (8087).
+Manages status, lifecycle, limits, models, and cookie storage for all 7 providers:
+ChatGPT (8000), Claude (8080), Gemini (8084), GLM (8085), Kimi (8086), Grok (8087), DeepSeek (8088).
 """
 
 import asyncio
@@ -183,10 +183,293 @@ PROVIDERS_CONFIG = {
         "cookie_placeholder": "sso=...; sso-rw=...; x-userid=...",
         "auth_header": None,
     },
+    "deepseek": {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "port": 8088,
+        "host": os.getenv("DEEPSEEK_HOST", PROVIDER_HOST),
+        "badge": "DeepSeek AI",
+        "color": "#4D6BFE",
+        "start_script": "start_deepseek2api.sh",
+        "stop_script": "stop_deepseek2api.sh",
+        "health_path": "/healthz",
+        "cookie_type": "user_token_or_json",
+        "cookie_label": "DeepSeek userToken (Bearer) or Login JSON",
+        "cookie_placeholder": "Paste DeepSeek userToken (JWT from chat.deepseek.com) or {\"email\": \"...\", \"password\": \"...\"}",
+        "auth_header": "Bearer deepseek2api",
+    },
+    "qwen": {
+        "id": "qwen",
+        "name": "Qwen",
+        "port": 8089,
+        "host": os.getenv("QWEN_HOST", PROVIDER_HOST),
+        "badge": "Alibaba Cloud",
+        "color": "#615CED",
+        "start_script": "start_qwen2api.sh",
+        "stop_script": "stop_qwen2api.sh",
+        "health_path": "/healthz",
+        "cookie_type": "token_or_json",
+        "cookie_label": "Qwen Token (chat.qwen.ai) or Login JSON",
+        "cookie_placeholder": "Paste chat.qwen.ai Bearer token, Cookie string, or localStorage JSON",
+        "auth_header": "Bearer qwen2api",
+    },
 }
 
-# Dynamic Comprehensive Catalog (206 models across 6 providers)
-MODELS_CATALOG = [   {   'capabilities': ['chat', 'vision', 'code', 'streaming'],
+# Dynamic Comprehensive Catalog (226 models across 8 providers)
+MODELS_CATALOG = [
+    {
+        'capabilities': ['chat', 'reasoning', 'code', 'streaming', 'vision'],
+        'context': '1M tokens',
+        'description': 'Flagship ~2.4T parameter frontier reasoning and multimodal powerhouse with 1M context.',
+        'id': 'qwen3.8-max',
+        'locked': False,
+        'name': 'Qwen 3.8 Max',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'vision', 'audio', 'streaming'],
+        'context': '256K tokens',
+        'description': 'Ultra-low-latency real-time native omnimodal vision, audio, and speech model.',
+        'id': 'qwen3.8-omni-flash',
+        'locked': False,
+        'name': 'Qwen 3.8 Omni Flash',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'reasoning', 'code', 'streaming', 'vision'],
+        'context': '1M tokens',
+        'description': 'High-efficiency balanced flagship for complex multi-step reasoning, agents, and tool use.',
+        'id': 'qwen3.8-plus',
+        'locked': False,
+        'name': 'Qwen 3.8 Plus',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming'],
+        'context': '1M tokens',
+        'description': 'Lightning-fast generation model with sub-second TTFT and 1M context window.',
+        'id': 'qwen3.8-flash-next',
+        'locked': False,
+        'name': 'Qwen 3.8 Flash Next',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming', 'vision'],
+        'context': '1M tokens',
+        'description': 'Stable enterprise workhorse with deep domain knowledge and tool-use synthesis.',
+        'id': 'qwen3.6-plus',
+        'locked': False,
+        'name': 'Qwen 3.6 Plus',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming'],
+        'context': '1M tokens',
+        'description': 'Extremely cost-effective lightweight conversational and summarization model.',
+        'id': 'qwen3.5-flash',
+        'locked': False,
+        'name': 'Qwen 3.5 Flash',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'reasoning', 'code', 'streaming'],
+        'context': '1M tokens',
+        'description': 'Frontier alias for current Qwen3.8-Max reasoning powerhouse.',
+        'id': 'qwen-max',
+        'locked': False,
+        'name': 'Qwen-Max',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming'],
+        'context': '1M tokens',
+        'description': 'Balanced production alias for Qwen3.8-Plus.',
+        'id': 'qwen-plus',
+        'locked': False,
+        'name': 'Qwen-Plus',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming'],
+        'context': '1M tokens',
+        'description': 'High-throughput rapid response alias.',
+        'id': 'qwen-turbo',
+        'locked': False,
+        'name': 'Qwen-Turbo',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming'],
+        'context': '1M tokens',
+        'description': 'Dedicated code synthesis, refactoring, and debugging model.',
+        'id': 'qwen-coder',
+        'locked': False,
+        'name': 'Qwen-Coder',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'reasoning', 'web_search', 'streaming'],
+        'context': '1M tokens',
+        'description': 'Autonomous deep research workflow with multi-query synthesis and report generation.',
+        'id': 'qwen-deep-research',
+        'locked': False,
+        'name': 'Qwen Deep Research',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'vision', 'image_generation'],
+        'context': '128K tokens',
+        'description': 'Wanx / Qwen-Image generation and visual comprehension.',
+        'id': 'qwen-image',
+        'locked': False,
+        'name': 'Qwen Image',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'vision', 'video'],
+        'context': '128K tokens',
+        'description': 'Qwen visual video comprehension and generation engine.',
+        'id': 'qwen-video',
+        'locked': False,
+        'name': 'Qwen Video',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'reasoning', 'code', 'streaming', 'vision'],
+        'context': '1M tokens',
+        'description': 'Qwen3.7-Plus flagship multimodal model with integrated Wanx video and image synthesis.',
+        'id': 'qwen3.7-plus',
+        'locked': False,
+        'name': 'Qwen 3.7 Plus',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'vision', 'video'],
+        'context': '128K tokens',
+        'description': 'Alibaba Wanx 2.1 state-of-the-art text-to-video generative synthesis model.',
+        'id': 'wanx-2.1',
+        'locked': False,
+        'name': 'Wanx 2.1 Video',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'vision', 'video'],
+        'context': '128K tokens',
+        'description': 'Alibaba Wanx unified visual generation alias for cinematic video synthesis.',
+        'id': 'wanx',
+        'locked': False,
+        'name': 'Wanx Video',
+        'provider': 'qwen'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming'],
+        'context': '64K tokens',
+        'description': 'DeepSeek-V3 671B MoE frontier conversational and coding flagship model.',
+        'id': 'deepseek-chat',
+        'locked': False,
+        'name': 'DeepSeek-V3 Chat',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'reasoning', 'code', 'streaming'],
+        'context': '64K tokens',
+        'description': 'DeepSeek-R1 frontier reasoning model with chain-of-thought visible thinking tokens.',
+        'id': 'deepseek-reasoner',
+        'locked': False,
+        'name': 'DeepSeek-R1 Reasoner',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'web_search', 'code', 'streaming'],
+        'context': '64K tokens',
+        'description': 'DeepSeek-V3 with live real-time web search grounding enabled.',
+        'id': 'deepseek-chat-search',
+        'locked': False,
+        'name': 'DeepSeek-V3 Search',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'reasoning', 'web_search', 'code', 'streaming'],
+        'context': '64K tokens',
+        'description': 'DeepSeek-R1 reasoning engine with live real-time web search grounding.',
+        'id': 'deepseek-reasoner-search',
+        'locked': False,
+        'name': 'DeepSeek-R1 Reasoner Search',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming'],
+        'context': '64K tokens',
+        'description': 'DeepSeek-V3 flagship model alias.',
+        'id': 'deepseek-v3',
+        'locked': False,
+        'name': 'DeepSeek-V3',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'reasoning', 'code', 'streaming'],
+        'context': '64K tokens',
+        'description': 'DeepSeek-R1 reasoning model alias.',
+        'id': 'deepseek-r1',
+        'locked': False,
+        'name': 'DeepSeek-R1',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming'],
+        'context': '128K tokens',
+        'description': 'DeepSeek-Coder V2 specialized code generation and repository synthesis.',
+        'id': 'deepseek-coder',
+        'locked': False,
+        'name': 'DeepSeek Coder V2',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming', 'vision'],
+        'context': '1M tokens',
+        'description': 'DeepSeek-V4.1-Flash (Sep 2026) 552B MoE flagship with Causal Encoder-Decoder architecture.',
+        'id': 'deepseek-v4.1-flash',
+        'locked': False,
+        'name': 'DeepSeek-V4.1 Flash',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming', 'vision'],
+        'context': '1M tokens',
+        'description': 'Official API alias for DeepSeek-V4.1-Flash with 1M context window.',
+        'id': 'deepseek-flash',
+        'locked': False,
+        'name': 'DeepSeek Flash',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'reasoning', 'code', 'streaming'],
+        'context': '256K tokens',
+        'description': 'DeepSeek-V4-Pro 1.6T parameter frontier foundation model (GA August 2026).',
+        'id': 'deepseek-v4-pro',
+        'locked': False,
+        'name': 'DeepSeek-V4 Pro',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming'],
+        'context': '1M tokens',
+        'description': 'DeepSeek-V4 foundation series alias.',
+        'id': 'deepseek-v4',
+        'locked': False,
+        'name': 'DeepSeek-V4',
+        'provider': 'deepseek'
+    },
+    {
+        'capabilities': ['chat', 'code', 'streaming', 'vision'],
+        'context': '1M tokens',
+        'description': 'DeepSeek-V4.1 generation alias.',
+        'id': 'deepseek-v4.1',
+        'locked': False,
+        'name': 'DeepSeek-V4.1',
+        'provider': 'deepseek'
+    },
+    {   'capabilities': ['chat', 'vision', 'code', 'streaming'],
         'context': '1M tokens',
         'description': 'Ultra-fast flagship model with multimodal vision and low latency.',
         'id': 'gemini-3.8-flash',
@@ -2352,11 +2635,91 @@ async def get_all_limits() -> Dict[str, Any]:
         "accounts": glm_data,
     }
 
+    # 7. DeepSeek AI quotas (derived from stacked accounts in SQLite DB)
+    deepseek_accounts = db.get_accounts("deepseek")
+    deepseek_data = []
+    for acc in deepseek_accounts:
+        plan = (acc.get("plan") or "free").upper()
+        ident = acc.get("identifier") or acc.get("name") or "DeepSeek Account"
+        deepseek_data.append({
+            "email": ident,
+            "type": plan,
+            "status": "Normal" if acc.get("status") == "active" else "Disabled",
+            "image_quota": "—",
+            "reason_remaining": "50 / day",
+            "deep_research": "50 / day",
+            "web_search": "200 / day",
+            "file_upload": "5 files (100MB)",
+            "concurrency": "1 request (5/min)",
+            "restore_at": "Daily (Midnight CST)",
+        })
+
+    if not deepseek_data:
+        deepseek_data.append({
+            "email": "DeepSeek Web (chat.deepseek.com)",
+            "type": "FREE",
+            "status": "Normal",
+            "image_quota": "—",
+            "reason_remaining": "50 / day",
+            "deep_research": "50 / day",
+            "web_search": "200 / day",
+            "file_upload": "5 files (100MB)",
+            "concurrency": "1 request (5/min)",
+            "restore_at": "Daily (Midnight CST)",
+        })
+
+    limits["deepseek"] = {
+        "title": "DeepSeek AI Account Quotas",
+        "accounts_count": len(deepseek_data),
+        "accounts": deepseek_data,
+    }
+
+    # 8. Qwen / Tongyi Qianwen quotas (Alibaba Cloud)
+    qwen_accounts = db.get_accounts("qwen")
+    qwen_data = []
+    for acc in qwen_accounts:
+        plan = (acc.get("plan") or "free").upper()
+        ident = acc.get("identifier") or acc.get("name") or "Qwen Account"
+        if ident.startswith("qwen_ey"):
+            ident = acc.get("name") or "user_766931c8"
+        qwen_data.append({
+            "email": ident,
+            "type": plan,
+            "status": "Normal" if acc.get("status") == "active" else "Disabled",
+            "image_quota": 30,
+            "reason_remaining": "100 / day",
+            "deep_research": "10 / day",
+            "web_search": "500 / day",
+            "file_upload": "50 files (100MB)",
+            "concurrency": "2 requests (10/min)",
+            "restore_at": "Daily (Midnight CST)",
+        })
+
+    if not qwen_data:
+        qwen_data.append({
+            "email": "Qwen Web (chat.qwen.ai)",
+            "type": "FREE",
+            "status": "Normal",
+            "image_quota": 30,
+            "reason_remaining": "100 / day",
+            "deep_research": "10 / day",
+            "web_search": "500 / day",
+            "file_upload": "50 files (100MB)",
+            "concurrency": "2 requests (10/min)",
+            "restore_at": "Daily (Midnight CST)",
+        })
+
+    limits["qwen"] = {
+        "title": "Qwen / Alibaba Cloud Account Quotas",
+        "accounts_count": len(qwen_data),
+        "accounts": qwen_data,
+    }
+
     return limits
 
 
 def get_stored_cookies() -> Dict[str, Any]:
-    """Read stacked cookies/accounts for all 6 providers from unified SQLite DB."""
+    """Read stacked cookies/accounts for all 8 providers from unified SQLite DB."""
     result: Dict[str, Any] = {}
 
     label_map = {
@@ -2366,6 +2729,8 @@ def get_stored_cookies() -> Dict[str, Any]:
         "grok": ("cookie_string", "Grok SSO & x-userid"),
         "glm": ("token_lines", "GLM Refresh Tokens"),
         "chatgpt": ("json_or_token", "ChatGPT Accounts"),
+        "deepseek": ("token_or_json", "DeepSeek userToken or Login JSON"),
+        "qwen": ("token_or_json", "Qwen Bearer Token or Session JSON"),
     }
 
     for p, (ctype, clabel) in label_map.items():
@@ -2401,6 +2766,9 @@ def get_stored_cookies() -> Dict[str, Any]:
                 formatted.append({"id": acc["id"], "raw": tok, "masked": masked, "identifier": ident, "name": name})
             elif p == "glm":
                 masked = tok[:12] + "..." + tok[-8:] if len(tok) > 24 else tok
+                formatted.append({"id": acc["id"], "token": tok, "masked": masked, "identifier": ident, "name": name})
+            elif p in ("deepseek", "qwen"):
+                masked = tok[:15] + "..." + tok[-10:] if len(tok) > 25 else (ident or "Active")
                 formatted.append({"id": acc["id"], "token": tok, "masked": masked, "identifier": ident, "name": name})
 
         result[p] = {

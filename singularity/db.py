@@ -246,6 +246,91 @@ def parse_credential(provider: str, raw: str) -> Optional[Dict[str, Any]]:
             "metadata": json.dumps({}),
         }
 
+    # 7. DeepSeek
+    elif provider == "deepseek":
+        raw_str = raw.strip()
+        email = ""
+        token = raw_str
+        uid = ""
+        if raw_str.startswith("{"):
+            try:
+                d = json.loads(raw_str)
+                if isinstance(d, dict):
+                    email = d.get("email", "")
+                    token = d.get("token") or d.get("userToken") or d.get("user_token") or d.get("value") or raw_str
+                    uid = d.get("uid") or ""
+            except Exception:
+                pass
+
+        if not email and token:
+            jwt = _decode_jwt_payload(token)
+            if jwt:
+                email = jwt.get("email") or ""
+                uid = jwt.get("sub") or jwt.get("uid") or ""
+
+        identifier = (email or uid or f"ds_{token[:20]}").strip().lower()
+        name = f"DeepSeek ({identifier[:8]})" if not email else email.split("@")[0]
+        return {
+            "provider": "deepseek",
+            "identifier": identifier,
+            "name": name,
+            "token": token,
+            "plan": "free",
+            "status": "active",
+            "metadata": json.dumps({"email": email, "uid": uid}),
+        }
+
+    # 8. Qwen (Alibaba Cloud)
+    elif provider in ("qwen", "tongyi"):
+        raw_str = raw.strip()
+        email = ""
+        token = raw_str
+        uid = ""
+        cookies = ""
+        if raw_str.startswith("{"):
+            try:
+                d = json.loads(raw_str)
+                if isinstance(d, dict):
+                    email = d.get("email", "")
+                    token = (
+                        d.get("token")
+                        or d.get("userToken")
+                        or d.get("user_token")
+                        or d.get("value")
+                        or d.get("access_token")
+                        or raw_str
+                    )
+                    uid = d.get("uid") or d.get("id") or ""
+                    cookies = d.get("cookies") or d.get("cookie") or ""
+            except Exception:
+                pass
+        elif ";" in raw_str and ("eyJ" in raw_str or "x5sec" in raw_str):
+            parts = [p.strip() for p in raw_str.split(";", 1)]
+            if parts[0].startswith("eyJ"):
+                token = parts[0]
+                cookies = parts[1]
+            elif "x5sec" in parts[0] or "bx-v" in parts[0]:
+                cookies = parts[0]
+                token = parts[1]
+
+        if not email and token:
+            jwt = _decode_jwt_payload(token)
+            if jwt:
+                email = jwt.get("email") or ""
+                uid = jwt.get("id") or jwt.get("sub") or jwt.get("uid") or jwt.get("user_id") or ""
+
+        identifier = (email or uid or f"qwen_{token[:20]}").strip().lower()
+        name = f"Qwen ({identifier[:8]})" if not email else email.split("@")[0]
+        return {
+            "provider": "qwen",
+            "identifier": identifier,
+            "name": name,
+            "token": token,
+            "plan": "free",
+            "status": "active",
+            "metadata": json.dumps({"email": email, "uid": uid, "cookies": cookies}),
+        }
+
     return None
 
 

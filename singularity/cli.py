@@ -107,7 +107,7 @@ def cmd_status(args):
 
 
 def cmd_limits(args):
-    """Inspect remaining limits and quotas across all 6 providers."""
+    """Inspect remaining limits and quotas across all 7 providers."""
     db.init_db()
     data = asyncio.run(providers.get_all_limits())
 
@@ -251,6 +251,52 @@ def cmd_limits(args):
         print_table(headers, rows)
     else:
         print("    No GLM engines configured.")
+
+    # 7. DeepSeek AI
+    ds_obj = data.get("deepseek", {})
+    ds_accounts = ds_obj.get("accounts", [])
+    print(f"\n[7] {ds_obj.get('title', 'DeepSeek AI Account Quotas')} ({len(ds_accounts)} accounts)")
+    if ds_accounts:
+        headers = ["Account / Session", "Plan", "Status", "Images", "Reasoning / CoT", "Deep Res", "Web Search", "Uploads", "Reset Window"]
+        rows = []
+        for a in ds_accounts:
+            rows.append([
+                a.get("email", "—"),
+                a.get("type", "FREE"),
+                a.get("status", "Active"),
+                str(a.get("image_quota", "—")),
+                str(a.get("reason_remaining", "50 / day")),
+                str(a.get("deep_research", "50 / day")),
+                str(a.get("web_search", "200 / day")),
+                str(a.get("file_upload", "5 files (100MB)")),
+                str(a.get("restore_at", "Daily (Midnight CST)")),
+            ])
+        print_table(headers, rows)
+    else:
+        print("    No DeepSeek accounts configured in vault.")
+
+    # 8. Qwen / Alibaba Cloud
+    qw_obj = data.get("qwen", {})
+    qw_accounts = qw_obj.get("accounts", [])
+    print(f"\n[8] {qw_obj.get('title', 'Qwen / Alibaba Cloud Account Quotas')} ({len(qw_accounts)} accounts)")
+    if qw_accounts:
+        headers = ["Account / Session", "Plan", "Status", "Images", "Reasoning / CoT", "Deep Res", "Web Search", "Uploads", "Reset Window"]
+        rows = []
+        for a in qw_accounts:
+            rows.append([
+                a.get("email", "—"),
+                a.get("type", "FREE"),
+                a.get("status", "Active"),
+                str(a.get("image_quota", "30")),
+                str(a.get("reason_remaining", "100 / day")),
+                str(a.get("deep_research", "10 / day")),
+                str(a.get("web_search", "500 / day")),
+                str(a.get("file_upload", "50 files (100MB)")),
+                str(a.get("restore_at", "Daily (Midnight CST)")),
+            ])
+        print_table(headers, rows)
+    else:
+        print("    No Qwen accounts configured in vault.")
     print()
 
 

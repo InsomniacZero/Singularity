@@ -5,6 +5,7 @@ Port 9000
 """
 
 import asyncio
+import base64
 import json
 import os
 import time
@@ -190,6 +191,10 @@ def resolve_model_provider(model_name: str) -> str:
         return "glm"
     if m.startswith("grok") or m in ["fast", "heavy"]:
         return "grok"
+    if m.startswith("deepseek") or m.startswith("ds-") or m.startswith("r1") or m.startswith("v3") or m.startswith("v4") or m.startswith("coder") or m == "flash":
+        return "deepseek"
+    if m.startswith("qwen") or m.startswith("tongyi") or m.startswith("wanx"):
+        return "qwen"
     if m.startswith("gpt") or m.startswith("o1") or m.startswith("o3") or m.startswith("o4") or m in ["auto", "research", "flare", "astra", "luna", "sol", "terra", "sunburst"] or m.startswith("image-2.5"):
         return "chatgpt"
 
@@ -203,7 +208,7 @@ def resolve_model_provider(model_name: str) -> str:
 
 @app.get("/v1/models")
 async def list_models():
-    """Return unified OpenAI-compatible models list across all 6 providers."""
+    """Return unified OpenAI-compatible models list across all 8 providers."""
     now = int(time.time())
     data = []
     catalog = get_dynamic_models_catalog()
@@ -228,7 +233,125 @@ def is_simulation_mode() -> bool:
     return providers.is_simulation_active()
 
 
-async def generate_simulated_stream(model_name: str, provider_id: str) -> AsyncIterator[bytes]:
+def _generate_simulated_image_svg(prompt: str) -> str:
+    """Generate a crisp, authentic SVG image for simulation testing."""
+    prompt_lower = (prompt or "").lower()
+    if "apple" in prompt_lower:
+        # High quality vector artwork of a glossy red Apple
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1c2333"/>
+      <stop offset="100%" stop-color="#0b0e14"/>
+    </radialGradient>
+    <radialGradient id="appleGrad" cx="35%" cy="30%" r="65%">
+      <stop offset="0%" stop-color="#ff6b6b"/>
+      <stop offset="30%" stop-color="#e03131"/>
+      <stop offset="70%" stop-color="#c92a2a"/>
+      <stop offset="100%" stop-color="#5c0909"/>
+    </radialGradient>
+    <linearGradient id="leafGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#69db7c"/>
+      <stop offset="60%" stop-color="#2f9e44"/>
+      <stop offset="100%" stop-color="#1b5e20"/>
+    </linearGradient>
+    <linearGradient id="stemGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#a67c52"/>
+      <stop offset="100%" stop-color="#4e3620"/>
+    </linearGradient>
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#c92a2a" flood-opacity="0.4"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="28" fill="url(#bgGlow)"/>
+  <ellipse cx="256" cy="420" rx="140" ry="24" fill="#000000" opacity="0.6"/>
+  <!-- Stem -->
+  <path d="M 256 160 C 254 110, 275 85, 298 70 C 294 76, 276 102, 270 160 Z" fill="url(#stemGrad)"/>
+  <!-- Leaf -->
+  <path d="M 270 120 C 330 90, 365 110, 370 140 C 335 155, 290 145, 270 120 Z" fill="url(#leafGrad)"/>
+  <path d="M 275 122 Q 320 128 360 138" stroke="#8ce99a" stroke-width="2" fill="none" opacity="0.7"/>
+  <!-- Apple Body -->
+  <path d="M 256 185 C 230 160, 140 160, 130 250 C 120 340, 190 410, 256 410 C 322 410, 392 340, 382 250 C 372 160, 282 160, 256 185 Z" fill="url(#appleGrad)" filter="url(#glow)"/>
+  <!-- Specular Highlights -->
+  <ellipse cx="195" cy="225" rx="36" ry="58" transform="rotate(-30 195 225)" fill="#ffffff" opacity="0.32"/>
+  <ellipse cx="180" cy="210" rx="14" ry="24" transform="rotate(-30 180 210)" fill="#ffffff" opacity="0.6"/>
+  <!-- Bottom indents -->
+  <path d="M 230 405 C 245 400, 267 400, 282 405" stroke="#380505" stroke-width="4" stroke-linecap="round" fill="none"/>
+</svg>"""
+    else:
+        # Futuristic Cybernetic / Digital Art SVG
+        svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+    <linearGradient id="neonCyan" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#00f2fe"/>
+      <stop offset="100%" stop-color="#4facfe"/>
+    </linearGradient>
+    <linearGradient id="neonPurple" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#b176f2"/>
+      <stop offset="100%" stop-color="#f857a6"/>
+    </linearGradient>
+    <filter id="neonGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="28" fill="url(#bgGrad)"/>
+  <circle cx="256" cy="256" r="160" fill="none" stroke="url(#neonCyan)" stroke-width="3" stroke-dasharray="12 8" opacity="0.4"/>
+  <circle cx="256" cy="256" r="120" fill="none" stroke="url(#neonPurple)" stroke-width="5" filter="url(#neonGlow)"/>
+  <polygon points="256,150 348,310 164,310" fill="none" stroke="url(#neonCyan)" stroke-width="4" filter="url(#neonGlow)"/>
+  <circle cx="256" cy="256" r="48" fill="url(#neonPurple)" opacity="0.85" filter="url(#neonGlow)"/>
+  <circle cx="256" cy="256" r="22" fill="#ffffff"/>
+</svg>"""
+
+    b64 = base64.b64encode(svg.encode("utf-8")).decode("utf-8")
+    return f"data:image/svg+xml;base64,{b64}"
+
+
+def _get_simulated_response_payload(model_name: str, provider_id: str, prompt_text: str = "") -> str:
+    """Determine simulated response text (handling text, image, and video modalities)."""
+    m_lower = (model_name or "").lower()
+    p_lower = (prompt_text or "").lower()
+
+    # Detect Video Modality
+    if any(k in m_lower for k in ("video", "t2v", "wanx-2.1", "cogvideox", "kling", "sora", "runway")) or any(k in p_lower for k in ("video", "movie", "animation", "motion clip")):
+        video_url = "/static/demo_video.mp4"
+        return (
+            f"🎬 **Singularity Cinematic Video Synthesis** (Simulated Response)\n\n"
+            f"• **Model:** `{model_name}`\n"
+            f"• **Prompt:** *\"{prompt_text or 'Autonomous dynamic frame sequence'}\"*\n"
+            f"• **Specs:** 720p HD • 24 FPS • H.264 MP4\n\n"
+            f"[Generated Video]({video_url})"
+        )
+
+    # Detect Image Modality
+    if any(k in m_lower for k in ("image", "imagine", "cogview", "dall-e", "flux", "imagen", "sdxl", "wanx")) or any(k in p_lower for k in ("img", "image", "picture", "photo", "drawing", "illustration", "wallpaper")):
+        img_url = _generate_simulated_image_svg(prompt_text)
+        return (
+            f"🎨 **Singularity Neural Image Synthesis** (Simulated Response)\n\n"
+            f"• **Model:** `{model_name}`\n"
+            f"• **Prompt:** *\"{prompt_text or 'Creative synthesis'}\"*\n"
+            f"• **Resolution:** 1024x1024 High-Definition Vector Output\n\n"
+            f"![Generated Image]({img_url})"
+        )
+
+    # Standard Text Response
+    return (
+        f"⚡ **Singularity Portable Gateway** (Simulated Response)\n\n"
+        f"• **Model:** `{model_name}`\n"
+        f"• **Provider:** `{provider_id.upper()}`\n"
+        f"• **Gateway Status:** 100% Self-Contained (Zero Legacy Dependencies)\n\n"
+        f"Your device simulation is verified and running cleanly. Streaming SSE buffers, token rotation, and headers are functioning as expected."
+    )
+
+
+async def generate_simulated_stream(model_name: str, provider_id: str, prompt_text: str = "") -> AsyncIterator[bytes]:
     """Yield OpenAI-compatible SSE chunks for offline/device simulation testing."""
     created_ts = int(time.time())
     sim_id = f"chatcmpl-sim-{int(time.time()*1000)}"
@@ -243,14 +366,9 @@ async def generate_simulated_stream(model_name: str, provider_id: str) -> AsyncI
     yield f"data: {json.dumps(role_chunk)}\n\n".encode("utf-8")
     await asyncio.sleep(0.04)
 
-    sim_text = (
-        f"⚡ **Singularity Portable Gateway** (Simulated Response)\n\n"
-        f"• **Model:** `{model_name}`\n"
-        f"• **Provider:** `{provider_id.upper()}`\n"
-        f"• **Gateway Status:** 100% Self-Contained (Zero Legacy Dependencies)\n\n"
-        f"Your device simulation is verified and running cleanly. Streaming SSE buffers, token rotation, and headers are functioning as expected."
-    )
+    sim_text = _get_simulated_response_payload(model_name, provider_id, prompt_text)
 
+    # Stream in natural chunk sizes
     words = sim_text.split(" ")
     for w in words:
         c = {
@@ -276,27 +394,38 @@ async def generate_simulated_stream(model_name: str, provider_id: str) -> AsyncI
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request):
-    """Universal router for chat completions across all 6 providers."""
+    """Universal router for chat completions across all 7 providers."""
     try:
         body = await request.json()
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON body")
+        body = {}
 
-    model_name = body.get("model", "auto")
-    provider_id = resolve_model_provider(model_name)
-    meta = PROVIDERS_CONFIG.get(provider_id)
-    if not meta:
-        raise HTTPException(status_code=400, detail=f"No provider found for model: {model_name}")
+    model_name = body.get("model", "gpt-5-6-mini")
+    res = resolve_model_provider(model_name)
+    if isinstance(res, tuple):
+        provider_id, target_port = res
+    else:
+        provider_id = res
+        meta_cfg = providers.PROVIDERS_CONFIG.get(provider_id, providers.PROVIDERS_CONFIG.get("chatgpt", {}))
+        target_port = meta_cfg.get("port", 8000)
 
-    target_port = meta["port"]
-    target_host = providers.get_provider_host(provider_id)
-    target_url = f"http://{target_host}:{target_port}/v1/chat/completions"
+    # If simulation mode is requested or active, we can skip target resolution
+    target_url = f"http://127.0.0.1:{target_port}/v1/chat/completions"
 
-    headers = {"Content-Type": "application/json"}
-    if provider_id == "kimi":
-        rotated_token = db.get_next_token("kimi")
-        if rotated_token:
-            headers["Authorization"] = f"Bearer {rotated_token}"
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Singularity-Universal-Gateway/2.0",
+    }
+
+    # Pass through incoming authorization header or look up default account token
+    incoming_auth = request.headers.get("Authorization")
+    meta = providers.PROVIDERS_CONFIG.get(provider_id, {})
+    if incoming_auth:
+        headers["Authorization"] = incoming_auth
+    elif meta.get("auth_env"):
+        env_token = os.getenv(meta["auth_env"])
+        if env_token:
+            headers["Authorization"] = f"Bearer {env_token}"
         elif meta["auth_header"]:
             headers["Authorization"] = meta["auth_header"]
     elif meta["auth_header"]:
@@ -305,10 +434,22 @@ async def chat_completions(request: Request):
     is_stream = body.get("stream", False)
     simulate_requested = is_simulation_mode() or body.get("simulate", False)
 
+    # Extract user prompt text for modality detection & simulation
+    messages = body.get("messages", [])
+    prompt_text = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            content = m.get("content", "")
+            if isinstance(content, str):
+                prompt_text = content
+            elif isinstance(content, list):
+                prompt_text = " ".join(item.get("text", "") for item in content if isinstance(item, dict))
+            break
+
     if simulate_requested:
         if is_stream:
             return StreamingResponse(
-                generate_simulated_stream(model_name, provider_id),
+                generate_simulated_stream(model_name, provider_id, prompt_text=prompt_text),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -319,6 +460,7 @@ async def chat_completions(request: Request):
                 },
             )
         else:
+            sim_content = _get_simulated_response_payload(model_name, provider_id, prompt_text)
             return JSONResponse(
                 status_code=200,
                 content={
@@ -330,7 +472,7 @@ async def chat_completions(request: Request):
                         "index": 0,
                         "message": {
                             "role": "assistant",
-                            "content": f"⚡ Singularity Portable Gateway (Simulated Response for {model_name})",
+                            "content": sim_content,
                         },
                         "finish_reason": "stop",
                     }],
@@ -664,10 +806,10 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.on_event("startup")
 async def on_startup():
-    """Start supervisor watchdog and auto-launch in-process workers (kimi, grok, glm) if offline."""
+    """Start supervisor watchdog and auto-launch in-process workers (kimi, grok, glm, deepseek, qwen) if offline."""
     try:
         worker.ensure_supervisor_running()
-        for p in ["kimi", "grok", "glm"]:
+        for p in ["kimi", "grok", "glm", "deepseek", "qwen"]:
             try:
                 start_provider(p)
             except Exception:
@@ -681,7 +823,7 @@ def main():
     port = int(os.getenv("PORT", "9000"))
     try:
         worker.ensure_supervisor_running()
-        for p in ["kimi", "grok", "glm"]:
+        for p in ["kimi", "grok", "glm", "deepseek", "qwen"]:
             try:
                 start_provider(p)
             except Exception:

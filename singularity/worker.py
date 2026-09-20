@@ -3,7 +3,7 @@
 Singularity Unified Provider Worker Daemon
 ==========================================
 A lightweight, 100% self-contained micro-server providing native backend daemons
-for each AI provider (Gemini, ChatGPT, Claude, Kimi, GLM, Grok) across Windows,
+for each AI provider (Gemini, ChatGPT, Claude, Kimi, GLM, Grok, DeepSeek, Qwen) across Windows,
 Linux, macOS, and Android/Termux without requiring any legacy scripts or binaries.
 
 Supports:
