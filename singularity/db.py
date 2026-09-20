@@ -67,10 +67,52 @@ def init_db() -> None:
 # Token & Credential Parsers
 # ==============================================================================
 
+def _clean_jwt_string(raw: str) -> str:
+    """Extract and unwrap clean JWT string from raw input (JSON, quotes, or Bearer prefix)."""
+    if not raw:
+        return ""
+    t = raw.strip()
+    # Strip wrapping quotes
+    if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+        t = t[1:-1].strip()
+    # If JSON object, look for refresh_token, access_token, token, or value
+    if (t.startswith("{") and t.endswith("}")) or (t.startswith("[") and t.endswith("]")):
+        try:
+            data = json.loads(t)
+            if isinstance(data, dict):
+                cand = (
+                    data.get("refresh_token")
+                    or data.get("access_token")
+                    or data.get("token")
+                    or data.get("value")
+                )
+                if cand:
+                    t = str(cand).strip()
+            elif isinstance(data, list) and data:
+                if isinstance(data[0], str):
+                    t = data[0].strip()
+                elif isinstance(data[0], dict):
+                    cand = (
+                        data[0].get("refresh_token")
+                        or data[0].get("access_token")
+                        or data[0].get("token")
+                        or data[0].get("value")
+                    )
+                    if cand:
+                        t = str(cand).strip()
+        except Exception:
+            pass
+    # Strip Bearer prefix if present
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+    return t.strip().strip('"').strip("'")
+
+
 def _decode_jwt_payload(token_str: str) -> Optional[Dict[str, Any]]:
     """Safely decode JWT payload without verification."""
     try:
-        parts = token_str.strip().split(".")
+        clean = _clean_jwt_string(token_str)
+        parts = clean.split(".")
         if len(parts) >= 2:
             payload_b64 = parts[1]
             payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
@@ -149,11 +191,12 @@ def parse_credential(provider: str, raw: str) -> Optional[Dict[str, Any]]:
 
     # 2. Kimi
     elif provider == "kimi":
+        raw = _clean_jwt_string(raw)
         # Check if line format KIMI_TOKEN=...
         if "KIMI_TOKEN=" in raw:
             m = re.search(r"KIMI_TOKEN=([^\s]+)", raw)
             if m:
-                raw = m.group(1).strip()
+                raw = _clean_jwt_string(m.group(1))
 
         jwt = _decode_jwt_payload(raw)
         sub = None

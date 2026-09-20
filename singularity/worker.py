@@ -191,8 +191,10 @@ class WorkerHTTPHandler(http.server.BaseHTTPRequestHandler):
                     self.send_response(200)
                     self.send_header("Content-Type", "text/event-stream")
                     self.send_header("Cache-Control", "no-cache")
+                    self.send_header("Connection", "close")
                     self.send_cors_headers()
                     self.end_headers()
+                    self.close_connection = True
 
                     async def run_stream():
                         try:

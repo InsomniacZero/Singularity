@@ -1253,7 +1253,7 @@ const TOKEN_GUIDES = {
       },
       {
         num: '3',
-        text: 'Copy the <code>access_token</code> or <code>refresh_token</code> string (starts with <code>eyJ...</code>) and paste it below.'
+        text: 'Copy the <code>refresh_token</code> string (recommended for long-term access) or <code>access_token</code> and paste it below. (JSON dumps and quotes are auto-unwrapped).'
       }
     ],
     rules: [

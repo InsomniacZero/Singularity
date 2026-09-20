@@ -43,9 +43,55 @@ FAKE_HEADERS = {
 }
 
 
+def _clean_token(raw_token: str) -> str:
+    """Extract and unwrap clean JWT token from raw input (JSON, quotes, or Bearer prefix)."""
+    if not raw_token:
+        return ""
+    t = raw_token.strip()
+    if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
+        t = t[1:-1].strip()
+    if (t.startswith("{") and t.endswith("}")) or (t.startswith("[") and t.endswith("]")):
+        try:
+            data = json.loads(t)
+            if isinstance(data, dict):
+                cand = (
+                    data.get("refresh_token")
+                    or data.get("access_token")
+                    or data.get("token")
+                    or data.get("value")
+                )
+                if cand:
+                    t = str(cand).strip()
+            elif isinstance(data, list) and data:
+                if isinstance(data[0], str):
+                    t = data[0].strip()
+                elif isinstance(data[0], dict):
+                    cand = (
+                        data[0].get("refresh_token")
+                        or data[0].get("access_token")
+                        or data[0].get("token")
+                        or data[0].get("value")
+                    )
+                    if cand:
+                        t = str(cand).strip()
+        except Exception:
+            pass
+    if t.lower().startswith("bearer "):
+        t = t[7:].strip()
+    return t.strip().strip('"').strip("'")
+
+
+def _extract_device_id_from_token(token: str) -> Optional[str]:
+    payload = _parse_jwt(token)
+    if payload and payload.get("device_id"):
+        return str(payload.get("device_id"))
+    return None
+
+
 def _parse_jwt(token: str) -> Optional[Dict[str, Any]]:
     try:
-        parts = token.split(".")
+        clean = _clean_token(token)
+        parts = clean.split(".")
         if len(parts) != 3:
             return None
         payload = parts[1]
@@ -94,10 +140,10 @@ _CACHE_LOCK = asyncio.Lock()
 
 
 async def get_kimi_access_token(refresh_token: str, client: Optional[httpx.AsyncClient] = None) -> str:
-    """Exchange Kimi refresh token for active bearer access token with in-memory caching."""
-    token = refresh_token.strip()
-    if token.startswith("Bearer "):
-        token = token[7:].strip()
+    """Exchange Kimi refresh token for active bearer access token with in-memory caching and failover."""
+    token = _clean_token(refresh_token)
+    if not token:
+        raise ValueError("Empty Kimi token provided")
 
     # Check if already a valid non-expired access token
     payload = _parse_jwt(token)
@@ -113,31 +159,63 @@ async def get_kimi_access_token(refresh_token: str, client: Optional[httpx.Async
         if cached and now < cached[1] - 60:
             return cached[0]
 
+    device_id = _extract_device_id_from_token(token) or str(random.randint(7000000000000000000, 7999999999999999999))
+
     headers = {
         **FAKE_HEADERS,
         "Authorization": f"Bearer {token}",
+        "X-Msh-Device-Id": device_id,
     }
 
     own_client = False
     if client is None:
-        client = httpx.AsyncClient(timeout=15.0, follow_redirects=True)
+        client = httpx.AsyncClient(timeout=httpx.Timeout(15.0, connect=8.0), follow_redirects=True)
         own_client = True
 
+    # Try primary endpoint, then alternative fallback endpoints
+    endpoints = [
+        KIMI_API_BASE,
+        "https://kimi.moonshot.cn",
+        "https://www.kimi.com",
+    ]
+    seen = set()
+    unique_endpoints = []
+    for ep in endpoints:
+        ep_clean = ep.rstrip("/")
+        if ep_clean not in seen:
+            seen.add(ep_clean)
+            unique_endpoints.append(ep_clean)
+
+    last_err = None
     try:
-        resp = await client.get(f"{KIMI_API_BASE}/api/auth/token/refresh", headers=headers)
-        if resp.status_code != 200:
-            raise RuntimeError(f"Kimi token refresh failed ({resp.status_code}): {resp.text[:200]}")
-        data = resp.json()
-        access_tok = data.get("access_token")
-        if not access_tok:
-            raise RuntimeError("Kimi did not return access_token")
+        for ep in unique_endpoints:
+            try:
+                ep_headers = {
+                    **headers,
+                    "Origin": ep,
+                    "Referer": f"{ep}/",
+                }
+                resp = await client.get(f"{ep}/api/auth/token/refresh", headers=ep_headers)
+                if resp.status_code != 200:
+                    last_err = RuntimeError(f"Kimi token refresh failed ({resp.status_code}): {resp.text[:200]}")
+                    continue
+                data = resp.json()
+                access_tok = data.get("access_token")
+                if not access_tok:
+                    last_err = RuntimeError("Kimi did not return access_token")
+                    continue
 
-        p = _parse_jwt(access_tok)
-        exp = float(p.get("exp", now + 3600)) if p else now + 3600
+                p = _parse_jwt(access_tok)
+                exp = float(p.get("exp", now + 3600)) if p else now + 3600
 
-        async with _CACHE_LOCK:
-            _ACCESS_TOKEN_CACHE[token] = (access_tok, exp)
-        return access_tok
+                async with _CACHE_LOCK:
+                    _ACCESS_TOKEN_CACHE[token] = (access_tok, exp)
+                return access_tok
+            except (httpx.ConnectError, httpx.TimeoutException, OSError) as net_err:
+                last_err = net_err
+                continue
+
+        raise last_err or RuntimeError("Kimi token refresh failed on all candidate endpoints")
     finally:
         if own_client:
             await client.aclose()
@@ -273,91 +351,154 @@ async def stream_kimi_chat(
     has_yielded_tokens = False
 
     for attempt_idx, account in enumerate(sorted_candidates):
-        token_str = account["token"]
+        token_str = _clean_token(account["token"])
         acc_name = account.get("name") or account.get("identifier") or f"Account-{account.get('id')}"
+        device_id = _extract_device_id_from_token(token_str) or str(random.randint(7000000000000000000, 7999999999999999999))
 
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=15.0), follow_redirects=True) as client:
-                try:
-                    access_token = await get_kimi_access_token(token_str, client=client)
-                except Exception as auth_err:
-                    last_error_msg = f"Token refresh error on {acc_name}: {str(auth_err)}"
-                    continue
+        # Candidate endpoints to prevent DNS or connectivity failures
+        candidate_endpoints = [
+            KIMI_API_BASE,
+            "https://kimi.moonshot.cn",
+            "https://www.kimi.com",
+        ]
+        seen_ep = set()
+        unique_eps = []
+        for ep in candidate_endpoints:
+            ep_clean = ep.rstrip("/")
+            if ep_clean not in seen_ep:
+                seen_ep.add(ep_clean)
+                unique_eps.append(ep_clean)
 
-                headers = {
-                    **FAKE_HEADERS,
-                    "Authorization": f"Bearer {access_token}",
-                    "X-Msh-Device-Id": device_id,
-                    "X-Msh-Session-Id": session_id,
-                    "Connect-Protocol-Version": "1",
-                    "Content-Type": "application/connect+json",
-                }
-
-                async with client.stream(
-                    "POST",
-                    f"{KIMI_API_BASE}{KIMI_CHAT_PATH}",
-                    content=connect_body,
-                    headers=headers,
-                ) as resp:
-                    if resp.status_code >= 400:
-                        err_text = (await resp.aread()).decode("utf-8", errors="ignore")
-                        last_error_msg = f"HTTP {resp.status_code} on {acc_name}: {err_text[:200]}"
-                        if resp.status_code in (401, 403, 429) and attempt_idx + 1 < len(sorted_candidates):
-                            continue
+        account_success = False
+        for current_base in unique_eps:
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0), follow_redirects=True) as client:
+                    try:
+                        access_token = await get_kimi_access_token(token_str, client=client)
+                    except Exception as auth_err:
+                        last_error_msg = f"Token refresh error on {acc_name}: {str(auth_err)}"
+                        # Break to next account if refresh token itself failed
                         break
 
-                    buffer = bytearray()
-                    account_failed = False
-                    total_reasoning = ""
-                    total_content = ""
+                    headers = {
+                        **FAKE_HEADERS,
+                        "Authorization": f"Bearer {access_token}",
+                        "Origin": current_base,
+                        "Referer": f"{current_base}/",
+                        "X-Msh-Device-Id": device_id,
+                        "X-Msh-Session-Id": session_id,
+                        "Connect-Protocol-Version": "1",
+                        "Content-Type": "application/connect+json",
+                    }
 
-                    async for chunk in resp.aiter_bytes():
-                        buffer.extend(chunk)
-                        while len(buffer) >= 5:
-                            flag = buffer[0]
-                            length = int.from_bytes(buffer[1:5], "big")
-                            if len(buffer) < 5 + length:
+                    async with client.stream(
+                        "POST",
+                        f"{current_base}{KIMI_CHAT_PATH}",
+                        content=connect_body,
+                        headers=headers,
+                    ) as resp:
+                        if resp.status_code >= 400:
+                            err_text = (await resp.aread()).decode("utf-8", errors="ignore")
+                            last_error_msg = f"HTTP {resp.status_code} on {acc_name}: {err_text[:200]}"
+                            if resp.status_code in (401, 403, 429):
+                                # Account level issue
                                 break
+                            # Try next endpoint for 500s
+                            continue
 
-                            frame = bytes(buffer[5 : 5 + length])
-                            del buffer[: 5 + length]
+                        buffer = bytearray()
+                        account_failed = False
+                        total_reasoning = ""
+                        total_content = ""
 
-                            if flag & 0x80:
-                                continue
-
-                            try:
-                                evt_str = frame.decode("utf-8", errors="ignore").strip()
-                                if not evt_str:
-                                    continue
-                                evt = json.loads(evt_str)
-                            except Exception:
-                                continue
-
-                            # Check for Connect Protocol trailer (flag & 0x02) or error
-                            err = evt.get("error")
-                            is_trailer = bool(flag & 0x02)
-
-                            if err:
-                                err_code = err.get("code", "error") if isinstance(err, dict) else "error"
-                                err_msg = ""
-                                if isinstance(err, dict):
-                                    err_msg = err.get("localizedMessage", {}).get("message") or err.get("message") or str(err)
-                                else:
-                                    err_msg = str(evt)
-
-                                is_quota = (
-                                    "exhausted" in str(err_code).lower()
-                                    or "quota" in str(err_msg).lower()
-                                    or "credits" in str(err_msg).lower()
-                                )
-                                if is_quota:
-                                    _EXHAUSTED_ACCOUNTS[token_str] = time.time() + 1800
-
-                                if not has_yielded_tokens and attempt_idx + 1 < len(sorted_candidates):
-                                    account_failed = True
-                                    last_error_msg = f"Quota depleted on {acc_name} ({err_msg}). Rotating..."
+                        async for chunk in resp.aiter_bytes():
+                            buffer.extend(chunk)
+                            while len(buffer) >= 5:
+                                flag = buffer[0]
+                                length = int.from_bytes(buffer[1:5], "big")
+                                if len(buffer) < 5 + length:
                                     break
-                                else:
+
+                                frame = bytes(buffer[5 : 5 + length])
+                                del buffer[: 5 + length]
+
+                                if flag & 0x80:
+                                    continue
+
+                                try:
+                                    evt_str = frame.decode("utf-8", errors="ignore").strip()
+                                    if not evt_str:
+                                        continue
+                                    evt = json.loads(evt_str)
+                                except Exception:
+                                    continue
+
+                                # Check for Connect Protocol trailer (flag & 0x02) or error
+                                err = evt.get("error")
+                                is_trailer = bool(flag & 0x02)
+
+                                if err:
+                                    err_code = err.get("code", "error") if isinstance(err, dict) else "error"
+                                    err_msg = ""
+                                    if isinstance(err, dict):
+                                        err_msg = err.get("localizedMessage", {}).get("message") or err.get("message") or str(err)
+                                    else:
+                                        err_msg = str(evt)
+
+                                    is_quota = (
+                                        "exhausted" in str(err_code).lower()
+                                        or "quota" in str(err_msg).lower()
+                                        or "credits" in str(err_msg).lower()
+                                    )
+                                    if is_quota:
+                                        _EXHAUSTED_ACCOUNTS[token_str] = time.time() + 1800
+
+                                    if not has_yielded_tokens and attempt_idx + 1 < len(sorted_candidates):
+                                        account_failed = True
+                                        last_error_msg = f"Quota depleted on {acc_name} ({err_msg}). Rotating..."
+                                        break
+                                    else:
+                                        if not role_yielded:
+                                            yield {
+                                                "id": chat_id,
+                                                "object": "chat.completion.chunk",
+                                                "created": created_ts,
+                                                "model": model,
+                                                "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                                            }
+                                            role_yielded = True
+                                        yield {
+                                            "id": chat_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": created_ts,
+                                            "model": model,
+                                            "choices": [{
+                                                "index": 0,
+                                                "delta": {"content": f"\n\n⚠️ **Kimi Error ({err_code}):** {err_msg}\n"},
+                                                "finish_reason": "error",
+                                            }],
+                                        }
+                                        return
+
+                                if is_trailer:
+                                    # Clean normal end-of-stream trailer frame
+                                    break
+
+                                mask = evt.get("mask", "")
+                                block = evt.get("block", {})
+                                think_obj = block.get("think")
+                                text_obj = block.get("text")
+
+                                delta_reasoning = None
+                                delta_content = None
+
+                                if "block.think" in mask or (isinstance(think_obj, dict) and think_obj.get("content")):
+                                    delta_reasoning = think_obj.get("content") if isinstance(think_obj, dict) else None
+
+                                if "block.text" in mask or (isinstance(text_obj, dict) and text_obj.get("content")):
+                                    delta_content = text_obj.get("content") if isinstance(text_obj, dict) else None
+
+                                if delta_reasoning or delta_content:
                                     if not role_yielded:
                                         yield {
                                             "id": chat_id,
@@ -367,105 +508,70 @@ async def stream_kimi_chat(
                                             "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
                                         }
                                         role_yielded = True
+
+                                if delta_reasoning:
+                                    has_yielded_tokens = True
+                                    total_reasoning += delta_reasoning
                                     yield {
                                         "id": chat_id,
                                         "object": "chat.completion.chunk",
                                         "created": created_ts,
                                         "model": model,
-                                        "choices": [{
-                                            "index": 0,
-                                            "delta": {"content": f"\n\n⚠️ **Kimi Error ({err_code}):** {err_msg}\n"},
-                                            "finish_reason": "error",
-                                        }],
+                                        "choices": [{"index": 0, "delta": {"reasoning_content": delta_reasoning}, "finish_reason": None}],
                                     }
-                                    return
 
-                            if is_trailer:
-                                # Clean normal end-of-stream trailer frame
-                                break
-
-                            mask = evt.get("mask", "")
-                            block = evt.get("block", {})
-                            think_obj = block.get("think")
-                            text_obj = block.get("text")
-
-                            delta_reasoning = None
-                            delta_content = None
-
-                            if "block.think" in mask or (isinstance(think_obj, dict) and think_obj.get("content")):
-                                delta_reasoning = think_obj.get("content") if isinstance(think_obj, dict) else None
-
-                            if "block.text" in mask or (isinstance(text_obj, dict) and text_obj.get("content")):
-                                delta_content = text_obj.get("content") if isinstance(text_obj, dict) else None
-
-                            if delta_reasoning or delta_content:
-                                if not role_yielded:
+                                if delta_content:
+                                    has_yielded_tokens = True
+                                    total_content += delta_content
                                     yield {
                                         "id": chat_id,
                                         "object": "chat.completion.chunk",
                                         "created": created_ts,
                                         "model": model,
-                                        "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                                        "choices": [{"index": 0, "delta": {"content": delta_content}, "finish_reason": None}],
                                     }
-                                    role_yielded = True
 
-                            if delta_reasoning:
-                                has_yielded_tokens = True
-                                total_reasoning += delta_reasoning
+                        if account_failed:
+                            break
+
+                        # If response finished with only reasoning and 0 text, yield clear conclusion
+                        if has_yielded_tokens:
+                            if not total_content and total_reasoning:
                                 yield {
                                     "id": chat_id,
                                     "object": "chat.completion.chunk",
                                     "created": created_ts,
                                     "model": model,
-                                    "choices": [{"index": 0, "delta": {"reasoning_content": delta_reasoning}, "finish_reason": None}],
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {"content": "\n\n*(Thinking process completed)*"},
+                                        "finish_reason": None,
+                                    }],
                                 }
 
-                            if delta_content:
-                                has_yielded_tokens = True
-                                total_content += delta_content
-                                yield {
-                                    "id": chat_id,
-                                    "object": "chat.completion.chunk",
-                                    "created": created_ts,
-                                    "model": model,
-                                    "choices": [{"index": 0, "delta": {"content": delta_content}, "finish_reason": None}],
-                                }
-
-                    if account_failed:
-                        continue
-
-                    # If response finished with only reasoning and 0 text, yield clear conclusion
-                    if has_yielded_tokens:
-                        if not total_content and total_reasoning:
+                            # Final stop chunk
                             yield {
                                 "id": chat_id,
                                 "object": "chat.completion.chunk",
                                 "created": created_ts,
                                 "model": model,
-                                "choices": [{
-                                    "index": 0,
-                                    "delta": {"content": "\n\n*(Thinking process completed)*"},
-                                    "finish_reason": None,
-                                }],
+                                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                             }
+                            return
 
-                        # Final stop chunk
-                        yield {
-                            "id": chat_id,
-                            "object": "chat.completion.chunk",
-                            "created": created_ts,
-                            "model": model,
-                            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                        }
-                        return
-
-        except Exception as conn_err:
-            last_error_msg = f"Connection error on {acc_name}: {str(conn_err)}"
-            if not has_yielded_tokens and attempt_idx + 1 < len(sorted_candidates):
+            except Exception as conn_err:
+                last_error_msg = f"Connection error on {acc_name} ({current_base}): {str(conn_err)}"
+                if has_yielded_tokens:
+                    return
                 continue
-            break
 
-    # If all candidate accounts failed
+        if has_yielded_tokens:
+            return
+
+    # If all candidate accounts failed and no tokens were emitted
+    if has_yielded_tokens:
+        return
+
     if not role_yielded:
         yield {
             "id": chat_id,

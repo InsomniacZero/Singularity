@@ -80,7 +80,7 @@ if not exist "%SING_DIR%\.venv\Scripts\python.exe" (
 )
 
 :: Verify dependencies
-"%PYTHON_EXE%" %PYTHON_ARGS% -c "import starlette, uvicorn, httpx" >nul 2>&1
+"%PYTHON_EXE%" %PYTHON_ARGS% -c "import starlette, uvicorn, httpx, curl_cffi" >nul 2>&1
 if %errorlevel% neq 0 (
     echo [*] Installing required Singularity dependencies from requirements.txt...
     "%PYTHON_EXE%" %PYTHON_ARGS% -m pip install -r "%ROOT_DIR%requirements.txt"

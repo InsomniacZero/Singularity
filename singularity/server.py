@@ -480,20 +480,63 @@ async def chat_completions(request: Request):
                 },
             )
 
+    # 1. Direct in-process execution for thread workers (bypasses loopback socket entirely)
+    # This prevents loopback socket disconnects, avoids BaseHTTP keepalive issues, and is 10x faster.
+    if worker.is_worker_in_thread(provider_id):
+        if is_stream:
+            async def direct_stream_generator() -> AsyncIterator[bytes]:
+                try:
+                    async for chunk in engines.stream_chat(provider_id, model_name, body.get("messages", []), stream=True):
+                        yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                    yield b"data: [DONE]\n\n"
+                except Exception as inner_e:
+                    p_name = meta.get("name", provider_id)
+                    err_msg = f"Provider {p_name} error: {str(inner_e)}"
+                    yield f"data: {json.dumps({'error': err_msg})}\n\n".encode("utf-8")
+                    yield b"data: [DONE]\n\n"
+
+            return StreamingResponse(
+                direct_stream_generator(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "Connection": "keep-alive",
+                    "X-Accel-Buffering": "no",
+                    "X-Singularity-Provider": provider_id,
+                },
+            )
+        else:
+            try:
+                data = await engines.generate_chat(provider_id, model_name, body.get("messages", []))
+                return JSONResponse(status_code=200, content=data)
+            except Exception as inner_e:
+                p_name = meta.get("name", provider_id)
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Provider {p_name} error: {str(inner_e)}",
+                )
+
     if is_stream:
         async def stream_generator() -> AsyncIterator[bytes]:
             client = httpx.AsyncClient(timeout=120.0)
+            yielded_any_bytes = False
             try:
                 async with client.stream("POST", target_url, json=body, headers=headers) as upstream:
                     if upstream.status_code < 400:
                         async for chunk in upstream.aiter_bytes():
                             if chunk:
+                                yielded_any_bytes = True
                                 yield chunk
                         return
             except Exception:
                 pass
             finally:
                 await client.aclose()
+
+            # If bytes were already emitted to the client, DO NOT run fallback into the same stream!
+            if yielded_any_bytes:
+                yield b"data: [DONE]\n\n"
+                return
 
             # Direct in-process native engine fallback (when upstream daemon is down or returned >= 400)
             try:
@@ -804,9 +847,26 @@ async def serve_favicon():
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
+def _ensure_packages():
+    """Silently ensure optional packages like curl_cffi are present for TLS impersonation."""
+    try:
+        import curl_cffi
+    except ImportError:
+        try:
+            import subprocess
+            subprocess.Popen(
+                [sys.executable, "-m", "pip", "install", "curl_cffi>=0.16.0"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            pass
+
+
 @app.on_event("startup")
 async def on_startup():
     """Start supervisor watchdog and auto-launch in-process workers (chatgpt, kimi, grok, glm, deepseek, qwen) if offline."""
+    _ensure_packages()
     try:
         worker.ensure_supervisor_running()
         for p in ["chatgpt", "kimi", "grok", "glm", "deepseek", "qwen"]:
