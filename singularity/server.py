@@ -806,10 +806,10 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 @app.on_event("startup")
 async def on_startup():
-    """Start supervisor watchdog and auto-launch in-process workers (kimi, grok, glm, deepseek, qwen) if offline."""
+    """Start supervisor watchdog and auto-launch in-process workers (chatgpt, kimi, grok, glm, deepseek, qwen) if offline."""
     try:
         worker.ensure_supervisor_running()
-        for p in ["kimi", "grok", "glm", "deepseek", "qwen"]:
+        for p in ["chatgpt", "kimi", "grok", "glm", "deepseek", "qwen"]:
             try:
                 start_provider(p)
             except Exception:
@@ -823,7 +823,7 @@ def main():
     port = int(os.getenv("PORT", "9000"))
     try:
         worker.ensure_supervisor_running()
-        for p in ["kimi", "grok", "glm", "deepseek", "qwen"]:
+        for p in ["chatgpt", "kimi", "grok", "glm", "deepseek", "qwen"]:
             try:
                 start_provider(p)
             except Exception:
