@@ -26,3 +26,5 @@ singularity/data/*
 singularity/credentials_export*.json
 legacy/
 .vscode/
+*.zip
+singularity/static/fonts/*-fontiko/

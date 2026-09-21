@@ -66,7 +66,7 @@ fi
 
 # Route CLI commands vs server launch
 case "$1" in
-    status|limits|accounts|import|export|simulate|host|chat|service|-h|--help)
+    status|limits|accounts|import|export|simulate|host|chat|thinking|service|-h|--help)
         exec "$PYTHON_BIN" cli.py "$@"
         ;;
     server|"")

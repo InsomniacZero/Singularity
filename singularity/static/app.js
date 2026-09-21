@@ -5,13 +5,13 @@
 
 // Global State
 const state = {
-  currentTab: 'control',
+  currentTab: 'playground',
   services: [],
   limits: {},
   models: [],
   activeCookieProvider: 'chatgpt',
   cookiesData: {},
-  selectedModel: 'gpt-5-6-mini',
+  selectedModel: 'gpt-5.6-sol',
   chatMessages: [],
   isStreaming: false,
   playgroundModality: 'all',
@@ -178,10 +178,13 @@ function initNavigation() {
       }
     });
   });
+
+  document.body.dataset.activeTab = state.currentTab || 'playground';
 }
 
 function switchTab(tabId) {
   state.currentTab = tabId;
+  document.body.dataset.activeTab = tabId;
 
   document.querySelectorAll('.nav-item').forEach(item => {
     item.classList.toggle('active', item.dataset.tab === tabId);
@@ -212,8 +215,8 @@ function switchTab(tabId) {
       sub: '',
     },
     playground: {
-      h: 'Interactive Playground',
-      sub: 'Direct workbench to test streaming chat completions and reasoning traces across any provider.',
+      h: 'Playground',
+      sub: '',
     },
     tunnel: {
       h: 'Singularity-Access',
@@ -255,7 +258,8 @@ function renderServices() {
 
   const onlineCount = state.services.filter(s => s.running).length;
   const totalCount = state.services.length || 8;
-  document.getElementById('nav-active-count').textContent = `${onlineCount}/${totalCount} Active`;
+  const activeBadge = document.getElementById('nav-active-count');
+  if (activeBadge) activeBadge.textContent = `${onlineCount}/${totalCount} Active`;
 
   container.innerHTML = state.services.map(srv => {
     const isOnline = srv.running;
@@ -855,9 +859,12 @@ async function fetchModels() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     state.models = data.models || [];
-    document.getElementById('nav-model-count').textContent = `${state.models.length} Models`;
+    const modelBadge = document.getElementById('nav-model-count');
+    if (modelBadge) modelBadge.textContent = `${state.models.length} Models`;
     renderModels();
     renderCustomSelectOptions();
+    const label = document.getElementById('model-select-label');
+    if (label) label.textContent = formatModelDisplayName(state.selectedModel);
   } catch (err) {
     console.error('Error fetching models:', err);
   }
@@ -1090,9 +1097,14 @@ function renderModels() {
 function selectAndTestModel(modelId) {
   state.selectedModel = modelId;
   const label = document.getElementById('model-select-label');
-  if (label) label.textContent = modelId;
+  if (label) label.textContent = formatModelDisplayName(modelId);
+  const inputModel = document.getElementById('input-model-name');
+  if (inputModel) inputModel.textContent = formatModelDisplayName(modelId);
+  if (typeof loadModelSettings === 'function') {
+    loadModelSettings(modelId);
+  }
   switchTab('playground');
-  showToast(`Selected model: ${modelId}`, 'info');
+  showToast(`Selected model: ${formatModelDisplayName(modelId)}`, 'info');
   document.getElementById('chat-input')?.focus();
 }
 
@@ -1696,12 +1708,33 @@ async function handleImportCookiesFile(event) {
 
 
 // ===================================================================
-// Custom Select Component (NO DEFAULT GOOGLE SELECT)
+// Model Display Formatter & Custom Select Component
 // ===================================================================
+function formatModelDisplayName(modelId) {
+  if (!modelId) return 'Gpt 5.6 Sol';
+  const found = state.models?.find(m => m.id.toLowerCase() === modelId.toLowerCase());
+  if (found && found.name) {
+    return found.name.replace(/^GPT[- ]/i, 'Gpt ').replace(/-/g, ' ');
+  }
+  return modelId
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map(token => {
+      if (/^\d+(\.\d+)*$/.test(token)) return token;
+      return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+    })
+    .join(' ');
+}
+
 function initCustomSelect() {
   const trigger = document.getElementById('model-select-trigger');
   const popover = document.getElementById('model-select-popover');
   const searchInput = document.getElementById('model-filter-input');
+
+  const label = document.getElementById('model-select-label');
+  if (label) {
+    label.textContent = formatModelDisplayName(state.selectedModel);
+  }
 
   trigger.addEventListener('click', (e) => {
     e.stopPropagation();
@@ -1765,10 +1798,16 @@ function renderCustomSelectOptions(query = '') {
     opt.addEventListener('click', () => {
       const modelId = opt.dataset.id;
       state.selectedModel = modelId;
-      document.getElementById('model-select-label').textContent = modelId;
+      const label = document.getElementById('model-select-label');
+      if (label) label.textContent = formatModelDisplayName(modelId);
+      const inputModel = document.getElementById('input-model-name');
+      if (inputModel) inputModel.textContent = formatModelDisplayName(modelId);
       document.getElementById('model-select-popover').classList.remove('open');
       document.getElementById('model-select-trigger').classList.remove('active');
       renderCustomSelectOptions();
+      if (typeof loadModelSettings === 'function') {
+        loadModelSettings(modelId);
+      }
     });
   });
 }
@@ -1860,48 +1899,43 @@ function createThinkingLoader(modality, promptText) {
   let timerId = null;
 
   if (modality === 'image') {
-    // 1. IMAGE LOADER: Authentic ChatGPT Glowing Dot Matrix Shimmer
+    // 1. IMAGE LOADER: Authentic ChatGPT Warm Stone Shimmer Card
     container.className = 'image-gen-loader';
-
-    // Generate 20 cols x 14 rows = 280 SVG dots
-    let dotsSvg = '';
-    const cols = 20;
-    const rows = 14;
-    const centerCol = 9.5;
-    const centerRow = 6.5;
-
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
-        const cx = 16 + c * 15;
-        const cy = 16 + r * 12;
-        const dist = Math.sqrt(Math.pow(c - centerCol, 2) + Math.pow(r - centerRow, 2));
-        const delay = (dist * 0.11).toFixed(2);
-        dotsSvg += `<circle class="matrix-dot" cx="${cx}" cy="${cy}" r="1.4" style="animation-delay: ${delay}s"></circle>`;
-      }
-    }
 
     container.innerHTML = `
       <div class="media-gen-header">
         <div class="media-gen-title-wrap">
           <span class="media-gen-icon-sparkle">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 2L14.4 9.6L22 12L14.4 14.4L12 22L9.6 14.4L2 12L9.6 9.6L12 2Z"/>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="12" y1="8" x2="12" y2="16"></line>
+              <line x1="8" y1="12" x2="16" y2="12"></line>
             </svg>
           </span>
           <span class="media-gen-title">Creating image</span>
         </div>
-        <span class="media-gen-subtitle">Synthesizing visual tokens...</span>
+        <span class="media-gen-subtitle">Synthesizing visual elements...</span>
       </div>
-      <div class="dot-matrix-canvas">
-        <svg class="dot-matrix-svg" viewBox="0 0 315 180" xmlns="http://www.w3.org/2000/svg">
-          ${dotsSvg}
-        </svg>
+      <div class="gpt-image-shimmer-canvas">
+        <div class="gpt-canvas-reticle">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+            <circle cx="8.5" cy="8.5" r="1.5"></circle>
+            <polyline points="21 15 16 10 5 21"></polyline>
+          </svg>
+          <span style="font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.05em; opacity: 0.8;">RENDERING FRAME</span>
+        </div>
       </div>
-      <div class="gen-progress-pill">
+      <div class="gpt-gen-progress-track">
+        <div class="gpt-gen-progress-fill" style="width: 0%;"></div>
+      </div>
+      <div class="gpt-gen-footer-row">
+        <span style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 260px;">${escapeHtml(promptText || 'Visual synthesis')}</span>
         <span class="gen-progress-num">0%</span>
       </div>
     `;
 
+    const fillBar = container.querySelector('.gpt-gen-progress-fill');
     const pillNum = container.querySelector('.gen-progress-num');
     let progress = 0;
     const startTime = Date.now();
@@ -1917,17 +1951,20 @@ function createThinkingLoader(modality, promptText) {
       } else {
         progress = Math.min(98, 94 + Math.round(((elapsed - 12) / 10) * 4));
       }
-      pillNum.textContent = `${progress}%`;
+      if (fillBar) fillBar.style.width = `${progress}%`;
+      if (pillNum) pillNum.textContent = `${progress}%`;
     }, 120);
 
     updateProgress = (p) => {
       progress = Math.max(progress, p);
-      pillNum.textContent = `${progress}%`;
+      if (fillBar) fillBar.style.width = `${progress}%`;
+      if (pillNum) pillNum.textContent = `${progress}%`;
     };
 
     finish = () => {
       clearInterval(timerId);
-      pillNum.textContent = '100%';
+      if (fillBar) fillBar.style.width = '100%';
+      if (pillNum) pillNum.textContent = '100%';
     };
 
   } else if (modality === 'video') {
@@ -2269,55 +2306,54 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
     }
   }
 
-  // Render Interactive Image Cards
+  // Render Interactive ChatGPT-Style Image Cards
   extractedImages.forEach((img, idx) => {
     const card = document.createElement('div');
-    card.className = 'chat-media-card chat-image-card';
+    card.className = 'gpt-rendered-image-card';
     const filename = `singularity-${state.selectedModel}-${Date.now()}-${idx + 1}.png`;
 
     card.innerHTML = `
-      <div class="media-preview-container">
-        <img src="${img.src}" alt="${escapeHtml(img.alt)}" class="chat-rendered-image" loading="lazy" />
-        <div class="media-hover-overlay">
-          <span class="media-hover-badge">
+      <div class="gpt-image-viewport">
+        <img src="${img.src}" alt="${escapeHtml(img.alt || promptText || 'Generated Image')}" class="gpt-image-element" loading="lazy" />
+        <div class="gpt-image-glass-toolbar">
+          <button class="gpt-glass-action-btn btn-zoom" title="View Full Size (Lightbox)">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"></circle>
-              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-              <line x1="11" y1="8" x2="11" y2="14"></line>
-              <line x1="8" y1="11" x2="14" y2="11"></line>
+              <polyline points="15 3 21 3 21 9"></polyline>
+              <polyline points="9 21 3 21 3 15"></polyline>
+              <line x1="21" y1="3" x2="14" y2="10"></line>
+              <line x1="3" y1="21" x2="10" y2="14"></line>
             </svg>
-            Click to Expand
-          </span>
+          </button>
+          <button class="gpt-glass-action-btn btn-copy" title="Copy Image">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          </button>
+          <button class="gpt-glass-action-btn btn-download" title="Download Image">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+          </button>
         </div>
       </div>
-      <div class="media-card-toolbar">
-        <div class="media-meta-tags">
-          <span class="media-badge-tag">IMAGE</span>
-          <span style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">${escapeHtml(state.selectedAspectRatio || '1:1')}</span>
-        </div>
-        <div class="media-actions-group">
-          <button class="btn-media-action btn-zoom" title="Expand to Lightbox">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" y1="3" x2="14" y2="10"></line><line x1="3" y1="21" x2="10" y2="14"></line></svg>
-            Expand
-          </button>
-          <button class="btn-media-action btn-copy" title="Copy Image">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            Copy
-          </button>
-          <button class="btn-media-action btn-download" title="Download Image">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-            Download
-          </button>
+      <div class="gpt-image-caption-bar">
+        <p class="gpt-image-caption-text">${escapeHtml(promptText || img.alt || 'Generated with Singularity Universal Engine')}</p>
+        <div class="gpt-image-caption-meta">
+          <span>${escapeHtml(state.selectedModel)}</span>
+          <span>Neural Synthesis</span>
         </div>
       </div>
     `;
 
-    card.querySelector('.media-preview-container').addEventListener('click', () => {
-      openMediaLightbox(img.src, 'image', img.alt);
+    card.querySelector('.gpt-image-viewport').addEventListener('click', () => {
+      openMediaLightbox(img.src, 'image', promptText || img.alt);
     });
     card.querySelector('.btn-zoom').addEventListener('click', (e) => {
       e.stopPropagation();
-      openMediaLightbox(img.src, 'image', img.alt);
+      openMediaLightbox(img.src, 'image', promptText || img.alt);
     });
 
     card.querySelector('.btn-copy').addEventListener('click', (e) => {
@@ -2389,75 +2425,288 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
   }
 }
 
+// ===================================================================
+// Model Parameter Overrides & Global Thinking Budget Enforcement
+// ===================================================================
+
+function updateThinkingBudgetDisplay(tokens) {
+  const valEl = document.getElementById('thinking-budget-val');
+  const t = parseInt(tokens, 10) || 0;
+  if (valEl) {
+    valEl.textContent = t > 0 ? `${t.toLocaleString()} tokens` : 'Off (0)';
+  }
+  const btns = document.querySelectorAll('#thinking-preset-btns .preset-btn');
+  btns.forEach(b => {
+    const btnTok = parseInt(b.dataset.tokens, 10);
+    b.classList.toggle('active', btnTok === t);
+  });
+}
+
+function applyModelSettingsToUI(cfg, model) {
+  const activeModelLabel = document.getElementById('param-active-model-name');
+  if (activeModelLabel) activeModelLabel.textContent = model || state.selectedModel || 'gpt-5.6-sol';
+
+  const thinkingRange = document.getElementById('thinking-budget-range');
+  const maxTokensRange = document.getElementById('max-tokens-range');
+  const maxTokensVal = document.getElementById('max-tokens-val');
+  const tempRange = document.getElementById('temp-range');
+  const tempVal = document.getElementById('temp-val');
+  const promptInput = document.getElementById('system-prompt-input');
+
+  const budget = (cfg && cfg.thinking_budget !== undefined) ? cfg.thinking_budget : 0;
+  if (thinkingRange) thinkingRange.value = budget;
+  updateThinkingBudgetDisplay(budget);
+
+  const maxTokens = (cfg && cfg.max_tokens !== undefined) ? cfg.max_tokens : 4096;
+  if (maxTokensRange) maxTokensRange.value = maxTokens;
+  if (maxTokensVal) maxTokensVal.textContent = `${Number(maxTokens).toLocaleString()} tokens`;
+
+  const maxBtns = document.querySelectorAll('#max-tokens-preset-btns .preset-btn');
+  maxBtns.forEach(b => {
+    b.classList.toggle('active', parseInt(b.dataset.tokens, 10) === maxTokens);
+  });
+
+  if (cfg && cfg.temperature !== undefined && tempRange) {
+    tempRange.value = cfg.temperature;
+    if (tempVal) tempVal.textContent = Number(cfg.temperature).toFixed(2);
+  }
+  if (cfg && cfg.system_prompt !== undefined && promptInput) {
+    promptInput.value = cfg.system_prompt;
+  }
+}
+
+async function loadModelSettings(model) {
+  const targetModel = model || state.selectedModel || 'gpt-5.6-sol';
+  const activeModelLabel = document.getElementById('param-active-model-name');
+  if (activeModelLabel) activeModelLabel.textContent = targetModel;
+
+  try {
+    const res = await fetch(`/api/model-settings?model=${encodeURIComponent(targetModel)}`);
+    if (res.ok) {
+      const data = await res.json();
+      applyModelSettingsToUI(data.settings || {}, targetModel);
+    }
+  } catch (e) {
+    console.warn('Failed to load model settings:', e);
+  }
+}
+
+let _saveSettingsDebounceTimer = null;
+async function saveCurrentModelSettings(showNotice = true) {
+  const model = state.selectedModel || 'gpt-5.6-sol';
+  const thinkingRange = document.getElementById('thinking-budget-range');
+  const maxTokensRange = document.getElementById('max-tokens-range');
+  const tempRange = document.getElementById('temp-range');
+  const promptInput = document.getElementById('system-prompt-input');
+  const statusEl = document.getElementById('model-settings-status');
+
+  const payload = {
+    model: model,
+    thinking_budget: parseInt(thinkingRange?.value || 0, 10),
+    max_tokens: parseInt(maxTokensRange?.value || 4096, 10),
+    temperature: parseFloat(tempRange?.value || 0.7),
+    system_prompt: promptInput?.value.trim() || '',
+  };
+
+  try {
+    const res = await fetch('/api/model-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      if (statusEl) {
+        const budgetStr = payload.thinking_budget > 0 ? `${payload.thinking_budget.toLocaleString()} tokens` : 'Off';
+        statusEl.textContent = `Enforced globally (${budgetStr})`;
+        clearTimeout(_saveSettingsDebounceTimer);
+        _saveSettingsDebounceTimer = setTimeout(() => { if (statusEl) statusEl.textContent = ''; }, 3500);
+      }
+      if (showNotice) {
+        const budgetStr = payload.thinking_budget > 0 ? `${payload.thinking_budget.toLocaleString()} tokens` : 'Disabled (0 tokens)';
+        showToast(`Thinking cap for '${model}' set to ${budgetStr}. Enforced across all Gateway requests.`, 'success');
+      }
+    }
+  } catch (e) {
+    if (showNotice) showToast(`Failed to save settings: ${e.message}`, 'error');
+  }
+}
+
+async function resetCurrentModelSettings() {
+  const model = state.selectedModel || 'gpt-5.6-sol';
+  try {
+    await fetch(`/api/model-settings?model=${encodeURIComponent(model)}`, { method: 'DELETE' });
+    applyModelSettingsToUI({ thinking_budget: 0, max_tokens: 4096, temperature: 0.7, system_prompt: '' }, model);
+    showToast(`Reset settings for '${model}' to factory defaults.`, 'info');
+  } catch (e) {
+    showToast(`Failed to reset: ${e.message}`, 'error');
+  }
+}
+
+const HERO_DIALOGUES = [
+  "Tomboys for the win !",
+  "9/11 was an insider job fr",
+  "Am I cooking, Chat?",
+  "Watch Konosuba, Trust.",
+  "Bro think he the main character",
+  "Let him cook, I said LET HIM COOK",
+  "It is what it is (it isn't)",
+  "Touch grass? In this economy?",
+  "Certified yapper in the building",
+  "Delusion is my superpower",
+  "Skill issue or cosmic malice?",
+  "We stay silly, we stay scheming",
+  "Works on my machine, ship it",
+  "Nah, I'd win",
+  "Frieren would be proud",
+  "Trust the process (I have no plan)",
+  "The voices told me to refactor",
+  "Peak fiction, zero budget",
+  "Submitting PR and fleeing the country",
+  "Steins;Gate was a documentary",
+  "Terminal open, brain disconnected",
+  "Who let bro cook in production?",
+  "I don't need sleep, I need answers"
+];
+
+let lastGreetingIndex = -1;
+function updateHeroGreeting(forceNew = true) {
+  const greetingEl = document.getElementById('claude-hero-greeting');
+  if (!greetingEl) return;
+  const list = HERO_DIALOGUES;
+  let idx = Math.floor(Math.random() * list.length);
+  if (forceNew && list.length > 1 && idx === lastGreetingIndex) {
+    idx = (idx + 1) % list.length;
+  }
+  lastGreetingIndex = idx;
+  const text = list[idx];
+
+  greetingEl.className = 'claude-hero-greeting';
+  greetingEl.style.opacity = '0';
+  greetingEl.style.transform = 'translateY(4px)';
+  setTimeout(() => {
+    greetingEl.textContent = text;
+    greetingEl.style.opacity = '1';
+    greetingEl.style.transform = 'translateY(0)';
+  }, 160);
+}
+
 function initPlayground() {
   const sendBtn = document.getElementById('btn-send-chat');
   const input = document.getElementById('chat-input');
   const tempRange = document.getElementById('temp-range');
   const tempVal = document.getElementById('temp-val');
   const clearBtn = document.getElementById('btn-clear-chat');
+  const inputModelName = document.getElementById('input-model-name');
+  if (inputModelName) inputModelName.textContent = formatModelDisplayName(state.selectedModel || 'gpt-5.6-sol');
 
-  // Modality filter tabs (All / Images / Videos)
-  const modalityTabs = document.querySelectorAll('#playground-modality-tabs .modality-tab');
-  const mediaOptionsPanel = document.getElementById('playground-media-options');
+  // Initialize dynamic time-aware greeting
+  updateHeroGreeting(false);
+  const heroTrigger = document.getElementById('claude-hero-trigger');
+  if (heroTrigger) {
+    heroTrigger.addEventListener('click', () => updateHeroGreeting(true));
+  }
 
-  modalityTabs.forEach(tab => {
-    tab.addEventListener('click', () => {
-      modalityTabs.forEach(t => t.classList.remove('active'));
-      tab.classList.add('active');
-      const modality = tab.dataset.modality || 'all';
-      state.playgroundModality = modality;
+  // Parameters Popover Toggle (Settings)
+  const btnToggleSettings = document.getElementById('btn-toggle-playground-settings');
+  const settingsDropdown = document.getElementById('playground-settings-dropdown');
+  const btnCloseSettings = document.getElementById('btn-close-pg-settings');
 
-      if (mediaOptionsPanel) {
-        mediaOptionsPanel.style.display = modality === 'all' ? 'none' : 'block';
+  if (btnToggleSettings && settingsDropdown) {
+    btnToggleSettings.addEventListener('click', (e) => {
+      e.stopPropagation();
+      settingsDropdown.classList.toggle('open');
+      if (settingsDropdown.classList.contains('open')) {
+        loadModelSettings(state.selectedModel || 'gpt-5.6-sol');
       }
-
-      // Filter options
-      renderCustomSelectOptions();
-
-      // Automatically select appropriate model if needed
-      if (modality === 'image') {
-        const hasImg = state.models.find(m => /(cogview|image|imagine|dall-e)/i.test(m.id));
-        if (hasImg && !/(cogview|image|imagine|dall-e)/i.test(state.selectedModel)) {
-          state.selectedModel = hasImg.id;
-          document.getElementById('model-select-label').textContent = hasImg.id;
-        }
-      } else if (modality === 'video') {
-        const hasVid = state.models.find(m => /(video|cogvideox|kling|sora)/i.test(m.id));
-        if (hasVid && !/(video|cogvideox|kling|sora)/i.test(state.selectedModel)) {
-          state.selectedModel = hasVid.id;
-          document.getElementById('model-select-label').textContent = hasVid.id;
-        }
+    });
+    if (btnCloseSettings) {
+      btnCloseSettings.addEventListener('click', () => {
+        settingsDropdown.classList.remove('open');
+      });
+    }
+    document.addEventListener('click', (e) => {
+      if (!settingsDropdown.contains(e.target) && !btnToggleSettings.contains(e.target)) {
+        settingsDropdown.classList.remove('open');
       }
+    });
+  }
+
+  // Model Parameter Overrides (Thinking Budget, Max Tokens, Temperature)
+  const thinkingRange = document.getElementById('thinking-budget-range');
+  const maxTokensRange = document.getElementById('max-tokens-range');
+  const maxTokensVal = document.getElementById('max-tokens-val');
+  const btnSaveSettings = document.getElementById('btn-save-model-settings');
+  const btnResetSettings = document.getElementById('btn-reset-model-settings');
+
+  if (thinkingRange) {
+    thinkingRange.addEventListener('input', () => {
+      updateThinkingBudgetDisplay(thinkingRange.value);
+    });
+    thinkingRange.addEventListener('change', () => {
+      saveCurrentModelSettings(false);
+    });
+  }
+
+  const thinkingBtns = document.querySelectorAll('#thinking-preset-btns .preset-btn');
+  thinkingBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tokens = parseInt(btn.dataset.tokens, 10);
+      if (thinkingRange) thinkingRange.value = tokens;
+      updateThinkingBudgetDisplay(tokens);
+      saveCurrentModelSettings(true);
     });
   });
 
-  // Aspect ratio pills
-  const ratioPills = document.querySelectorAll('#media-aspect-ratio-pills .preset-pill');
-  ratioPills.forEach(pill => {
-    pill.addEventListener('click', () => {
-      ratioPills.forEach(p => p.classList.remove('active'));
-      pill.classList.add('active');
-      state.selectedAspectRatio = pill.dataset.ratio || '1:1';
-      showToast(`Aspect ratio set to ${state.selectedAspectRatio}`, 'info');
+  if (maxTokensRange && maxTokensVal) {
+    maxTokensRange.addEventListener('input', () => {
+      const val = parseInt(maxTokensRange.value, 10);
+      maxTokensVal.textContent = `${val.toLocaleString()} tokens`;
+    });
+    maxTokensRange.addEventListener('change', () => {
+      saveCurrentModelSettings(false);
+    });
+  }
+
+  const maxTokensBtns = document.querySelectorAll('#max-tokens-preset-btns .preset-btn');
+  maxTokensBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tokens = parseInt(btn.dataset.tokens, 10);
+      if (maxTokensRange) maxTokensRange.value = tokens;
+      if (maxTokensVal) maxTokensVal.textContent = `${tokens.toLocaleString()} tokens`;
+      maxTokensBtns.forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      saveCurrentModelSettings(true);
     });
   });
 
-  // Style preset pills
-  const stylePills = document.querySelectorAll('#media-style-pills .preset-pill');
-  stylePills.forEach(pill => {
-    pill.addEventListener('click', () => {
-      const styleText = pill.dataset.style;
-      if (styleText && input) {
-        if (input.value.trim()) {
-          input.value += `, ${styleText}`;
-        } else {
-          input.value = `Generate ${styleText}`;
-        }
-        input.focus();
-        showToast('Appended style prompt', 'info');
-      }
+  if (tempRange && tempVal) {
+    tempRange.addEventListener('input', () => {
+      tempVal.textContent = parseFloat(tempRange.value).toFixed(2);
     });
-  });
+    tempRange.addEventListener('change', () => {
+      saveCurrentModelSettings(false);
+    });
+  }
+
+  const sysPromptInput = document.getElementById('system-prompt-input');
+  if (sysPromptInput) {
+    sysPromptInput.addEventListener('change', () => {
+      saveCurrentModelSettings(false);
+    });
+  }
+
+  if (btnSaveSettings) {
+    btnSaveSettings.addEventListener('click', () => {
+      saveCurrentModelSettings(true);
+    });
+  }
+
+  if (btnResetSettings) {
+    btnResetSettings.addEventListener('click', resetCurrentModelSettings);
+  }
+
+  // Initial load of model settings
+  loadModelSettings(state.selectedModel || 'gpt-5.6-sol');
 
   // Lightbox close & download
   const btnCloseLightbox = document.getElementById('btn-lightbox-close');
@@ -2512,15 +2761,16 @@ function initPlayground() {
     });
   }
 
-  if (tempRange && tempVal) {
-    tempRange.addEventListener('input', () => {
-      tempVal.textContent = tempRange.value;
-    });
-  }
-
-  if (sendBtn) sendBtn.addEventListener('click', sendChatMessage);
-
+  // Auto-grow textarea & send button enabling
   if (input) {
+    input.addEventListener('input', () => {
+      input.style.height = 'auto';
+      input.style.height = Math.min(input.scrollHeight, 180) + 'px';
+      if (sendBtn) {
+        sendBtn.disabled = !input.value.trim() || state.isStreaming;
+      }
+    });
+
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
@@ -2529,16 +2779,73 @@ function initPlayground() {
     });
   }
 
+  if (sendBtn) sendBtn.addEventListener('click', sendChatMessage);
+
+  // Claude Suggestion Pills & Legacy Chips Click
+  document.addEventListener('click', (e) => {
+    const pill = e.target.closest('.claude-pill-btn, .hero-chip');
+    if (pill) {
+      const prompt = pill.getAttribute('data-prompt');
+      if (input && prompt) {
+        input.value = prompt;
+        input.focus();
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        if (sendBtn) sendBtn.disabled = false;
+        input.style.height = 'auto';
+        input.style.height = Math.min(input.scrollHeight, 180) + 'px';
+      }
+    }
+  });
+
+
+
+  // Attachment button
+  const attachBtn = document.getElementById('claude-attach-btn');
+  const fileInput = document.getElementById('claude-file-input');
+  if (attachBtn && fileInput) {
+    attachBtn.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length > 0) {
+        showToast(`Attached ${e.target.files.length} file(s)`, 'info');
+      }
+    });
+  }
+
+  // Voice buttons
+  document.getElementById('btn-voice-input')?.addEventListener('click', () => {
+    showToast('Voice dictation ready (Microphone active)', 'info');
+  });
+  document.getElementById('btn-voice-chat')?.addEventListener('click', () => {
+    showToast('Voice conversation mode ready', 'info');
+  });
+  document.getElementById('btn-user-avatar')?.addEventListener('click', () => {
+    switchTab('vault');
+    showToast('Account Vault & Model Fleet', 'info');
+  });
+  document.getElementById('plan-upgrade-link')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    switchTab('vault');
+    showToast('Account Stacking & Provider Limits', 'info');
+  });
+
+  // Clear Chat Button Handler
   if (clearBtn) {
     clearBtn.addEventListener('click', () => {
       state.chatMessages = [];
-      document.getElementById('chat-history').innerHTML = `
-        <div class="chat-msg assistant">
-          <div class="msg-bubble">
-            Chat cleared. Ready for your next query on <strong>${escapeHtml(state.selectedModel)}</strong>.
-          </div>
-        </div>
-      `;
+      const history = document.getElementById('chat-history');
+      const thread = history?.querySelector('.chat-thread-container');
+      if (thread) thread.innerHTML = '';
+      const workspace = document.getElementById('playground-workspace');
+      if (workspace) workspace.classList.remove('has-messages');
+      const heroEl = document.getElementById('playground-hero');
+      if (heroEl) heroEl.classList.remove('hidden');
+      updateHeroGreeting(true);
+      if (input) {
+        input.value = '';
+        input.style.height = 'auto';
+      }
+      if (sendBtn) sendBtn.disabled = true;
+      showToast('Chat history cleared', 'info');
     });
   }
 }
@@ -2550,16 +2857,34 @@ async function sendChatMessage() {
   const userText = input.value.trim();
   if (!userText) return;
 
+  // Toggle active chat workspace mode
+  const workspace = document.getElementById('playground-workspace');
+  if (workspace) {
+    workspace.classList.add('has-messages');
+  }
+
+  // Hide the centered playground hero when sending message
+  const heroEl = document.getElementById('playground-hero');
+  if (heroEl) {
+    heroEl.classList.add('hidden');
+  }
+
   input.value = '';
-  input.style.height = '44px';
+  input.style.height = '24px';
 
   const history = document.getElementById('chat-history');
+  let thread = history.querySelector('.chat-thread-container');
+  if (!thread) {
+    thread = document.createElement('div');
+    thread.className = 'chat-thread-container';
+    history.appendChild(thread);
+  }
 
   // Append user message
   const userMsgEl = document.createElement('div');
   userMsgEl.className = 'chat-msg user';
   userMsgEl.innerHTML = `<div class="msg-bubble">${escapeHtml(userText)}</div>`;
-  history.appendChild(userMsgEl);
+  thread.appendChild(userMsgEl);
 
   state.chatMessages.push({ role: 'user', content: userText });
 
@@ -2577,13 +2902,13 @@ async function sendChatMessage() {
   const loaderObj = createThinkingLoader(modality, userText);
   bubbleEl.appendChild(loaderObj.el);
   assistantMsgEl.appendChild(bubbleEl);
-  history.appendChild(assistantMsgEl);
+  thread.appendChild(assistantMsgEl);
 
   history.scrollTop = history.scrollHeight;
 
   state.isStreaming = true;
   const sendBtn = document.getElementById('btn-send-chat');
-  sendBtn.disabled = true;
+  if (sendBtn) sendBtn.disabled = true;
 
   const systemPrompt = document.getElementById('system-prompt-input')?.value.trim();
   const messagesPayload = [];
@@ -2593,6 +2918,8 @@ async function sendChatMessage() {
   messagesPayload.push(...state.chatMessages);
 
   const temperature = parseFloat(document.getElementById('temp-range')?.value || 0.7);
+  const thinkingBudget = parseInt(document.getElementById('thinking-budget-range')?.value || 0, 10);
+  const maxTokens = parseInt(document.getElementById('max-tokens-range')?.value || 4096, 10);
 
   let fullContent = '';
   let fullReasoning = '';
@@ -2608,6 +2935,8 @@ async function sendChatMessage() {
         model: state.selectedModel,
         messages: messagesPayload,
         temperature: temperature,
+        max_tokens: maxTokens,
+        thinking_budget: thinkingBudget,
         stream: true,
       }),
     });
@@ -2722,7 +3051,7 @@ async function sendChatMessage() {
     bubbleEl.innerHTML = `<span style="color: var(--color-error);">Stream Failed: ${escapeHtml(err.message)}</span>`;
   } finally {
     state.isStreaming = false;
-    sendBtn.disabled = false;
+    if (sendBtn) sendBtn.disabled = !input.value.trim();
     history.scrollTop = history.scrollHeight;
   }
 }
@@ -2939,10 +3268,332 @@ function loadTunnelTab() {
 }
 
 // ===================================================================
+// Claude-Grade Global Floating Tooltip System
+// ===================================================================
+function initTooltips() {
+  let tooltipEl = document.getElementById('singularity-tooltip');
+  if (!tooltipEl) {
+    tooltipEl = document.createElement('div');
+    tooltipEl.id = 'singularity-tooltip';
+    document.body.appendChild(tooltipEl);
+  }
+
+  let hoverTimer = null;
+  let isWarm = false;
+  let warmResetTimer = null;
+  let currentTarget = null;
+
+  function showTooltip(target) {
+    const text = target.getAttribute('data-tooltip') || target.getAttribute('data-title');
+    if (!text || !text.trim()) return;
+
+    tooltipEl.textContent = text.trim();
+    tooltipEl.style.display = 'block';
+
+    const rect = target.getBoundingClientRect();
+    const tipRect = tooltipEl.getBoundingClientRect();
+
+    let top = rect.top - tipRect.height - 8;
+    let left = rect.left + (rect.width / 2) - (tipRect.width / 2);
+
+    if (top < 8) {
+      top = rect.bottom + 8;
+    }
+
+    if (left < 10) left = 10;
+    if (left + tipRect.width > window.innerWidth - 10) {
+      left = window.innerWidth - tipRect.width - 10;
+    }
+
+    tooltipEl.style.top = `${Math.round(top)}px`;
+    tooltipEl.style.left = `${Math.round(left)}px`;
+    tooltipEl.classList.add('visible');
+
+    isWarm = true;
+    clearTimeout(warmResetTimer);
+  }
+
+  function hideTooltip() {
+    clearTimeout(hoverTimer);
+    if (tooltipEl.classList.contains('visible')) {
+      tooltipEl.classList.remove('visible');
+      warmResetTimer = setTimeout(() => {
+        isWarm = false;
+        tooltipEl.style.display = 'none';
+      }, 250);
+    }
+    currentTarget = null;
+  }
+
+  // Intercept titles and upgrade them to buttery data-tooltips
+  function convertTitles(root = document) {
+    root.querySelectorAll('[title]').forEach(el => {
+      if (el.id === 'sidebar-toggle-btn' || el.hasAttribute('data-no-tooltip') || el.closest('#sidebar-toggle-btn')) {
+        return;
+      }
+      const title = el.getAttribute('title');
+      if (title && !el.hasAttribute('data-tooltip')) {
+        el.setAttribute('data-tooltip', title);
+        el.removeAttribute('title');
+      }
+    });
+  }
+
+  convertTitles();
+
+  const observer = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+      if (m.type === 'childList') {
+        m.addedNodes.forEach(node => {
+          if (node.nodeType === Node.ELEMENT_NODE) {
+            convertTitles(node);
+          }
+        });
+      }
+    }
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+
+  document.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (!target || target === currentTarget || target.id === 'sidebar-toggle-btn' || target.hasAttribute('data-no-tooltip')) return;
+
+    clearTimeout(hoverTimer);
+    currentTarget = target;
+
+    if (isWarm) {
+      showTooltip(target);
+    } else {
+      hoverTimer = setTimeout(() => {
+        if (currentTarget === target) {
+          showTooltip(target);
+        }
+      }, 260);
+    }
+  }, true);
+
+  document.addEventListener('mouseout', (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (target && target === currentTarget) {
+      const related = e.relatedTarget ? e.relatedTarget.closest('[data-tooltip]') : null;
+      if (!related || related !== currentTarget) {
+        hideTooltip();
+      }
+    }
+  }, true);
+
+  document.addEventListener('click', hideTooltip, true);
+  window.addEventListener('scroll', hideTooltip, true);
+}
+
+// ===================================================================
+// Claude-Style Resizable & Collapsible Sidebar
+// ===================================================================
+function initSidebar() {
+  const sidebar = document.getElementById('sidebar') || document.querySelector('.sidebar');
+  const resizer = document.getElementById('sidebar-resizer');
+  const toggleBtn = document.getElementById('sidebar-toggle-btn');
+  const collapseBtn = document.getElementById('sidebar-collapse-btn');
+  const expandBtn = document.getElementById('sidebar-expand-btn');
+  if (!sidebar) return;
+
+  const STORAGE_WIDTH_KEY = 'singularity_sidebar_width';
+  const STORAGE_COLLAPSED_KEY = 'singularity_sidebar_collapsed';
+  const DEFAULT_WIDTH = 270;
+  const MIN_WIDTH = 180;
+  const MAX_WIDTH = 500;
+  const COLLAPSE_THRESHOLD = 150;
+
+  // Restore saved width
+  let savedWidth = parseInt(localStorage.getItem(STORAGE_WIDTH_KEY), 10);
+  if (isNaN(savedWidth) || savedWidth < MIN_WIDTH || savedWidth > MAX_WIDTH) {
+    savedWidth = DEFAULT_WIDTH;
+  }
+  document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
+
+  let peekTimer = null;
+
+  function showPeek() {
+    clearTimeout(peekTimer);
+    if (document.body.classList.contains('has-collapsed-sidebar') || sidebar.classList.contains('collapsed')) {
+      document.body.classList.add('sidebar-peeking');
+    }
+  }
+
+  function scheduleHidePeek() {
+    clearTimeout(peekTimer);
+    peekTimer = setTimeout(() => {
+      document.body.classList.remove('sidebar-peeking');
+    }, 180);
+  }
+
+  function updateButtonTooltip(collapsed) {
+    const tip = collapsed ? 'Expand sidebar (Ctrl+[)' : 'Collapse sidebar (Ctrl+[';
+    if (toggleBtn) {
+      delete toggleBtn.dataset.tooltip;
+      toggleBtn.removeAttribute('data-tooltip');
+      toggleBtn.setAttribute('aria-label', tip);
+    }
+    if (collapseBtn) {
+      delete collapseBtn.dataset.tooltip;
+      collapseBtn.removeAttribute('data-tooltip');
+      collapseBtn.setAttribute('aria-label', 'Collapse sidebar');
+    }
+    if (expandBtn) {
+      delete expandBtn.dataset.tooltip;
+      expandBtn.removeAttribute('data-tooltip');
+      expandBtn.setAttribute('aria-label', 'Expand sidebar');
+    }
+  }
+
+  function setSidebarCollapsed(collapsed) {
+    clearTimeout(peekTimer);
+    document.body.classList.remove('sidebar-peeking');
+    if (collapsed) {
+      sidebar.classList.add('collapsed');
+      document.body.classList.add('has-collapsed-sidebar');
+      localStorage.setItem(STORAGE_COLLAPSED_KEY, 'true');
+    } else {
+      sidebar.classList.remove('collapsed');
+      document.body.classList.remove('has-collapsed-sidebar');
+      localStorage.setItem(STORAGE_COLLAPSED_KEY, 'false');
+      document.documentElement.style.setProperty('--sidebar-width', `${savedWidth}px`);
+    }
+    updateButtonTooltip(collapsed);
+  }
+
+  // Restore collapsed state
+  const isCollapsed = localStorage.getItem(STORAGE_COLLAPSED_KEY) === 'true';
+  if (isCollapsed) {
+    setSidebarCollapsed(true);
+  } else {
+    updateButtonTooltip(false);
+  }
+
+  // Claude Hover-Peek on Toggle Button
+  if (toggleBtn) {
+    toggleBtn.addEventListener('mouseenter', showPeek);
+    toggleBtn.addEventListener('mouseleave', scheduleHidePeek);
+
+    toggleBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      clearTimeout(peekTimer);
+      document.body.classList.remove('sidebar-peeking');
+      const isCurrentlyCollapsed = sidebar.classList.contains('collapsed') || document.body.classList.contains('has-collapsed-sidebar');
+      setSidebarCollapsed(!isCurrentlyCollapsed);
+    });
+  }
+
+  // Claude Hover-Peek on Sidebar itself (keeps it open while cursor is inside)
+  if (sidebar) {
+    sidebar.addEventListener('mouseenter', showPeek);
+    sidebar.addEventListener('mouseleave', scheduleHidePeek);
+
+    // If user clicks a nav item while peeking, activate tab and close peek
+    sidebar.querySelectorAll('.nav-item').forEach(item => {
+      item.addEventListener('click', () => {
+        if (document.body.classList.contains('sidebar-peeking')) {
+          scheduleHidePeek();
+        }
+      });
+    });
+  }
+
+  if (collapseBtn) {
+    collapseBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setSidebarCollapsed(true);
+    });
+  }
+
+  if (expandBtn) {
+    expandBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setSidebarCollapsed(false);
+    });
+  }
+
+  // Keyboard shortcut: Ctrl+[ or Cmd+[
+  window.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === '[') {
+      e.preventDefault();
+      const current = sidebar.classList.contains('collapsed') || document.body.classList.contains('has-collapsed-sidebar');
+      setSidebarCollapsed(!current);
+    }
+  });
+
+  // Drag to Resize Handling
+  if (resizer) {
+    let startX = 0;
+    let startWidth = savedWidth;
+    let isDragging = false;
+
+    resizer.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      isDragging = true;
+      startX = e.clientX;
+      startWidth = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width'), 10) || DEFAULT_WIDTH;
+
+      sidebar.classList.add('resizing');
+      document.body.classList.add('sidebar-resizing');
+
+      function onMouseMove(moveEvent) {
+        if (!isDragging) return;
+        const currentX = moveEvent.clientX;
+
+        // If dragged too close to the left, visually hint collapse
+        if (currentX < COLLAPSE_THRESHOLD) {
+          sidebar.style.opacity = '0.35';
+          return;
+        }
+
+        sidebar.style.opacity = '1';
+        let newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, currentX));
+        document.documentElement.style.setProperty('--sidebar-width', `${newWidth}px`);
+        savedWidth = newWidth;
+      }
+
+      function onMouseUp(upEvent) {
+        if (!isDragging) return;
+        isDragging = false;
+        sidebar.classList.remove('resizing');
+        document.body.classList.remove('sidebar-resizing');
+        sidebar.style.opacity = '';
+
+        window.removeEventListener('mousemove', onMouseMove);
+        window.removeEventListener('mouseup', onMouseUp);
+
+        if (upEvent.clientX < COLLAPSE_THRESHOLD) {
+          setSidebarCollapsed(true);
+        } else {
+          setSidebarCollapsed(false);
+          localStorage.setItem(STORAGE_WIDTH_KEY, String(savedWidth));
+        }
+      }
+
+      window.addEventListener('mousemove', onMouseMove);
+      window.addEventListener('mouseup', onMouseUp);
+    });
+
+    // Double-click to reset width
+    resizer.addEventListener('dblclick', () => {
+      savedWidth = DEFAULT_WIDTH;
+      document.documentElement.style.setProperty('--sidebar-width', `${DEFAULT_WIDTH}px`);
+      localStorage.setItem(STORAGE_WIDTH_KEY, String(DEFAULT_WIDTH));
+      setSidebarCollapsed(false);
+      showToast('Sidebar reset to default width (270px)', 'info');
+    });
+  }
+}
+
+// ===================================================================
 // Initialization
 // ===================================================================
 document.addEventListener('DOMContentLoaded', () => {
   initTheme();
+  initSidebar();
+  initTooltips();
   initSimulationToggle();
   initNavigation();
   initModelFilters();

@@ -411,6 +411,17 @@ async def stream_deepseek_chat(
     req_id = f"chatcmpl-deepseek-{uuid.uuid4().hex[:12]}"
     created = int(time.time())
     thinking_enabled, search_enabled = _resolve_deepseek_features(model)
+    if kwargs.get("thinking_budget") is not None:
+        try:
+            thinking_enabled = int(kwargs["thinking_budget"]) > 0
+        except Exception:
+            pass
+    elif kwargs.get("thinking") is not None:
+        th = kwargs.get("thinking")
+        if isinstance(th, dict):
+            thinking_enabled = th.get("type") == "enabled"
+        elif isinstance(th, bool):
+            thinking_enabled = th
 
     # 1. Device Simulation Mode
     if simulate or os.getenv("SINGULARITY_SIMULATE", "0") in ("1", "true", "yes", "on"):

@@ -96,6 +96,31 @@ async def stream_gemini_chat(
     model_id = cfg["mode"]
     think_mode = cfg["think"]
 
+    tb = kwargs.get("thinking_budget")
+    if tb is not None:
+        try:
+            tb_val = int(tb)
+            if tb_val == 0:
+                think_mode = 4
+                if model_id == 2:
+                    model_id = 1
+            elif tb_val > 0:
+                think_mode = 0
+                if model_id == 1:
+                    model_id = 2
+        except Exception:
+            pass
+    elif kwargs.get("thinking") is not None:
+        th = kwargs.get("thinking")
+        if isinstance(th, dict) and th.get("type") == "disabled":
+            think_mode = 4
+            if model_id == 2:
+                model_id = 1
+        elif (isinstance(th, dict) and th.get("type") == "enabled") or th is True:
+            think_mode = 0
+            if model_id == 1:
+                model_id = 2
+
     prompt = _format_messages_to_prompt(messages)
     chat_id = f"chatcmpl-gemini-{uuid.uuid4().hex[:12]}"
     created_ts = int(time.time())

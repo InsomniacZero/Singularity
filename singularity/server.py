@@ -351,7 +351,12 @@ def _get_simulated_response_payload(model_name: str, provider_id: str, prompt_te
     )
 
 
-async def generate_simulated_stream(model_name: str, provider_id: str, prompt_text: str = "") -> AsyncIterator[bytes]:
+async def generate_simulated_stream(
+    model_name: str,
+    provider_id: str,
+    prompt_text: str = "",
+    thinking_budget: Optional[int] = None,
+) -> AsyncIterator[bytes]:
     """Yield OpenAI-compatible SSE chunks for offline/device simulation testing."""
     created_ts = int(time.time())
     sim_id = f"chatcmpl-sim-{int(time.time()*1000)}"
@@ -365,6 +370,25 @@ async def generate_simulated_stream(model_name: str, provider_id: str, prompt_te
     }
     yield f"data: {json.dumps(role_chunk)}\n\n".encode("utf-8")
     await asyncio.sleep(0.04)
+
+    # If thinking budget cap > 0, stream reasoning tokens first
+    if thinking_budget is not None and thinking_budget > 0:
+        sim_reasoning = (
+            f"Thinking process for {model_name} (Thinking Budget Cap: {thinking_budget:,} tokens):\n"
+            f"1. Parsing user input and model constraints\n"
+            f"2. Formulating systematic reasoning graph\n"
+            f"3. Validating response according to Singularity Gateway parameters\n\n"
+        )
+        for rw in sim_reasoning.split(" "):
+            rc = {
+                "id": sim_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": model_name,
+                "choices": [{"index": 0, "delta": {"reasoning_content": rw + " "}, "finish_reason": None}],
+            }
+            yield f"data: {json.dumps(rc)}\n\n".encode("utf-8")
+            await asyncio.sleep(0.015)
 
     sim_text = _get_simulated_response_payload(model_name, provider_id, prompt_text)
 
@@ -409,6 +433,86 @@ async def chat_completions(request: Request):
         meta_cfg = providers.PROVIDERS_CONFIG.get(provider_id, providers.PROVIDERS_CONFIG.get("chatgpt", {}))
         target_port = meta_cfg.get("port", 8000)
 
+    # 1. Look up persistent model settings in Singularity SQLite DB
+    model_cfg = db.get_model_settings(model_name)
+    thinking_cap = model_cfg.get("thinking_budget")
+    if thinking_cap is None and "thinking_budget" in body:
+        thinking_cap = body.get("thinking_budget")
+
+    # Enforce Thinking Budget Cap globally across all incoming gateway requests
+    if thinking_cap is not None:
+        try:
+            thinking_cap_int = max(0, int(thinking_cap))
+            body["thinking_budget"] = thinking_cap_int
+
+            # Provider-specific parameter translation
+            if provider_id in ("claude", "anthropic"):
+                if thinking_cap_int <= 0:
+                    body["thinking"] = {"type": "disabled"}
+                else:
+                    body["thinking"] = {
+                        "type": "enabled",
+                        "budget_tokens": thinking_cap_int,
+                    }
+                    if body.get("max_tokens") and int(body["max_tokens"]) <= thinking_cap_int:
+                        body["max_tokens"] = thinking_cap_int + 4096
+                    elif not body.get("max_tokens"):
+                        body["max_tokens"] = thinking_cap_int + 4096
+
+            elif provider_id in ("gemini", "google"):
+                if thinking_cap_int <= 0:
+                    body["thinking"] = {"type": "disabled"}
+                else:
+                    body["thinking"] = {"type": "enabled", "budget_tokens": thinking_cap_int}
+                if "generationConfig" not in body or not isinstance(body["generationConfig"], dict):
+                    body["generationConfig"] = {}
+                body["generationConfig"]["thinkingConfig"] = {"thinkingBudget": thinking_cap_int}
+
+            elif provider_id in ("chatgpt", "openai"):
+                if thinking_cap_int <= 0:
+                    body["reasoning_effort"] = "low"
+                elif thinking_cap_int <= 4096:
+                    body["reasoning_effort"] = "low"
+                elif thinking_cap_int <= 16384:
+                    body["reasoning_effort"] = "medium"
+                else:
+                    body["reasoning_effort"] = "high"
+                body["max_completion_tokens"] = thinking_cap_int
+
+            elif provider_id in ("deepseek", "deepseek-ai"):
+                body["thinking_enabled"] = thinking_cap_int > 0
+                body["thinking"] = thinking_cap_int > 0
+
+            elif provider_id in ("kimi", "moonshot"):
+                body["thinking"] = thinking_cap_int > 0
+
+            elif provider_id in ("qwen", "qwen-ai", "tongyi"):
+                body["thinking_enabled"] = thinking_cap_int > 0
+                body["thinking_mode"] = "Auto" if thinking_cap_int > 0 else "Disabled"
+
+            elif provider_id in ("glm", "zhipu"):
+                body["reasoning_effort"] = "low" if thinking_cap_int <= 4096 else "high" if thinking_cap_int > 16384 else "medium"
+        except Exception:
+            pass
+
+    # Model configuration fallbacks for max_tokens & temperature
+    if "max_tokens" in model_cfg and "max_tokens" not in body:
+        try:
+            body["max_tokens"] = int(model_cfg["max_tokens"])
+        except Exception:
+            pass
+    if "temperature" in model_cfg and "temperature" not in body:
+        try:
+            body["temperature"] = float(model_cfg["temperature"])
+        except Exception:
+            pass
+
+    # Forward kwargs to direct engines
+    forward_kwargs = {
+        k: v for k, v in body.items()
+        if k not in ("messages", "model", "stream")
+    }
+
     # If simulation mode is requested or active, we can skip target resolution
     target_url = f"http://127.0.0.1:{target_port}/v1/chat/completions"
 
@@ -446,10 +550,17 @@ async def chat_completions(request: Request):
                 prompt_text = " ".join(item.get("text", "") for item in content if isinstance(item, dict))
             break
 
+    effective_thinking_budget = body.get("thinking_budget")
+
     if simulate_requested:
         if is_stream:
             return StreamingResponse(
-                generate_simulated_stream(model_name, provider_id, prompt_text=prompt_text),
+                generate_simulated_stream(
+                    model_name,
+                    provider_id,
+                    prompt_text=prompt_text,
+                    thinking_budget=effective_thinking_budget,
+                ),
                 media_type="text/event-stream",
                 headers={
                     "Cache-Control": "no-cache",
@@ -461,6 +572,14 @@ async def chat_completions(request: Request):
             )
         else:
             sim_content = _get_simulated_response_payload(model_name, provider_id, prompt_text)
+            choice_msg = {
+                "role": "assistant",
+                "content": sim_content,
+            }
+            if effective_thinking_budget and effective_thinking_budget > 0:
+                choice_msg["reasoning_content"] = (
+                    f"Simulated reasoning trace for {model_name} (Thinking budget cap: {effective_thinking_budget:,} tokens)"
+                )
             return JSONResponse(
                 status_code=200,
                 content={
@@ -470,10 +589,7 @@ async def chat_completions(request: Request):
                     "model": model_name,
                     "choices": [{
                         "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": sim_content,
-                        },
+                        "message": choice_msg,
                         "finish_reason": "stop",
                     }],
                     "usage": {"prompt_tokens": 10, "completion_tokens": 15, "total_tokens": 25},
@@ -486,7 +602,7 @@ async def chat_completions(request: Request):
         if is_stream:
             async def direct_stream_generator() -> AsyncIterator[bytes]:
                 try:
-                    async for chunk in engines.stream_chat(provider_id, model_name, body.get("messages", []), stream=True):
+                    async for chunk in engines.stream_chat(provider_id, model_name, body.get("messages", []), stream=True, **forward_kwargs):
                         yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                     yield b"data: [DONE]\n\n"
                 except Exception as inner_e:
@@ -507,7 +623,7 @@ async def chat_completions(request: Request):
             )
         else:
             try:
-                data = await engines.generate_chat(provider_id, model_name, body.get("messages", []))
+                data = await engines.generate_chat(provider_id, model_name, body.get("messages", []), **forward_kwargs)
                 return JSONResponse(status_code=200, content=data)
             except Exception as inner_e:
                 p_name = meta.get("name", provider_id)
@@ -540,7 +656,7 @@ async def chat_completions(request: Request):
 
             # Direct in-process native engine fallback (when upstream daemon is down or returned >= 400)
             try:
-                async for chunk in engines.stream_chat(provider_id, model_name, body.get("messages", []), stream=True):
+                async for chunk in engines.stream_chat(provider_id, model_name, body.get("messages", []), stream=True, **forward_kwargs):
                     yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
                 return
@@ -576,7 +692,7 @@ async def chat_completions(request: Request):
 
     # Direct in-process native engine fallback
     try:
-        data = await engines.generate_chat(provider_id, model_name, body.get("messages", []))
+        data = await engines.generate_chat(provider_id, model_name, body.get("messages", []), **forward_kwargs)
         return JSONResponse(status_code=200, content=data)
     except Exception as inner_e:
         raise HTTPException(
@@ -741,6 +857,69 @@ async def api_get_limits():
 @app.get("/api/models")
 async def api_get_models():
     return {"models": get_dynamic_models_catalog()}
+
+
+@app.get("/api/model-settings")
+async def api_get_model_settings(model: Optional[str] = None):
+    """Retrieve customized settings (thinking_budget cap, max_tokens, etc.) for models."""
+    if model:
+        return {"status": "ok", "model": model, "settings": db.get_model_settings(model)}
+    return {"status": "ok", "settings": db.get_all_model_settings()}
+
+
+@app.post("/api/model-settings")
+async def api_save_model_settings(request: Request):
+    """Persist thinking budget cap, max output tokens, and parameters for a model."""
+    try:
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    model = (data.get("model") or "").strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="Missing required 'model' field")
+
+    cfg = {}
+    if "thinking_budget" in data:
+        try:
+            cfg["thinking_budget"] = max(0, min(65536, int(data["thinking_budget"])))
+        except (ValueError, TypeError):
+            pass
+    if "max_tokens" in data:
+        try:
+            cfg["max_tokens"] = max(1, min(131072, int(data["max_tokens"])))
+        except (ValueError, TypeError):
+            pass
+    if "temperature" in data:
+        try:
+            cfg["temperature"] = round(max(0.0, min(2.0, float(data["temperature"]))), 2)
+        except (ValueError, TypeError):
+            pass
+    if "system_prompt" in data:
+        cfg["system_prompt"] = str(data["system_prompt"]).strip()
+
+    db.set_model_settings(model, cfg)
+    return {
+        "status": "ok",
+        "message": f"Global settings for '{model}' saved successfully.",
+        "settings": cfg,
+    }
+
+
+@app.delete("/api/model-settings")
+async def api_delete_model_settings(request: Request, model: Optional[str] = None):
+    """Reset model settings to default."""
+    target_model = model
+    if not target_model:
+        try:
+            body = await request.json()
+            target_model = body.get("model")
+        except Exception:
+            pass
+    if not target_model:
+        raise HTTPException(status_code=400, detail="Missing model name")
+    db.delete_model_settings(target_model)
+    return {"status": "ok", "message": f"Model settings for '{target_model}' reset to defaults."}
+
 
 
 @app.get("/api/cookies")

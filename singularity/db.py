@@ -68,20 +68,21 @@ def init_db() -> None:
 # ==============================================================================
 
 def _clean_jwt_string(raw: str) -> str:
-    """Extract and unwrap clean JWT string from raw input (JSON, quotes, or Bearer prefix)."""
+    """Extract and unwrap clean JWT string from raw input (JSON, quotes, cookies, or Bearer prefix)."""
     if not raw:
         return ""
-    t = raw.strip()
+    t = raw.strip().replace("\r", "")
     # Strip wrapping quotes
     if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
         t = t[1:-1].strip()
-    # If JSON object, look for refresh_token, access_token, token, or value
+    # If JSON object, look for refresh_token, kimi-refresh-token, access_token, token, or value
     if (t.startswith("{") and t.endswith("}")) or (t.startswith("[") and t.endswith("]")):
         try:
             data = json.loads(t)
             if isinstance(data, dict):
                 cand = (
                     data.get("refresh_token")
+                    or data.get("kimi-refresh-token")
                     or data.get("access_token")
                     or data.get("token")
                     or data.get("value")
@@ -94,6 +95,7 @@ def _clean_jwt_string(raw: str) -> str:
                 elif isinstance(data[0], dict):
                     cand = (
                         data[0].get("refresh_token")
+                        or data[0].get("kimi-refresh-token")
                         or data[0].get("access_token")
                         or data[0].get("token")
                         or data[0].get("value")
@@ -105,6 +107,12 @@ def _clean_jwt_string(raw: str) -> str:
     # Strip Bearer prefix if present
     if t.lower().startswith("bearer "):
         t = t[7:].strip()
+    
+    # If string contains a valid 3-part JWT pattern, extract it cleanly
+    jwt_match = re.search(r"(eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)", t)
+    if jwt_match:
+        return jwt_match.group(1).strip()
+
     return t.strip().strip('"').strip("'")
 
 
@@ -192,8 +200,11 @@ def parse_credential(provider: str, raw: str) -> Optional[Dict[str, Any]]:
     # 2. Kimi
     elif provider == "kimi":
         raw = _clean_jwt_string(raw)
-        # Check if line format KIMI_TOKEN=...
-        if "KIMI_TOKEN=" in raw:
+        # Check if cookie / env format: KIMI_TOKEN=..., kimi-refresh-token=..., refresh_token=...
+        cookie_m = re.search(r"(?:kimi[-_]?refresh[-_]?token|refresh[-_]?token|kimi[-_]?token)=([^\s;]+)", raw, re.IGNORECASE)
+        if cookie_m:
+            raw = _clean_jwt_string(cookie_m.group(1))
+        elif "KIMI_TOKEN=" in raw:
             m = re.search(r"KIMI_TOKEN=([^\s]+)", raw)
             if m:
                 raw = _clean_jwt_string(m.group(1))
@@ -651,9 +662,72 @@ def get_all_settings() -> Dict[str, str]:
         return {r["key"]: r["value"] for r in rows}
 
 
+def get_model_settings(model: str) -> Dict[str, Any]:
+    """Retrieve customized settings (thinking_budget, max_tokens, etc.) for a model."""
+    if not model:
+        return {}
+    m = model.lower().strip()
+    raw = get_setting(f"model_cfg:{m}")
+    if raw:
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
+    # If model has provider prefix or path (e.g. claude/claude-3-7-sonnet or models/gemini-...)
+    if "/" in m:
+        base = m.split("/")[-1]
+        raw = get_setting(f"model_cfg:{base}")
+        if raw:
+            try:
+                return json.loads(raw)
+            except Exception:
+                pass
+    return {}
+
+
+def set_model_settings(model: str, cfg: Dict[str, Any]) -> None:
+    """Persist customized settings (thinking_budget, max_tokens, etc.) for a model."""
+    if not model:
+        return
+    m = model.lower().strip()
+    clean_cfg = dict(cfg)
+    clean_cfg["model"] = m
+    clean_cfg["updated_at"] = time.time()
+    set_setting(f"model_cfg:{m}", json.dumps(clean_cfg))
+
+
+def delete_model_settings(model: str) -> None:
+    """Delete customized model settings for a model, reverting to defaults."""
+    if not model:
+        return
+    m = model.lower().strip()
+    init_db()
+    with get_db_connection() as conn:
+        conn.execute("DELETE FROM settings WHERE key = ?", (f"model_cfg:{m}",))
+        if "/" in m:
+            base = m.split("/")[-1]
+            conn.execute("DELETE FROM settings WHERE key = ?", (f"model_cfg:{base}",))
+        conn.commit()
+
+
+def get_all_model_settings() -> Dict[str, Dict[str, Any]]:
+    """Retrieve all model settings overrides across all registered models."""
+    all_s = get_all_settings()
+    res = {}
+    for k, v in all_s.items():
+        if k.startswith("model_cfg:"):
+            m = k[len("model_cfg:"):]
+            try:
+                res[m] = json.loads(v)
+            except Exception:
+                pass
+    return res
+
+
 if __name__ == "__main__":
     init_db()
     all_acc = get_accounts()
     print(f"[+] Singularity Credential DB initialized. Stored accounts: {len(all_acc)}")
     for a in all_acc:
         print(f"  - [{a['provider'].upper()}] {a['name']} ({a['identifier']})")
+

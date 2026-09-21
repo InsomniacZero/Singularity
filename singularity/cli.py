@@ -401,6 +401,69 @@ def cmd_host(args):
         print("    Usage: ./singular host <ip_or_domain> (e.g. 192.168.1.100)")
 
 
+def cmd_thinking(args):
+    """View or configure thinking budget cap for any model."""
+    db.init_db()
+    model = (args.model or "").strip()
+    budget = args.budget
+
+    if not model or model in ("list", "all"):
+        all_cfgs = db.get_all_model_settings()
+        if not all_cfgs:
+            print("[*] No custom thinking caps or model settings configured yet.")
+            print("    Usage: ./singular thinking <model> <budget_tokens>")
+            print("    Example: ./singular thinking claude-3-7-sonnet 8192")
+            print("    Example: ./singular thinking gemini-3.8-flash-thinking 16384")
+            return
+
+        print_header("🧠 CONFIGURED MODEL THINKING CAPS & SETTINGS")
+        headers = ["Model", "Thinking Budget", "Max Tokens", "Temperature"]
+        rows = []
+        for m, cfg in sorted(all_cfgs.items()):
+            tb = cfg.get("thinking_budget")
+            tb_str = f"{tb:,} tokens" if (tb is not None and tb > 0) else "Disabled (0)" if tb == 0 else "Default"
+            mt = cfg.get("max_tokens", "—")
+            temp = cfg.get("temperature", "—")
+            rows.append([m, tb_str, str(mt), str(temp)])
+        print_table(headers, rows)
+        print("\n  Enforced automatically across all gateway /v1/chat/completions requests.")
+        return
+
+    if str(budget).lower() in ("reset", "delete", "remove", "default"):
+        db.delete_model_settings(model)
+        print(f"[+] Reset model settings for '{model}' to default.")
+        return
+
+    if budget is not None:
+        try:
+            budget_val = max(0, int(budget))
+        except ValueError:
+            print(f"[-] Invalid budget number: {budget}. Must be an integer like 8192 or 0.")
+            return
+
+        existing = db.get_model_settings(model)
+        existing["thinking_budget"] = budget_val
+        db.set_model_settings(model, existing)
+
+        status_label = f"{budget_val:,} tokens" if budget_val > 0 else "DISABLED (0 tokens)"
+        print(f"[+] Thinking budget cap for '{model}' set to: {status_label}")
+        print("    This thinking budget is now enforced on all requests to Singularity Gateway for this model.")
+    else:
+        cfg = db.get_model_settings(model)
+        if not cfg:
+            print(f"[*] No custom settings for model '{model}'. Upstream provider defaults will be used.")
+            print(f"    To set thinking budget: ./singular thinking {model} <tokens>")
+        else:
+            tb = cfg.get("thinking_budget")
+            tb_str = f"{tb:,} tokens" if (tb is not None and tb > 0) else "Disabled (0)" if tb == 0 else "Default"
+            print(f"[*] Settings for '{model}':")
+            print(f"    • Thinking Budget Cap : {tb_str}")
+            if "max_tokens" in cfg:
+                print(f"    • Max Tokens          : {cfg['max_tokens']}")
+            if "temperature" in cfg:
+                print(f"    • Temperature         : {cfg['temperature']}")
+
+
 def cmd_chat(args):
     """Execute a quick test completion through the local gateway."""
     import httpx
@@ -416,6 +479,8 @@ def cmd_chat(args):
     }
     if args.simulate:
         payload["simulate"] = True
+    if getattr(args, "thinking", None) is not None:
+        payload["thinking_budget"] = args.thinking
 
     print(f"[*] Routing to Singularity Gateway ({model})...\n")
 
@@ -605,8 +670,14 @@ def main():
     p_chat.add_argument("-m", "--model", default="gpt-5-6-mini", help="Model name (default: gpt-5-6-mini)")
     p_chat.add_argument("--stream", action="store_true", default=True, help="Stream response via SSE")
     p_chat.add_argument("--no-stream", dest="stream", action="store_false")
+    p_chat.add_argument("--thinking", type=int, default=None, help="Thinking budget token cap override (e.g. 8192, 0 to disable)")
     p_chat.add_argument("--simulate", action="store_true", help="Force simulated response")
     p_chat.add_argument("-p", "--port", type=int, default=9000, help="Gateway port (default: 9000)")
+
+    # thinking (model settings & budget cap)
+    p_th = subparsers.add_parser("thinking", help="Inspect or set persistent thinking budget caps for models")
+    p_th.add_argument("model", nargs="?", default=None, help="Model name (or 'list' to view all)")
+    p_th.add_argument("budget", nargs="?", default=None, help="Budget tokens (e.g. 8192, 0 to disable, or 'reset')")
 
     # service
     p_svc = subparsers.add_parser("service", help="Control provider daemons")
@@ -631,6 +702,8 @@ def main():
         cmd_host(args)
     elif args.subcommand == "chat":
         cmd_chat(args)
+    elif args.subcommand == "thinking":
+        cmd_thinking(args)
     elif args.subcommand == "service":
         cmd_service(args)
 

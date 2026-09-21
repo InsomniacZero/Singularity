@@ -11,6 +11,7 @@ import base64
 import json
 import os
 import random
+import re
 import time
 import uuid
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
@@ -19,7 +20,25 @@ import httpx
 
 KIMI_API_BASE = os.getenv("KIMI_API_BASE", "https://www.kimi.com")
 KIMI_CHAT_PATH = "/apiv2/kimi.gateway.chat.v1.ChatService/Chat"
-KIMI_SCENARIO = "SCENARIO_K2D5"
+KIMI_DEFAULT_SCENARIO = "SCENARIO_K3"
+
+
+def resolve_kimi_scenarios(model: str, enable_search: bool = False) -> List[str]:
+    """
+    Resolve ordered candidate scenarios for Moonshot Kimi models.
+    Prioritizes SCENARIO_K3 for K3 variants and falls back gracefully to sibling
+    scenarios if Moonshot temporarily sheds free load on a specific route.
+    """
+    m = model.lower()
+    if enable_search:
+        return ["SCENARIO_K3", "SCENARIO_SEARCH", "SCENARIO_K3_THINKING"]
+    if "k3" in m:
+        return ["SCENARIO_K3", "SCENARIO_K3_THINKING", "SCENARIO_SEARCH", "SCENARIO_CHAT"]
+    if "k2" in m:
+        # Note: K3 is prioritized over K2D5 on free tier because K2D5 is often
+        # paywalled with REASON_SERVER_OVERLOADED_FOR_FREE_USER.
+        return ["SCENARIO_K3", "SCENARIO_K2D5", "SCENARIO_SEARCH", "SCENARIO_CHAT"]
+    return ["SCENARIO_K3", "SCENARIO_SEARCH", "SCENARIO_CHAT", "SCENARIO_K2D5"]
 
 FAKE_HEADERS = {
     "Accept": "*/*",
@@ -44,10 +63,10 @@ FAKE_HEADERS = {
 
 
 def _clean_token(raw_token: str) -> str:
-    """Extract and unwrap clean JWT token from raw input (JSON, quotes, or Bearer prefix)."""
+    """Extract and unwrap clean JWT token from raw input (JSON, quotes, cookies, or Bearer prefix)."""
     if not raw_token:
         return ""
-    t = raw_token.strip()
+    t = raw_token.strip().replace("\r", "")
     if (t.startswith('"') and t.endswith('"')) or (t.startswith("'") and t.endswith("'")):
         t = t[1:-1].strip()
     if (t.startswith("{") and t.endswith("}")) or (t.startswith("[") and t.endswith("]")):
@@ -56,6 +75,7 @@ def _clean_token(raw_token: str) -> str:
             if isinstance(data, dict):
                 cand = (
                     data.get("refresh_token")
+                    or data.get("kimi-refresh-token")
                     or data.get("access_token")
                     or data.get("token")
                     or data.get("value")
@@ -68,6 +88,7 @@ def _clean_token(raw_token: str) -> str:
                 elif isinstance(data[0], dict):
                     cand = (
                         data[0].get("refresh_token")
+                        or data[0].get("kimi-refresh-token")
                         or data[0].get("access_token")
                         or data[0].get("token")
                         or data[0].get("value")
@@ -78,6 +99,12 @@ def _clean_token(raw_token: str) -> str:
             pass
     if t.lower().startswith("bearer "):
         t = t[7:].strip()
+    
+    # Extract pristine JWT token if embedded inside cookie string or key=value pair
+    jwt_match = re.search(r"(eyJ[A-Za-z0-9_\-]+\.eyJ[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+)", t)
+    if jwt_match:
+        return jwt_match.group(1).strip()
+
     return t.strip().strip('"').strip("'")
 
 
@@ -331,133 +358,204 @@ async def stream_kimi_chat(
         sorted_candidates = sorted_candidates[idx:] + sorted_candidates[:idx]
 
     enable_thinking = "thinking" in model.lower() or "k3" in model.lower()
+    if kwargs.get("thinking_budget") is not None:
+        try:
+            enable_thinking = int(kwargs["thinking_budget"]) > 0
+        except Exception:
+            pass
+    elif kwargs.get("thinking") is not None:
+        th = kwargs.get("thinking")
+        if isinstance(th, dict):
+            enable_thinking = th.get("type") == "enabled"
+        elif isinstance(th, bool):
+            enable_thinking = th
     enable_search = "search" in model.lower()
     prompt_text = _format_messages_to_prompt(messages)
 
-    payload: Dict[str, Any] = {
-        "scenario": KIMI_SCENARIO,
-        "tools": [{"type": "TOOL_TYPE_SEARCH", "search": {}}] if enable_search else [],
-        "message": {
-            "role": "user",
-            "blocks": [{"message_id": "", "text": {"content": prompt_text}}],
-            "scenario": KIMI_SCENARIO,
-        },
-        "options": {"thinking": enable_thinking},
-    }
-    connect_body = _encode_connect_request(payload)
+    scenarios = resolve_kimi_scenarios(model, enable_search=enable_search)
 
     last_error_msg = ""
     role_yielded = False
     has_yielded_tokens = False
 
     for attempt_idx, account in enumerate(sorted_candidates):
+        if has_yielded_tokens:
+            return
+
         token_str = _clean_token(account["token"])
         acc_name = account.get("name") or account.get("identifier") or f"Account-{account.get('id')}"
         device_id = _extract_device_id_from_token(token_str) or str(random.randint(7000000000000000000, 7999999999999999999))
 
-        # Candidate endpoints to prevent DNS or connectivity failures
-        candidate_endpoints = [
-            KIMI_API_BASE,
-            "https://kimi.moonshot.cn",
-            "https://www.kimi.com",
-        ]
-        seen_ep = set()
-        unique_eps = []
-        for ep in candidate_endpoints:
-            ep_clean = ep.rstrip("/")
-            if ep_clean not in seen_ep:
-                seen_ep.add(ep_clean)
-                unique_eps.append(ep_clean)
-
         account_success = False
-        for current_base in unique_eps:
-            try:
-                async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0), follow_redirects=True) as client:
-                    try:
-                        access_token = await get_kimi_access_token(token_str, client=client)
-                    except Exception as auth_err:
-                        last_error_msg = f"Token refresh error on {acc_name}: {str(auth_err)}"
-                        # Break to next account if refresh token itself failed
-                        break
 
-                    headers = {
-                        **FAKE_HEADERS,
-                        "Authorization": f"Bearer {access_token}",
-                        "Origin": current_base,
-                        "Referer": f"{current_base}/",
-                        "X-Msh-Device-Id": device_id,
-                        "X-Msh-Session-Id": session_id,
-                        "Connect-Protocol-Version": "1",
-                        "Content-Type": "application/connect+json",
-                    }
+        # Try candidate scenarios in prioritized order (e.g. SCENARIO_K3 -> SCENARIO_K3_THINKING -> SCENARIO_SEARCH)
+        for current_scenario in scenarios:
+            if account_success or has_yielded_tokens:
+                break
 
-                    async with client.stream(
-                        "POST",
-                        f"{current_base}{KIMI_CHAT_PATH}",
-                        content=connect_body,
-                        headers=headers,
-                    ) as resp:
-                        if resp.status_code >= 400:
-                            err_text = (await resp.aread()).decode("utf-8", errors="ignore")
-                            last_error_msg = f"HTTP {resp.status_code} on {acc_name}: {err_text[:200]}"
-                            if resp.status_code in (401, 403, 429):
-                                # Account level issue
-                                break
-                            # Try next endpoint for 500s
-                            continue
+            payload: Dict[str, Any] = {
+                "scenario": current_scenario,
+                "tools": [{"type": "TOOL_TYPE_SEARCH", "search": {}}] if enable_search else [],
+                "message": {
+                    "role": "user",
+                    "blocks": [{"message_id": "", "text": {"content": prompt_text}}],
+                    "scenario": current_scenario,
+                },
+                "options": {"thinking": enable_thinking},
+            }
+            connect_body = _encode_connect_request(payload)
 
-                        buffer = bytearray()
-                        account_failed = False
-                        total_reasoning = ""
-                        total_content = ""
+            # Candidate endpoints to prevent DNS or connectivity failures
+            candidate_endpoints = [
+                KIMI_API_BASE,
+                "https://kimi.moonshot.cn",
+                "https://www.kimi.com",
+            ]
+            seen_ep = set()
+            unique_eps = []
+            for ep in candidate_endpoints:
+                ep_clean = ep.rstrip("/")
+                if ep_clean not in seen_ep:
+                    seen_ep.add(ep_clean)
+                    unique_eps.append(ep_clean)
 
-                        async for chunk in resp.aiter_bytes():
-                            buffer.extend(chunk)
-                            while len(buffer) >= 5:
-                                flag = buffer[0]
-                                length = int.from_bytes(buffer[1:5], "big")
-                                if len(buffer) < 5 + length:
+            scenario_overloaded = False
+            scenario_quota_depleted = False
+
+            for current_base in unique_eps:
+                if account_success or has_yielded_tokens:
+                    break
+
+                try:
+                    async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0), follow_redirects=True) as client:
+                        try:
+                            access_token = await get_kimi_access_token(token_str, client=client)
+                        except Exception as auth_err:
+                            last_error_msg = f"Token refresh error on {acc_name}: {str(auth_err)}"
+                            break
+
+                        headers = {
+                            **FAKE_HEADERS,
+                            "Authorization": f"Bearer {access_token}",
+                            "Origin": current_base,
+                            "Referer": f"{current_base}/",
+                            "X-Msh-Device-Id": device_id,
+                            "X-Msh-Session-Id": session_id,
+                            "Connect-Protocol-Version": "1",
+                            "Content-Type": "application/connect+json",
+                        }
+
+                        async with client.stream(
+                            "POST",
+                            f"{current_base}{KIMI_CHAT_PATH}",
+                            content=connect_body,
+                            headers=headers,
+                        ) as resp:
+                            if resp.status_code >= 400:
+                                err_text = (await resp.aread()).decode("utf-8", errors="ignore")
+                                last_error_msg = f"HTTP {resp.status_code} on {acc_name}: {err_text[:200]}"
+                                if resp.status_code in (401, 403, 429):
                                     break
+                                continue
 
-                                frame = bytes(buffer[5 : 5 + length])
-                                del buffer[: 5 + length]
+                            buffer = bytearray()
+                            total_reasoning = ""
+                            total_content = ""
 
-                                if flag & 0x80:
-                                    continue
-
-                                try:
-                                    evt_str = frame.decode("utf-8", errors="ignore").strip()
-                                    if not evt_str:
-                                        continue
-                                    evt = json.loads(evt_str)
-                                except Exception:
-                                    continue
-
-                                # Check for Connect Protocol trailer (flag & 0x02) or error
-                                err = evt.get("error")
-                                is_trailer = bool(flag & 0x02)
-
-                                if err:
-                                    err_code = err.get("code", "error") if isinstance(err, dict) else "error"
-                                    err_msg = ""
-                                    if isinstance(err, dict):
-                                        err_msg = err.get("localizedMessage", {}).get("message") or err.get("message") or str(err)
-                                    else:
-                                        err_msg = str(evt)
-
-                                    is_quota = (
-                                        "exhausted" in str(err_code).lower()
-                                        or "quota" in str(err_msg).lower()
-                                        or "credits" in str(err_msg).lower()
-                                    )
-                                    if is_quota:
-                                        _EXHAUSTED_ACCOUNTS[token_str] = time.time() + 1800
-
-                                    if not has_yielded_tokens and attempt_idx + 1 < len(sorted_candidates):
-                                        account_failed = True
-                                        last_error_msg = f"Quota depleted on {acc_name} ({err_msg}). Rotating..."
+                            async for chunk in resp.aiter_bytes():
+                                buffer.extend(chunk)
+                                while len(buffer) >= 5:
+                                    flag = buffer[0]
+                                    length = int.from_bytes(buffer[1:5], "big")
+                                    if len(buffer) < 5 + length:
                                         break
-                                    else:
+
+                                    frame = bytes(buffer[5 : 5 + length])
+                                    del buffer[: 5 + length]
+
+                                    if flag & 0x80:
+                                        continue
+
+                                    try:
+                                        evt_str = frame.decode("utf-8", errors="ignore").strip()
+                                        if not evt_str:
+                                            continue
+                                        evt = json.loads(evt_str)
+                                    except Exception:
+                                        continue
+
+                                    # Check for Connect Protocol trailer (flag & 0x02) or error
+                                    err = evt.get("error")
+                                    is_trailer = bool(flag & 0x02)
+
+                                    if err:
+                                        err_code = err.get("code", "error") if isinstance(err, dict) else "error"
+                                        details = err.get("details", []) if isinstance(err, dict) else []
+                                        debug = details[0].get("debug", {}) if details and isinstance(details[0], dict) else {}
+                                        err_reason = debug.get("reason") or ""
+                                        loc_msg = debug.get("localizedMessage", {}).get("message")
+                                        err_msg = (
+                                            loc_msg
+                                            or (err.get("localizedMessage", {}).get("message") if isinstance(err, dict) else None)
+                                            or (err.get("message") if isinstance(err, dict) else None)
+                                            or err_reason
+                                            or "Kimi service busy"
+                                        )
+
+                                        is_overload = (
+                                            "overload" in err_reason.lower()
+                                            or "too many people" in err_msg.lower()
+                                            or "priority access" in err_msg.lower()
+                                        )
+                                        is_quota = (
+                                            "quota" in err_reason.lower()
+                                            or "credits" in err_msg.lower()
+                                            or "exhausted" in str(err_code).lower()
+                                        )
+
+                                        last_error_msg = f"{err_msg} ({err_reason or err_code})"
+
+                                        if is_overload:
+                                            scenario_overloaded = True
+                                        elif is_quota:
+                                            scenario_quota_depleted = True
+
+                                        if not has_yielded_tokens:
+                                            # We haven't sent tokens to user yet; transparently break to try next scenario or account
+                                            break
+                                        else:
+                                            # If already yielding tokens mid-stream, finish with clean message
+                                            yield {
+                                                "id": chat_id,
+                                                "object": "chat.completion.chunk",
+                                                "created": created_ts,
+                                                "model": model,
+                                                "choices": [{
+                                                    "index": 0,
+                                                    "delta": {"content": f"\n\n*(Kimi stream interrupted: {err_msg})*"},
+                                                    "finish_reason": "error",
+                                                }],
+                                            }
+                                            return
+
+                                    if is_trailer:
+                                        break
+
+                                    mask = evt.get("mask", "")
+                                    block = evt.get("block", {})
+                                    think_obj = block.get("think")
+                                    text_obj = block.get("text")
+
+                                    delta_reasoning = None
+                                    delta_content = None
+
+                                    if "block.think" in mask or (isinstance(think_obj, dict) and think_obj.get("content")):
+                                        delta_reasoning = think_obj.get("content") if isinstance(think_obj, dict) else None
+
+                                    if "block.text" in mask or (isinstance(text_obj, dict) and text_obj.get("content")):
+                                        delta_content = text_obj.get("content") if isinstance(text_obj, dict) else None
+
+                                    if delta_reasoning or delta_content:
                                         if not role_yielded:
                                             yield {
                                                 "id": chat_id,
@@ -467,106 +565,69 @@ async def stream_kimi_chat(
                                                 "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
                                             }
                                             role_yielded = True
+
+                                    if delta_reasoning:
+                                        has_yielded_tokens = True
+                                        total_reasoning += delta_reasoning
                                         yield {
                                             "id": chat_id,
                                             "object": "chat.completion.chunk",
                                             "created": created_ts,
                                             "model": model,
-                                            "choices": [{
-                                                "index": 0,
-                                                "delta": {"content": f"\n\n⚠️ **Kimi Error ({err_code}):** {err_msg}\n"},
-                                                "finish_reason": "error",
-                                            }],
+                                            "choices": [{"index": 0, "delta": {"reasoning_content": delta_reasoning}, "finish_reason": None}],
                                         }
-                                        return
 
-                                if is_trailer:
-                                    # Clean normal end-of-stream trailer frame
-                                    break
-
-                                mask = evt.get("mask", "")
-                                block = evt.get("block", {})
-                                think_obj = block.get("think")
-                                text_obj = block.get("text")
-
-                                delta_reasoning = None
-                                delta_content = None
-
-                                if "block.think" in mask or (isinstance(think_obj, dict) and think_obj.get("content")):
-                                    delta_reasoning = think_obj.get("content") if isinstance(think_obj, dict) else None
-
-                                if "block.text" in mask or (isinstance(text_obj, dict) and text_obj.get("content")):
-                                    delta_content = text_obj.get("content") if isinstance(text_obj, dict) else None
-
-                                if delta_reasoning or delta_content:
-                                    if not role_yielded:
+                                    if delta_content:
+                                        has_yielded_tokens = True
+                                        total_content += delta_content
                                         yield {
                                             "id": chat_id,
                                             "object": "chat.completion.chunk",
                                             "created": created_ts,
                                             "model": model,
-                                            "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
+                                            "choices": [{"index": 0, "delta": {"content": delta_content}, "finish_reason": None}],
                                         }
-                                        role_yielded = True
 
-                                if delta_reasoning:
-                                    has_yielded_tokens = True
-                                    total_reasoning += delta_reasoning
+                            if has_yielded_tokens:
+                                account_success = True
+                                if not total_content and total_reasoning:
                                     yield {
                                         "id": chat_id,
                                         "object": "chat.completion.chunk",
                                         "created": created_ts,
                                         "model": model,
-                                        "choices": [{"index": 0, "delta": {"reasoning_content": delta_reasoning}, "finish_reason": None}],
+                                        "choices": [{
+                                            "index": 0,
+                                            "delta": {"content": "\n\n*(Thinking process completed)*"},
+                                            "finish_reason": None,
+                                        }],
                                     }
 
-                                if delta_content:
-                                    has_yielded_tokens = True
-                                    total_content += delta_content
-                                    yield {
-                                        "id": chat_id,
-                                        "object": "chat.completion.chunk",
-                                        "created": created_ts,
-                                        "model": model,
-                                        "choices": [{"index": 0, "delta": {"content": delta_content}, "finish_reason": None}],
-                                    }
-
-                        if account_failed:
-                            break
-
-                        # If response finished with only reasoning and 0 text, yield clear conclusion
-                        if has_yielded_tokens:
-                            if not total_content and total_reasoning:
                                 yield {
                                     "id": chat_id,
                                     "object": "chat.completion.chunk",
                                     "created": created_ts,
                                     "model": model,
-                                    "choices": [{
-                                        "index": 0,
-                                        "delta": {"content": "\n\n*(Thinking process completed)*"},
-                                        "finish_reason": None,
-                                    }],
+                                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                                 }
+                                return
 
-                            # Final stop chunk
-                            yield {
-                                "id": chat_id,
-                                "object": "chat.completion.chunk",
-                                "created": created_ts,
-                                "model": model,
-                                "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                            }
-                            return
+                            if scenario_overloaded or scenario_quota_depleted:
+                                break
 
-            except Exception as conn_err:
-                last_error_msg = f"Connection error on {acc_name} ({current_base}): {str(conn_err)}"
-                if has_yielded_tokens:
-                    return
-                continue
+                except Exception as conn_err:
+                    last_error_msg = f"Connection error on {acc_name} ({current_base}): {str(conn_err)}"
+                    if has_yielded_tokens:
+                        return
+                    continue
 
-        if has_yielded_tokens:
-            return
+            # If this scenario worked, don't try fallback scenarios
+            if account_success or has_yielded_tokens:
+                return
+
+        # If all scenarios failed on this account due to quota depletion, mark account temporarily
+        if scenario_quota_depleted and not account_success:
+            _EXHAUSTED_ACCOUNTS[token_str] = time.time() + 600
 
     # If all candidate accounts failed and no tokens were emitted
     if has_yielded_tokens:
@@ -589,9 +650,9 @@ async def stream_kimi_chat(
             "index": 0,
             "delta": {
                 "content": (
-                    f"\n\n⚠️ **Kimi Inference Error:**\n"
-                    f"{last_error_msg or 'All stacked Kimi accounts have depleted their available quota or failed to respond.'}\n\n"
-                    f"Please add a fresh Kimi token in the Singularity Control Center or via `./singular import`."
+                    f"\n\n⚠️ **Kimi Inference Notice:**\n"
+                    f"{last_error_msg or 'All stacked Kimi accounts / scenarios are currently busy or out of credits.'}\n\n"
+                    f"Please check your credentials in the Singularity Control Center or try again in a few moments."
                 )
             },
             "finish_reason": "error",

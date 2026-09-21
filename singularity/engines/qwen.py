@@ -561,6 +561,17 @@ async def stream_qwen_chat(
     created = int(time.time())
     final_prompt = messages_prepare(messages)
     base_model, chat_type, thinking_enabled, search_enabled = _resolve_qwen_model_and_features(model, final_prompt)
+    if kwargs.get("thinking_budget") is not None:
+        try:
+            thinking_enabled = int(kwargs["thinking_budget"]) > 0
+        except Exception:
+            pass
+    elif kwargs.get("thinking") is not None:
+        th = kwargs.get("thinking")
+        if isinstance(th, dict):
+            thinking_enabled = th.get("type") == "enabled"
+        elif isinstance(th, bool):
+            thinking_enabled = th
 
     # 1. Device Simulation Mode
     if simulate or os.getenv("SINGULARITY_SIMULATE", "0") in ("1", "true", "yes", "on"):
