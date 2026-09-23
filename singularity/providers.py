@@ -616,6 +616,20 @@ MODELS_CATALOG = [
         'locked': False,
         'name': 'Imagen 4.0 Image Gen',
         'provider': 'gemini'},
+    {   'capabilities': ['chat', 'reasoning', 'code', 'vision'],
+        'context': '200k tokens',
+        'description': 'Anthropic frontier flagship with next-level cognitive depth and autonomous reasoning.',
+        'id': 'claude-opus-5-5',
+        'locked': False,
+        'name': 'Claude 5.5 Opus',
+        'provider': 'claude'},
+    {   'capabilities': ['chat', 'reasoning', 'code', 'vision', 'thinking'],
+        'context': '200k tokens',
+        'description': 'Maximum-depth chain-of-thought scratchpad reasoning with extreme cognitive persistence.',
+        'id': 'claude-opus-5-5-think',
+        'locked': False,
+        'name': 'Claude 5.5 Opus Thinking',
+        'provider': 'claude'},
     {   'capabilities': ['chat', 'vision', 'code', 'streaming'],
         'context': '200k tokens',
         'description': 'Frontier intelligence, elite coding, and long-context synthesis.',
@@ -1875,7 +1889,10 @@ def get_dynamic_models_catalog() -> List[Dict[str, Any]]:
 
         # Claude dynamic rules
         elif provider == "claude":
-            if "opus" in mid or "fable" in mid or "pro" in mid or "max" in mid:
+            if "opus-5-5" in mid or "opus-5.5" in mid or "opus-55" in mid or "opus5.5" in mid:
+                m["locked"] = False
+                m["reason"] = None
+            elif "opus" in mid or "fable" in mid or "pro" in mid or "max" in mid:
                 if tiers["claude_pro"]:
                     m["locked"] = False
                     m["reason"] = None

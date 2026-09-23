@@ -30,10 +30,21 @@ except ImportError:
 
 try:
     from singularity import db
+    from singularity import providers
     from singularity.providers import get_provider_host
+    from singularity import personas
 except ImportError:
     import db
-    from providers import get_provider_host
+    try:
+        import providers
+        from providers import get_provider_host
+    except ImportError:
+        providers = None
+        get_provider_host = None
+    try:
+        import personas
+    except ImportError:
+        personas = None
 
 
 # -------------------------------------------------------------------
@@ -189,79 +200,90 @@ async def stream_claude_chat(
     messages: List[Dict[str, Any]],
     accounts: Optional[List[Dict[str, Any]]] = None,
     stream: bool = True,
+    simulate: bool = False,
     **kwargs,
 ) -> AsyncIterator[Dict[str, Any]]:
     """
     Universal streaming inference engine for Claude.
-    1. First attempts high-speed daemon on port 8080 (if running).
-    2. Falls back to direct in-process Web2API conversation endpoint with multi-account rotation.
-    Yields OpenAI-compatible chunk dictionaries.
+    1. Supports instant device simulation mode when offline or testing.
+    2. Executes direct Web2API stream with automatic multi-account failover on 429 rate limit.
+    3. Streams standard OpenAI-compatible chunks with chain-of-thought thinking support.
     """
     chat_id = f"chatcmpl-claude-{uuid.uuid4().hex[:12]}"
     created_ts = int(time.time())
 
-    # Resolve target host & port
-    host = get_provider_host("claude")
-    port = int(os.getenv("CLAUDE_PORT", 8080))
-    bridge_url = f"http://{host}:{port}/v1/chat/completions"
+    # Check persona mapping (e.g. Claude 5.5 Opus, Claude 5.1 Fable, thinking variants)
+    persona_cfg = personas.get_persona_config(model) if personas else None
+    if persona_cfg:
+        messages = personas.inject_persona_messages(messages, persona_cfg)
+        target_model = persona_cfg.backend_model
+    else:
+        target_model = model
 
-    account = await get_next_claude_account(accounts)
-    session_key = ""
-    account_name = "Claude Session"
-    if account:
-        session_key = extract_claude_session_key(account.get("token", ""))
-        account_name = account.get("name") or account.get("identifier") or "Claude Session"
-
-    # 1. Attempt Daemon Proxy (Port 8080)
-    daemon_available = False
-    try:
-        async with httpx.AsyncClient(timeout=1.0) as check_client:
-            health_resp = await check_client.get(
-                f"http://{host}:{port}/v1/models",
-                headers={"Authorization": "Bearer sk-claude-local"},
+    # 1. Device Simulation Mode
+    is_sim = (
+        simulate
+        or (providers and hasattr(providers, "is_simulation_active") and providers.is_simulation_active())
+        or os.getenv("SINGULARITY_SIMULATE", "0").lower() in ("1", "true", "yes", "on")
+    )
+    if is_sim:
+        is_think = "think" in model.lower() or (persona_cfg and persona_cfg.is_think)
+        if is_think:
+            sim_thinking = (
+                f"Analyzing prompt with Claude advanced chain-of-thought ({model})...\n"
+                "1. Parsing constraints and contextual parameters.\n"
+                "2. Formulating systematic reasoning and domain synthesis.\n"
+                "3. Finalizing response strategy."
             )
-            if health_resp.status_code in (200, 401, 403):
-                daemon_available = True
-    except Exception:
-        daemon_available = False
+            yield {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"role": "assistant", "reasoning_content": sim_thinking},
+                    "finish_reason": None,
+                }],
+            }
+            await asyncio.sleep(0.04)
 
-    if daemon_available:
-        daemon_headers = {
-            "Content-Type": "application/json",
-            "Authorization": "Bearer sk-claude-local",
-        }
-        body = {
+        sim_response = (
+            f"Hello from Singularity's native Claude engine! Currently running simulated response for '{model}'. "
+            "Full persona mapping, credential management, and token streaming are active."
+        )
+        for word in sim_response.split(" "):
+            yield {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": word + " "},
+                    "finish_reason": None,
+                }],
+            }
+            await asyncio.sleep(0.015)
+
+        yield {
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": created_ts,
             "model": model,
-            "messages": messages,
-            "stream": True,
-            **kwargs,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
         }
+        return
 
-        client = httpx.AsyncClient(timeout=120.0)
+    # 2. Live Web2API Multi-Account Execution
+    all_accounts = accounts
+    if not all_accounts:
         try:
-            async with client.stream("POST", bridge_url, json=body, headers=daemon_headers) as upstream:
-                if upstream.status_code < 400:
-                    async for line in upstream.aiter_lines():
-                        if not line:
-                            continue
-                        line = line.strip()
-                        if line.startswith("data: "):
-                            raw_data = line[6:].strip()
-                            if raw_data == "[DONE]":
-                                break
-                            try:
-                                chunk = json.loads(raw_data)
-                                yield chunk
-                            except Exception:
-                                continue
-                    return
+            all_accounts = db.get_accounts("claude")
         except Exception:
-            pass  # Fall through to direct engine
-        finally:
-            await client.aclose()
+            all_accounts = []
 
-    # 2. Direct In-Process Web Engine
-    if not session_key:
+    if not all_accounts:
         yield {
             "id": chat_id,
             "object": "chat.completion.chunk",
@@ -277,24 +299,6 @@ async def stream_claude_chat(
         }
         return
 
-    # Obtain organization UUID
-    org_id = await get_claude_org_id(session_key)
-    if not org_id:
-        yield {
-            "id": chat_id,
-            "object": "chat.completion.chunk",
-            "created": created_ts,
-            "model": model,
-            "choices": [{
-                "index": 0,
-                "delta": {
-                    "content": f"\n\n[Claude Authentication Note: Could not verify organization with sessionKey for {account_name}. Please verify sessionKey is valid or start Claude service daemon on port {port}.]"
-                },
-                "finish_reason": "error",
-            }],
-        }
-        return
-
     # Initial role chunk
     yield {
         "id": chat_id,
@@ -304,23 +308,14 @@ async def stream_claude_chat(
         "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
     }
 
-    # Prepare direct conversation
-    conv_uuid = str(uuid.uuid4())
-    base_headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) "
-            "Chrome/131.0.0.0 Safari/537.36"
-        ),
-        "Cookie": f"sessionKey={session_key}",
-        "Accept": "text/event-stream",
-        "Content-Type": "application/json",
-        "Referer": f"https://claude.ai/chat/{conv_uuid}",
-        "Origin": "https://claude.ai",
-    }
+    # Rotate starting account index
+    global _ACCOUNT_ROTATION_INDEX
+    async with _ROTATION_LOCK:
+        start_idx = _ACCOUNT_ROTATION_INDEX % len(all_accounts)
+        _ACCOUNT_ROTATION_INDEX += 1
 
     prompt_text = _format_messages_to_prompt(messages)
-    web_model = model
+    web_model = target_model
     if web_model.startswith("claude-"):
         web_model = "claude-sonnet-5"
 
@@ -331,189 +326,81 @@ async def stream_claude_chat(
         "rendering_mode": "messages",
     }
 
-    if HAVE_CURL_CFFI:
+    success = False
+    rate_limited_count = 0
+    last_error_msg = ""
+
+    for attempt in range(len(all_accounts)):
+        acc = all_accounts[(start_idx + attempt) % len(all_accounts)]
+        acc_name = acc.get("name") or acc.get("identifier") or "Claude Account"
+        session_key = extract_claude_session_key(acc.get("token", ""))
+        if not session_key:
+            continue
+
+        org_id = await get_claude_org_id(session_key)
+        if not org_id:
+            last_error_msg = f"Could not obtain organization UUID for {acc_name}"
+            continue
+
+        conv_uuid = str(uuid.uuid4())
+        base_headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Cookie": f"sessionKey={session_key}",
+            "Accept": "text/event-stream",
+            "Content-Type": "application/json",
+            "Referer": f"https://claude.ai/chat/{conv_uuid}",
+            "Origin": "https://claude.ai",
+        }
+
         try:
-            async with CurlAsyncSession(impersonate="chrome120", timeout=120.0) as session:
-                # Create conversation
-                try:
-                    await session.post(
-                        f"https://claude.ai/api/organizations/{org_id}/chat_conversations",
-                        json={"uuid": conv_uuid, "name": ""},
-                        headers={**base_headers, "Accept": "application/json"},
-                        timeout=10.0,
+            if HAVE_CURL_CFFI:
+                async with CurlAsyncSession(impersonate="chrome120", timeout=60.0) as session:
+                    # Create conversation
+                    try:
+                        await session.post(
+                            f"https://claude.ai/api/organizations/{org_id}/chat_conversations",
+                            json={"uuid": conv_uuid, "name": ""},
+                            headers={**base_headers, "Accept": "application/json"},
+                            timeout=10.0,
+                        )
+                    except Exception:
+                        pass
+
+                    stream_resp = await session.post(
+                        f"https://claude.ai/api/organizations/{org_id}/chat_conversations/{conv_uuid}/completion",
+                        json=comp_payload,
+                        headers=base_headers,
+                        stream=True,
                     )
-                except Exception:
-                    pass
 
-                stream_resp = await session.post(
-                    f"https://claude.ai/api/organizations/{org_id}/chat_conversations/{conv_uuid}/completion",
-                    json=comp_payload,
-                    headers=base_headers,
-                    stream=True,
-                )
+                    if stream_resp.status_code == 429:
+                        rate_limited_count += 1
+                        last_error_msg = f"Account {acc_name} reached 5-hour rolling message limit (429 Rate Limited)."
+                        continue  # Auto-failover to next stacked account in vault
 
-                if stream_resp.status_code == 429:
-                    yield {
-                        "id": chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_ts,
-                        "model": model,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {
-                                "content": "\n\n[Claude Quota Note: You have reached Claude's message limit for this 5-hour rolling window on this account. Please try again after the window resets or add an additional Claude account to the vault.]"
-                            },
-                            "finish_reason": "error",
-                        }],
-                    }
-                    return
-
-                if stream_resp.status_code >= 400:
-                    err_text = stream_resp.text
-                    yield {
-                        "id": chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_ts,
-                        "model": model,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {
-                                "content": f"\n\n[Claude Web Ingestion Note: Direct upstream returned HTTP {stream_resp.status_code}: {err_text[:160]}]"
-                            },
-                            "finish_reason": "error",
-                        }],
-                    }
-                    return
-
-                async for line in stream_resp.aiter_lines():
-                    if not line:
+                    if stream_resp.status_code >= 400:
+                        err_text = stream_resp.text
+                        last_error_msg = f"Upstream returned HTTP {stream_resp.status_code}: {err_text[:160]}"
                         continue
-                    line_str = line.decode("utf-8", errors="ignore") if isinstance(line, bytes) else str(line)
-                    line_str = line_str.strip()
-                    if line_str.startswith("data: "):
-                        data_str = line_str[6:].strip()
-                        if data_str in ("[DONE]", ""):
-                            continue
-                        try:
-                            evt = json.loads(data_str)
-                            completion = evt.get("completion")
-                            if completion:
-                                yield {
-                                    "id": chat_id,
-                                    "object": "chat.completion.chunk",
-                                    "created": created_ts,
-                                    "model": model,
-                                    "choices": [{
-                                        "index": 0,
-                                        "delta": {"content": completion},
-                                        "finish_reason": None,
-                                    }],
-                                }
 
-                            delta = evt.get("delta", {})
-                            if delta.get("type") == "text_delta" and delta.get("text"):
-                                yield {
-                                    "id": chat_id,
-                                    "object": "chat.completion.chunk",
-                                    "created": created_ts,
-                                    "model": model,
-                                    "choices": [{
-                                        "index": 0,
-                                        "delta": {"content": delta["text"]},
-                                        "finish_reason": None,
-                                    }],
-                                }
-                            elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
-                                yield {
-                                    "id": chat_id,
-                                    "object": "chat.completion.chunk",
-                                    "created": created_ts,
-                                    "model": model,
-                                    "choices": [{
-                                        "index": 0,
-                                        "delta": {"reasoning_content": delta["thinking"]},
-                                        "finish_reason": None,
-                                    }],
-                                }
-                        except Exception:
-                            continue
-        except Exception as e:
-            yield {
-                "id": chat_id,
-                "object": "chat.completion.chunk",
-                "created": created_ts,
-                "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": f"\n\n[Claude Engine Exception: {str(e)}]"},
-                    "finish_reason": "error",
-                }],
-            }
-    else:
-        # Fallback to standard httpx client
-        try:
-            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
-                try:
-                    await client.post(
-                        f"https://claude.ai/api/organizations/{org_id}/chat_conversations",
-                        json={"uuid": conv_uuid, "name": ""},
-                        headers={**base_headers, "Accept": "application/json"},
-                        timeout=10.0,
-                    )
-                except Exception:
-                    pass
-
-                async with client.stream(
-                    "POST",
-                    f"https://claude.ai/api/organizations/{org_id}/chat_conversations/{conv_uuid}/completion",
-                    json=comp_payload,
-                    headers=base_headers,
-                ) as resp:
-                    if resp.status_code == 429:
-                        yield {
-                            "id": chat_id,
-                            "object": "chat.completion.chunk",
-                            "created": created_ts,
-                            "model": model,
-                            "choices": [{
-                                "index": 0,
-                                "delta": {
-                                    "content": "\n\n[Claude Quota Note: You have reached Claude's message limit for this 5-hour rolling window on this account. Please try again after the window resets or add an additional Claude account to the vault.]"
-                                },
-                                "finish_reason": "error",
-                            }],
-                        }
-                        return
-
-                    if resp.status_code >= 400:
-                        err_text = (await resp.aread()).decode("utf-8", errors="ignore")
-                        yield {
-                            "id": chat_id,
-                            "object": "chat.completion.chunk",
-                            "created": created_ts,
-                            "model": model,
-                            "choices": [{
-                                "index": 0,
-                                "delta": {
-                                    "content": f"\n\n[Claude Web Ingestion Note: Direct upstream returned HTTP {resp.status_code}: {err_text[:160]}]"
-                                },
-                                "finish_reason": "error",
-                            }],
-                        }
-                        return
-
-                    async for line in resp.aiter_lines():
+                    async for line in stream_resp.aiter_lines():
                         if not line:
                             continue
-                        line = line.strip()
-                        if line.startswith("data: "):
-                            data_str = line[6:].strip()
+                        line_str = line.decode("utf-8", errors="ignore") if isinstance(line, bytes) else str(line)
+                        line_str = line_str.strip()
+                        if line_str.startswith("data: "):
+                            data_str = line_str[6:].strip()
                             if data_str in ("[DONE]", ""):
                                 continue
                             try:
                                 evt = json.loads(data_str)
                                 completion = evt.get("completion")
                                 if completion:
+                                    success = True
                                     yield {
                                         "id": chat_id,
                                         "object": "chat.completion.chunk",
@@ -528,6 +415,7 @@ async def stream_claude_chat(
 
                                 delta = evt.get("delta", {})
                                 if delta.get("type") == "text_delta" and delta.get("text"):
+                                    success = True
                                     yield {
                                         "id": chat_id,
                                         "object": "chat.completion.chunk",
@@ -540,6 +428,7 @@ async def stream_claude_chat(
                                         }],
                                     }
                                 elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
+                                    success = True
                                     yield {
                                         "id": chat_id,
                                         "object": "chat.completion.chunk",
@@ -553,18 +442,122 @@ async def stream_claude_chat(
                                     }
                             except Exception:
                                 continue
+                    if success:
+                        break
+            else:
+                # httpx fallback
+                async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+                    try:
+                        await client.post(
+                            f"https://claude.ai/api/organizations/{org_id}/chat_conversations",
+                            json={"uuid": conv_uuid, "name": ""},
+                            headers={**base_headers, "Accept": "application/json"},
+                            timeout=10.0,
+                        )
+                    except Exception:
+                        pass
+
+                    async with client.stream(
+                        "POST",
+                        f"https://claude.ai/api/organizations/{org_id}/chat_conversations/{conv_uuid}/completion",
+                        json=comp_payload,
+                        headers=base_headers,
+                    ) as resp:
+                        if resp.status_code == 429:
+                            rate_limited_count += 1
+                            last_error_msg = f"Account {acc_name} reached 5-hour rolling message limit (429 Rate Limited)."
+                            continue
+
+                        if resp.status_code >= 400:
+                            err_text = (await resp.aread()).decode("utf-8", errors="ignore")
+                            last_error_msg = f"Upstream returned HTTP {resp.status_code}: {err_text[:160]}"
+                            continue
+
+                        async for line in resp.aiter_lines():
+                            if not line:
+                                continue
+                            line = line.strip()
+                            if line.startswith("data: "):
+                                data_str = line[6:].strip()
+                                if data_str in ("[DONE]", ""):
+                                    continue
+                                try:
+                                    evt = json.loads(data_str)
+                                    completion = evt.get("completion")
+                                    if completion:
+                                        success = True
+                                        yield {
+                                            "id": chat_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": created_ts,
+                                            "model": model,
+                                            "choices": [{
+                                                "index": 0,
+                                                "delta": {"content": completion},
+                                                "finish_reason": None,
+                                            }],
+                                        }
+
+                                    delta = evt.get("delta", {})
+                                    if delta.get("type") == "text_delta" and delta.get("text"):
+                                        success = True
+                                        yield {
+                                            "id": chat_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": created_ts,
+                                            "model": model,
+                                            "choices": [{
+                                                "index": 0,
+                                                "delta": {"content": delta["text"]},
+                                                "finish_reason": None,
+                                            }],
+                                        }
+                                    elif delta.get("type") == "thinking_delta" and delta.get("thinking"):
+                                        success = True
+                                        yield {
+                                            "id": chat_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": created_ts,
+                                            "model": model,
+                                            "choices": [{
+                                                "index": 0,
+                                                "delta": {"reasoning_content": delta["thinking"]},
+                                                "finish_reason": None,
+                                            }],
+                                        }
+                                except Exception:
+                                    continue
+                        if success:
+                            break
         except Exception as e:
-            yield {
-                "id": chat_id,
-                "object": "chat.completion.chunk",
-                "created": created_ts,
-                "model": model,
-                "choices": [{
-                    "index": 0,
-                    "delta": {"content": f"\n\n[Claude Engine Exception: {str(e)}]"},
-                    "finish_reason": "error",
-                }],
-            }
+            last_error_msg = str(e)
+            continue
+
+    if not success:
+        if rate_limited_count >= len(all_accounts):
+            content_err = (
+                f"\n\n[Claude Quota Note: All {len(all_accounts)} Claude account(s) in the Singularity vault "
+                "have reached Anthropic's 5-hour rolling message limit (HTTP 429 Rate Limited). "
+                "Please wait for Anthropic's rolling window to reset, add an additional Claude account in the Control Center, "
+                "or toggle Simulation Mode with './singular simulate on' to test immediately without rate limits.]"
+            )
+        else:
+            content_err = (
+                f"\n\n[Claude Execution Note: {last_error_msg or 'Could not complete request across vault accounts.'}]"
+            )
+
+        yield {
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": created_ts,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "delta": {"content": content_err},
+                "finish_reason": "error",
+            }],
+        }
+        return
 
     # Final completion chunk
     yield {

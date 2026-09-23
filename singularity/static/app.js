@@ -17,6 +17,11 @@ const state = {
   playgroundModality: 'all',
   selectedAspectRatio: '1:1',
   tunnel: { status: 'offline', public_url: null, has_authtoken: false },
+  enableArtifacts: true,
+  artifacts: {},
+  activeArtifactId: null,
+  activeArtifactView: 'preview',
+  artifactWorkbenchOpen: false,
 };
 
 // ===================================================================
@@ -65,60 +70,92 @@ function escapeHtml(str) {
 }
 
 // ===================================================================
-// Theme Toggle
+// ===================================================================
+// Theme Toggle (Shifted to User Profile)
 // ===================================================================
 function initTheme() {
-  const themeToggle = document.getElementById('theme-checkbox');
   const saved = localStorage.getItem('singularity_theme') || 'dark';
+  setAppTheme(saved);
 
-  document.documentElement.setAttribute('data-theme', saved);
-  themeToggle.checked = saved === 'dark';
+  // User Profile Theme Toggler
+  const btnDark = document.getElementById('btn-theme-dark');
+  const btnLight = document.getElementById('btn-theme-light');
 
-  themeToggle.addEventListener('change', () => {
-    const nextTheme = themeToggle.checked ? 'dark' : 'light';
-    document.documentElement.setAttribute('data-theme', nextTheme);
-    localStorage.setItem('singularity_theme', nextTheme);
-  });
-}
-
-// ===================================================================
-// Device Simulation Toggle
-// ===================================================================
-async function initSimulationToggle() {
-  const simToggle = document.getElementById('simulation-checkbox');
-  if (!simToggle) return;
-
-  try {
-    const res = await fetch('/api/simulation');
-    if (res.ok) {
-      const data = await res.json();
-      simToggle.checked = !!data.enabled;
-    }
-  } catch (e) {
-    console.warn('Could not fetch simulation status:', e);
+  if (btnDark) {
+    btnDark.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setAppTheme('dark');
+      showToast('Theme set to Dark Obsidian', 'info', 2000);
+    });
   }
 
-  simToggle.addEventListener('change', async () => {
-    try {
-      const res = await fetch('/api/simulation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: simToggle.checked }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        showToast(
-          data.enabled
-            ? '⚡ Device Simulation Mode Enabled: Offline AI streaming verified without local daemons.'
-            : '🔌 Device Simulation Mode Disabled: Connecting to live provider backends.',
-          'info'
-        );
-        fetchServices();
-      }
-    } catch (e) {
-      showToast('Failed to update simulation mode: ' + e.message, 'error');
+  if (btnLight) {
+    btnLight.addEventListener('click', (e) => {
+      e.stopPropagation();
+      setAppTheme('light');
+      showToast('Theme set to Warm Linen', 'info', 2000);
+    });
+  }
+
+  // User Profile Popover Interactions
+  initUserProfile();
+}
+
+function setAppTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('singularity_theme', theme);
+
+  const btnDark = document.getElementById('btn-theme-dark');
+  const btnLight = document.getElementById('btn-theme-light');
+  if (btnDark) btnDark.classList.toggle('active', theme === 'dark');
+  if (btnLight) btnLight.classList.toggle('active', theme === 'light');
+}
+
+function initUserProfile() {
+  const avatarBtn = document.getElementById('btn-user-avatar');
+  const profileDropdown = document.getElementById('user-profile-dropdown');
+  const copyEndpointBtn = document.getElementById('profile-copy-endpoint');
+  const gotoCookiesBtn = document.getElementById('profile-goto-cookies');
+  const gotoLimitsBtn = document.getElementById('profile-goto-limits');
+
+  if (!avatarBtn || !profileDropdown) return;
+
+  avatarBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    profileDropdown.classList.toggle('open');
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!profileDropdown.contains(e.target) && !avatarBtn.contains(e.target)) {
+      profileDropdown.classList.remove('open');
     }
   });
+
+  if (copyEndpointBtn) {
+    copyEndpointBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      navigator.clipboard.writeText('http://localhost:9000/v1').then(() => {
+        showToast('Copied API endpoint: http://localhost:9000/v1', 'success', 2500);
+      });
+    });
+  }
+
+  if (gotoCookiesBtn) {
+    gotoCookiesBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      profileDropdown.classList.remove('open');
+      switchTab('cookies');
+    });
+  }
+
+  if (gotoLimitsBtn) {
+    gotoLimitsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      profileDropdown.classList.remove('open');
+      switchTab('limits');
+    });
+  }
 }
 
 // ===================================================================
@@ -170,9 +207,20 @@ function initNavigation() {
   });
 
   tabs.forEach(tab => {
+    if (tab.id === 'tavern-nav-btn') {
+      tab.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openTavernStudio();
+        if (window.innerWidth <= 1024) {
+          closeSidebar();
+        }
+      });
+      return;
+    }
     tab.addEventListener('click', () => {
       const target = tab.dataset.tab;
-      switchTab(target);
+      if (target) switchTab(target);
       if (window.innerWidth <= 1024) {
         closeSidebar();
       }
@@ -193,6 +241,9 @@ function switchTab(tabId) {
   document.querySelectorAll('.tab-pane').forEach(pane => {
     pane.classList.toggle('active', pane.id === `pane-${tabId}`);
   });
+
+  window.SingularityGlassDock?.updateActiveDockTab?.();
+  window.SingularityGlassDock?.updateDockMode?.();
 
   const heading = document.getElementById('page-heading');
   const subheading = document.getElementById('page-subheading');
@@ -224,14 +275,20 @@ function switchTab(tabId) {
     },
   }[tabId] || { h: 'Singularity', sub: '' };
 
-  heading.textContent = titles.h;
-  subheading.textContent = titles.sub;
-  subheading.style.display = titles.sub ? 'block' : 'none';
+  if (heading) heading.textContent = titles.h;
+  if (subheading) {
+    subheading.textContent = titles.sub;
+    subheading.style.display = titles.sub ? 'block' : 'none';
+  }
 
-  if (tabId === 'limits') renderLimits();
-  if (tabId === 'models') renderModels();
-  if (tabId === 'cookies') loadCookiesTab();
-  if (tabId === 'tunnel') loadTunnelTab();
+  try {
+    if (tabId === 'limits') renderLimits();
+    if (tabId === 'models') renderModels();
+    if (tabId === 'cookies') loadCookiesTab();
+    if (tabId === 'tunnel') loadTunnelTab();
+  } catch (err) {
+    console.error('Error rendering tab content:', err);
+  }
 }
 
 // ===================================================================
@@ -247,8 +304,10 @@ async function fetchServices() {
     updateSidebarStatus(data.hub);
   } catch (err) {
     console.error('Error fetching services:', err);
-    document.getElementById('hub-dot').className = 'status-dot offline';
-    document.getElementById('hub-status-text').textContent = 'Gateway Offline';
+    const dot = document.getElementById('hub-dot');
+    const text = document.getElementById('hub-status-text');
+    if (dot) dot.className = 'status-dot offline';
+    if (text) text.textContent = 'Gateway Offline';
   }
 }
 
@@ -328,12 +387,11 @@ function renderServices() {
 function updateSidebarStatus(hub) {
   const dot = document.getElementById('hub-dot');
   const text = document.getElementById('hub-status-text');
-  if (hub && hub.running) {
-    dot.className = 'status-dot';
-    text.textContent = 'Gateway Online';
-  } else {
-    dot.className = 'status-dot offline';
-    text.textContent = 'Gateway Offline';
+  if (dot) {
+    dot.className = hub && hub.running ? 'status-dot' : 'status-dot offline';
+  }
+  if (text) {
+    text.textContent = hub && hub.running ? 'Gateway Online' : 'Gateway Offline';
   }
 }
 
@@ -2082,12 +2140,139 @@ function createThinkingLoader(modality, promptText) {
   return { el: container, updateProgress, finish, timerId };
 }
 
+function convertGenUiToArtifact(text) {
+  if (!text || typeof text !== 'string' || !text.includes('※genui※')) {
+    return text;
+  }
+  return text.replace(/※genui※(\{[\s\S]*?)(?:※|$)/g, (match, rawJson) => {
+    let data = null;
+    for (const suffix of ['', '}}', '"}}', '"]}}']) {
+      try {
+        data = JSON.parse(rawJson.trim() + suffix);
+        break;
+      } catch (e) {}
+    }
+
+    let title = 'Interactive Application';
+    let content = '';
+
+    if (data) {
+      const block = data.app_block || data;
+      title = block.title || title;
+      content = block.content || '';
+    } else {
+      const titleMatch = rawJson.match(/"title"\s*:\s*"([^"\\]*(?:\\.[^"\\]*)*)"/);
+      if (titleMatch) title = titleMatch[1].replace(/\\"/g, '"');
+      const contentMatch = rawJson.match(/"content"\s*:\s*"((?:[^"\\]|\\.)*)/);
+      if (contentMatch) {
+        let rawC = contentMatch[1];
+        try {
+          content = JSON.parse('"' + rawC + (rawC.endsWith('"') ? '' : '"'));
+        } catch (_) {
+          content = rawC.replace(/\\n/g, '\n').replace(/\\t/g, '\t').replace(/\\"/g, '"').replace(/\\\\/g, '\\');
+        }
+      } else {
+        return match;
+      }
+    }
+
+    const id = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'genui-app';
+    let type = 'text/html';
+    if (/export\s+default|import\s+React|from\s+["']react["']/.test(content)) {
+      type = 'application/vnd.ant.react';
+    }
+
+    return `\n\n<antArtifact identifier="${id}" type="${type}" title="${title}">\n${content}\n</antArtifact>\n`;
+  });
+}
+
 function renderMarkdown(text) {
   if (!text) return '';
+  text = convertGenUiToArtifact(text);
+
+  // 0. Remove thinking trace tags from the visible chat bubble
+  let processed = text.replace(/<antThinking>[\s\S]*?<\/antThinking>/gi, '');
+  processed = processed.replace(/<antThinking>[\s\S]*$/gi, '');
+
+  // 0.05 Strip internal search citations and OpenAI private PUA markers
+  processed = processed.replace(/[※\u203B][^\s]*/g, '');
+  processed = processed.replace(/\bcite[a-zA-Z0-9_]*turn[a-zA-Z0-9_]*\b/gi, '');
+  processed = processed.replace(/\bturn\d+[a-zA-Z0-9_]*\b/gi, '');
+  processed = processed.replace(/[\uE200-\uE20F]message_reaction[\uE200-\uE20F][^\uE200-\uE20F]*[\uE200-\uE20F]/g, '');
+  processed = processed.replace(/[\uE200-\uE20F]/g, '');
+
+  // 0.1 Extract Artifacts and replace with clean interactive pill placeholders
+  const artifactPills = [];
+  // Match closed artifacts
+  processed = processed.replace(/<antArtifact\s+([^>]+)>([\s\S]*?)<\/antArtifact>/gi, (match, rawAttrs, code) => {
+    const attrs = parseXmlAttributes(rawAttrs);
+    const id = attrs.identifier || 'artifact';
+    const type = attrs.type || 'application/vnd.ant.code';
+    const title = attrs.title || id;
+    const cleanContent = stripArtifactCodeFences(code);
+
+    if (!state.artifacts[id]) {
+      state.artifacts[id] = {
+        identifier: id,
+        type: type,
+        title: title,
+        language: attrs.language || '',
+        currentVersion: 1,
+        versions: [{ version: 1, content: cleanContent, timestamp: Date.now() }],
+        isStreaming: false,
+      };
+    } else {
+      const art = state.artifacts[id];
+      art.type = type;
+      art.title = title;
+      art.language = attrs.language || art.language || '';
+      art.isStreaming = false;
+      const curVer = art.currentVersion || 1;
+      if (art.versions && art.versions[curVer - 1]) {
+        art.versions[curVer - 1].content = cleanContent;
+      }
+    }
+
+    const placeholder = `@@ARTIFACT_PILL_${artifactPills.length}@@`;
+    artifactPills.push({ id, title, type, isStreaming: false });
+    return placeholder;
+  });
+
+  // Match in-flight (unclosed) streaming artifact
+  processed = processed.replace(/<antArtifact\s+([^>]+)>([\s\S]*)$/gi, (match, rawAttrs, partialCode) => {
+    const attrs = parseXmlAttributes(rawAttrs);
+    const id = attrs.identifier || 'artifact';
+    const type = attrs.type || 'application/vnd.ant.code';
+    const title = attrs.title || id;
+    const cleanPartial = stripArtifactCodeFences(partialCode);
+
+    if (!state.artifacts[id]) {
+      state.artifacts[id] = {
+        identifier: id,
+        type: type,
+        title: title,
+        language: attrs.language || '',
+        currentVersion: 1,
+        versions: [{ version: 1, content: cleanPartial, timestamp: Date.now() }],
+        isStreaming: true,
+      };
+    } else {
+      const art = state.artifacts[id];
+      const curVer = art.currentVersion || 1;
+      if (art.versions && art.versions[curVer - 1]) {
+        art.versions[curVer - 1].content = cleanPartial;
+      }
+      art.isStreaming = true;
+    }
+
+    const placeholder = `@@ARTIFACT_PILL_${artifactPills.length}@@`;
+    artifactPills.push({ id, title, type, isStreaming: true });
+    return placeholder;
+  });
 
   // 1. Extract and safeguard code blocks
   const codeBlocks = [];
-  let processed = text.replace(/```([a-zA-Z0-9_\-\+]*)\n?([\s\S]*?)```/g, (match, lang, code) => {
+  processed = processed.replace(/```([a-zA-Z0-9_\-\+]*)\n?([\s\S]*?)```/g, (match, lang, code) => {
     const placeholder = `@@CODE_BLOCK_${codeBlocks.length}@@`;
     codeBlocks.push({ lang: (lang || 'code').toLowerCase(), code });
     return placeholder;
@@ -2205,6 +2390,13 @@ function renderMarkdown(text) {
     `;
   });
 
+  // 16. Restore Artifact Pills
+  processed = processed.replace(/@@ARTIFACT_PILL_(\d+)@@/g, (match, idx) => {
+    const item = artifactPills[Number(idx)];
+    if (!item) return '';
+    return renderArtifactChatPillHtml(item.id, item.title, item.type, item.isStreaming);
+  });
+
   return processed;
 }
 
@@ -2217,6 +2409,15 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
   bubbleEl.innerHTML = '';
 
   let content = rawContent || '';
+
+  // Preserve artifacts before any raw base64 or media cleaning
+  const preservedArtifacts = [];
+  content = content.replace(/<antArtifact\s+[^>]+>[\s\S]*?<\/antArtifact>/gi, (match) => {
+    const ph = `@@ARTIFACT_RAW_PRESERVE_${preservedArtifacts.length}@@`;
+    preservedArtifacts.push(match);
+    return ph;
+  });
+
   const extractedImages = [];
   const extractedVideos = [];
 
@@ -2281,6 +2482,11 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
   // 6. Absolute safety cleanup: strip any orphaned markdown brackets and leftover long base64 blocks
   content = content.replace(/!\[.*?\]\(\s*\)/g, '');
   content = content.replace(/[A-Za-z0-9+/=]{90,}/g, '');
+
+  // Restore preserved raw artifacts
+  content = content.replace(/@@ARTIFACT_RAW_PRESERVE_(\d+)@@/g, (m, idx) => {
+    return preservedArtifacts[Number(idx)] || '';
+  });
 
   const cleanText = content.trim();
 
@@ -2590,6 +2796,1167 @@ function updateHeroGreeting(forceNew = true) {
   }, 160);
 }
 
+// ===================================================================
+// Universal Artifacts Workbench Engine (Claude-Style Multi-Model System)
+// ===================================================================
+
+function parseXmlAttributes(rawAttrs) {
+  const attrs = {};
+  if (!rawAttrs) return attrs;
+  const attrRegex = /([a-zA-Z0-9_\-]+)=["']([^"']*)["']/g;
+  let m;
+  while ((m = attrRegex.exec(rawAttrs)) !== null) {
+    attrs[m[1]] = m[2];
+  }
+  return attrs;
+}
+
+function stripArtifactCodeFences(code) {
+  if (!code) return '';
+  let str = String(code).trim();
+  // Strip leading code fence e.g. ```jsx, ```html, ```css, etc.
+  str = str.replace(/^\s*```[a-zA-Z0-9_\-\+]*\s*(\r?\n)?/i, '');
+  // Strip trailing code fence e.g. ```
+  str = str.replace(/(\r?\n)?```\s*$/i, '');
+  return str.replace(/^\r?\n+/, '').replace(/\r?\n+$/, '');
+}
+
+function getArtifactIconSvg(type) {
+  if (type === 'application/vnd.ant.react') {
+    return `<img src="/static/icons/react-js-icon.svg" class="artifact-icon-img artifact-icon-react" alt="React" width="22" height="22" />`;
+  } else if (type === 'text/html') {
+    return `<img src="/static/icons/html-icon.svg" class="artifact-icon-img artifact-icon-html" alt="HTML" width="20" height="20" />`;
+  } else if (type === 'image/svg+xml') {
+    return `<img src="/static/icons/svg-icon.svg" class="artifact-icon-img artifact-icon-svg" alt="SVG" width="20" height="20" />`;
+  } else if (type === 'text/markdown') {
+    return `<img src="/static/icons/markdown-icon.svg" class="artifact-icon-img artifact-icon-md" alt="Markdown" width="20" height="20" />`;
+  } else if (type === 'application/vnd.ant.mermaid') {
+    return `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="artifact-icon-img artifact-icon-diagram"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="8.5" y="14" width="7" height="7" rx="1"></rect><path d="M6.5 10v2a2 2 0 0 0 2 2h7a2 2 0 0 0 2-2v-2"></path><path d="M12 14v-2"></path></svg>`;
+  }
+  return `<img src="/static/icons/code-icon.svg" class="artifact-icon-img artifact-icon-code" alt="Code" width="20" height="20" />`;
+}
+
+function getArtifactShortTypeLabel(type, language) {
+  if (type === 'application/vnd.ant.react') return 'React';
+  if (type === 'text/html') return 'HTML';
+  if (type === 'image/svg+xml') return 'SVG';
+  if (type === 'application/vnd.ant.mermaid') return 'Mermaid';
+  if (type === 'text/markdown') return 'Markdown';
+  return (language || 'Code').toUpperCase();
+}
+
+function updateArtifactDownloadLabel(type, language) {
+  const labelEl = document.getElementById('artifact-download-label');
+  if (!labelEl) return;
+  if (type === 'text/html') labelEl.textContent = 'Download as HTML';
+  else if (type === 'application/vnd.ant.react') labelEl.textContent = 'Download as TSX';
+  else if (type === 'image/svg+xml') labelEl.textContent = 'Download as SVG';
+  else if (type === 'text/markdown') labelEl.textContent = 'Download as Markdown';
+  else if (type === 'application/vnd.ant.mermaid') labelEl.textContent = 'Download as Mermaid';
+  else {
+    const ext = (language || 'txt').toUpperCase();
+    labelEl.textContent = `Download as ${ext}`;
+  }
+}
+
+function getArtifactTypeLabel(type) {
+  if (type === 'application/vnd.ant.react') return 'React Component';
+  if (type === 'text/html') return 'HTML Web App';
+  if (type === 'image/svg+xml') return 'Vector Art (SVG)';
+  if (type === 'application/vnd.ant.mermaid') return 'Mermaid Diagram';
+  if (type === 'text/markdown') return 'Markdown Document';
+  return 'Source Code';
+}
+
+function getArtifactFileExtension(type, language) {
+  if (type === 'application/vnd.ant.react') return '.tsx';
+  if (type === 'text/html') return '.html';
+  if (type === 'image/svg+xml') return '.svg';
+  if (type === 'application/vnd.ant.mermaid') return '.mmd';
+  if (type === 'text/markdown') return '.md';
+  const langMap = { python: '.py', javascript: '.js', typescript: '.ts', html: '.html', css: '.css', json: '.json', rust: '.rs', go: '.go', c: '.c', cpp: '.cpp', bash: '.sh', sql: '.sql' };
+  return langMap[(language || '').toLowerCase()] || '.txt';
+}
+
+function renderArtifactChatPillHtml(id, title, type, isStreaming) {
+  const icon = getArtifactIconSvg(type);
+  const label = getArtifactTypeLabel(type);
+  const activeClass = (state.activeArtifactId === id && state.artifactWorkbenchOpen) ? 'active' : '';
+  const streamingDot = isStreaming ? '<span class="artifact-pill-streaming-dot"></span> Generating ' : '';
+  return `
+    <div class="artifact-chat-pill ${activeClass}" data-artifact-id="${escapeHtml(id)}" onclick="openArtifact('${escapeHtml(id)}')">
+      <div class="artifact-pill-icon">${icon}</div>
+      <div class="artifact-pill-info">
+        <div class="artifact-pill-title">${escapeHtml(title || id)}</div>
+        <div class="artifact-pill-subtitle">${streamingDot}${label}</div>
+      </div>
+      <div class="artifact-pill-action">
+        <span>${isStreaming ? 'View' : 'Open'}</span>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+      </div>
+    </div>
+  `;
+}
+
+function openArtifact(identifier, versionNum = null) {
+  const art = state.artifacts[identifier];
+  if (!art) return;
+
+  state.activeArtifactId = identifier;
+  state.artifactWorkbenchOpen = true;
+
+  const workspace = document.getElementById('playground-workspace');
+  if (workspace) {
+    workspace.classList.add('artifact-open');
+  }
+  const resizer = document.getElementById('artifact-resizer');
+  const wb = document.getElementById('artifact-workbench');
+  if (resizer) resizer.style.display = 'flex';
+  if (wb) wb.style.display = 'flex';
+
+  const ver = versionNum || art.currentVersion || 1;
+  art.currentVersion = ver;
+
+  // Update Header UI
+  const titleEl = document.getElementById('artifact-title');
+  if (titleEl) {
+    titleEl.textContent = art.title || art.identifier;
+    titleEl.title = art.title || art.identifier;
+  }
+
+  const badgeEl = document.getElementById('artifact-type-badge');
+  if (badgeEl) badgeEl.textContent = getArtifactShortTypeLabel(art.type, art.language);
+
+  updateArtifactDownloadLabel(art.type, art.language);
+  updateVersionStepper(art);
+
+  // Set default view: React/HTML/CSS/SVG/Mermaid default to 'preview', Code defaults to 'code'
+  const isVisualType = art.type === 'application/vnd.ant.react' ||
+                       art.type === 'text/html' ||
+                       art.type === 'text/css' ||
+                       (art.type === 'application/vnd.ant.code' && art.language === 'css') ||
+                       art.type === 'image/svg+xml' ||
+                       art.type === 'application/vnd.ant.mermaid';
+  if (!isVisualType && art.type === 'application/vnd.ant.code') {
+    switchArtifactView('code');
+  } else {
+    switchArtifactView(state.activeArtifactView || 'preview');
+  }
+
+  renderArtifactContent(art, ver);
+
+  // Highlight pill in chat
+  document.querySelectorAll('.artifact-chat-pill').forEach(pill => {
+    if (pill.dataset.artifactId === identifier) {
+      pill.classList.add('active');
+    } else {
+      pill.classList.remove('active');
+    }
+  });
+}
+
+function closeArtifactWorkbench() {
+  state.artifactWorkbenchOpen = false;
+  const workspace = document.getElementById('playground-workspace');
+  if (workspace) {
+    workspace.classList.remove('artifact-open');
+  }
+  const resizer = document.getElementById('artifact-resizer');
+  const wb = document.getElementById('artifact-workbench');
+  if (resizer) resizer.style.display = 'none';
+  if (wb) {
+    wb.style.display = 'none';
+    wb.classList.remove('is-fullscreen');
+  }
+  document.querySelectorAll('.artifact-chat-pill').forEach(pill => {
+    pill.classList.remove('active');
+  });
+}
+
+function switchArtifactVersion(delta) {
+  const art = state.artifacts[state.activeArtifactId];
+  if (!art || !art.versions) return;
+
+  const newVer = (art.currentVersion || 1) + delta;
+  if (newVer >= 1 && newVer <= art.versions.length) {
+    art.currentVersion = newVer;
+    updateVersionStepper(art);
+    renderArtifactContent(art, newVer);
+  }
+}
+
+function updateVersionStepper(art) {
+  const label = document.getElementById('artifact-version-label');
+  const prevBtn = document.getElementById('btn-artifact-prev-ver');
+  const nextBtn = document.getElementById('btn-artifact-next-ver');
+
+  const total = art.versions ? art.versions.length : 1;
+  const current = art.currentVersion || 1;
+
+  if (label) label.textContent = total > 1 ? `v${current} of ${total}` : `v${current}`;
+  if (prevBtn) prevBtn.disabled = current <= 1;
+  if (nextBtn) nextBtn.disabled = current >= total;
+}
+
+function switchArtifactView(view) {
+  state.activeArtifactView = view;
+  const btnPrev = document.getElementById('btn-artifact-preview');
+  const btnCode = document.getElementById('btn-artifact-code');
+  const panePrev = document.getElementById('artifact-preview-pane');
+  const paneCode = document.getElementById('artifact-code-pane');
+
+  if (view === 'preview') {
+    if (btnPrev) btnPrev.classList.add('active');
+    if (btnCode) btnCode.classList.remove('active');
+    if (panePrev) panePrev.classList.add('active');
+    if (paneCode) paneCode.classList.remove('active');
+  } else {
+    if (btnPrev) btnPrev.classList.remove('active');
+    if (btnCode) btnCode.classList.add('active');
+    if (panePrev) panePrev.classList.remove('active');
+    if (paneCode) paneCode.classList.add('active');
+  }
+}
+
+function copyActiveArtifactCode() {
+  const art = state.artifacts[state.activeArtifactId];
+  if (!art || !art.versions) return;
+  const ver = art.versions[art.currentVersion - 1];
+  const code = ver ? stripArtifactCodeFences(ver.content) : '';
+  if (!code) return;
+
+  navigator.clipboard.writeText(code).then(() => {
+    const copyBtn = document.getElementById('btn-artifact-copy');
+    if (copyBtn) {
+      const span = copyBtn.querySelector('span');
+      if (span) span.textContent = 'Copied!';
+      copyBtn.classList.add('copied');
+      setTimeout(() => {
+        if (span) span.textContent = 'Copy';
+        copyBtn.classList.remove('copied');
+      }, 2000);
+    }
+    showToast('Copied artifact code to clipboard', 'success');
+  }).catch(() => {
+    showToast('Failed to copy to clipboard', 'error');
+  });
+}
+
+function toggleArtifactMenu(e) {
+  if (e) e.stopPropagation();
+  const menu = document.getElementById('artifact-dropdown-menu');
+  if (menu) {
+    const isShown = menu.style.display !== 'none';
+    menu.style.display = isShown ? 'none' : 'block';
+  }
+}
+
+function downloadActiveArtifact() {
+  const menu = document.getElementById('artifact-dropdown-menu');
+  if (menu) menu.style.display = 'none';
+
+  const art = state.artifacts[state.activeArtifactId];
+  if (!art || !art.versions) return;
+  const ver = art.versions[art.currentVersion - 1];
+  const code = ver ? stripArtifactCodeFences(ver.content) : '';
+  if (!code) return;
+
+  const ext = getArtifactFileExtension(art.type, art.language);
+  const filename = `${art.identifier || 'artifact'}${ext}`;
+  const blob = new Blob([code], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  showToast(`Downloaded ${filename}`, 'success');
+}
+
+function toggleArtifactFullscreen() {
+  const wb = document.getElementById('artifact-workbench');
+  if (wb) {
+    wb.classList.toggle('is-fullscreen');
+  }
+}
+
+function renderArtifactContent(art, versionNum) {
+  if (!art || !art.versions) return;
+  const verObj = art.versions[versionNum - 1] || art.versions[art.versions.length - 1];
+  if (!verObj) return;
+
+  const content = stripArtifactCodeFences(verObj.content || '');
+
+  // 1. Update Code Pane & Line Numbers
+  const codeEl = document.getElementById('artifact-code-content');
+  const gutterEl = document.getElementById('artifact-code-gutter');
+  if (codeEl) codeEl.textContent = content;
+
+  if (gutterEl) {
+    const lines = content.length > 0 ? content.split('\n') : [''];
+    let gutterHtml = '';
+    for (let i = 1; i <= lines.length; i++) {
+      gutterHtml += `<div class="line-number">${i}</div>`;
+    }
+    gutterEl.innerHTML = gutterHtml;
+  }
+
+  const langLabel = document.getElementById('artifact-code-lang');
+  if (langLabel) {
+    if (art.type === 'application/vnd.ant.react') langLabel.textContent = 'REACT / JSX';
+    else if (art.type === 'text/html') langLabel.textContent = 'HTML5 / WEB';
+    else if (art.type === 'image/svg+xml') langLabel.textContent = 'SVG / VECTOR';
+    else if (art.type === 'application/vnd.ant.mermaid') langLabel.textContent = 'MERMAID DIAGRAM';
+    else if (art.type === 'text/markdown') langLabel.textContent = 'MARKDOWN';
+    else langLabel.textContent = (art.language || 'CODE').toUpperCase();
+  }
+
+  // 2. Update Preview Pane
+  const iframe = document.getElementById('artifact-sandbox-frame');
+  const svgBox = document.getElementById('artifact-svg-container');
+  const mmdBox = document.getElementById('artifact-mermaid-container');
+  const mdBox = document.getElementById('artifact-md-container');
+
+  if (iframe) { iframe.style.display = 'none'; iframe.classList.add('hidden'); }
+  if (svgBox) { svgBox.style.display = 'none'; svgBox.classList.add('hidden'); }
+  if (mmdBox) { mmdBox.style.display = 'none'; mmdBox.classList.add('hidden'); }
+  if (mdBox) { mdBox.style.display = 'none'; mdBox.classList.add('hidden'); }
+
+  const isCss = art.type === 'text/css' || 
+                (art.type === 'application/vnd.ant.code' && (art.language === 'css' || (content && (content.includes('@keyframes') || content.includes('backdrop-filter') || content.includes('.glass') || content.includes('background:')) && !content.includes('import ') && !content.includes('function ') && !content.includes('<html'))));
+
+  if (art.type === 'application/vnd.ant.react') {
+    if (iframe) {
+      iframe.style.display = 'block';
+      iframe.classList.remove('hidden');
+      iframe.srcdoc = buildReactSandboxHtml(content);
+    }
+  } else if (art.type === 'text/html') {
+    if (iframe) {
+      iframe.style.display = 'block';
+      iframe.classList.remove('hidden');
+      iframe.srcdoc = buildHtmlSandboxDoc(content);
+    }
+  } else if (isCss) {
+    if (iframe) {
+      iframe.style.display = 'block';
+      iframe.classList.remove('hidden');
+      iframe.srcdoc = buildCssSandboxDoc(content);
+    }
+  } else if (art.type === 'image/svg+xml') {
+    if (svgBox) {
+      svgBox.style.display = 'flex';
+      svgBox.classList.remove('hidden');
+      svgBox.innerHTML = content.includes('<svg') ? content : `<svg viewBox="0 0 100 100">${content}</svg>`;
+    }
+  } else if (art.type === 'application/vnd.ant.mermaid') {
+    if (mmdBox) {
+      mmdBox.style.display = 'flex';
+      mmdBox.classList.remove('hidden');
+      renderMermaidDiagram(mmdBox, content);
+    }
+  } else if (art.type === 'text/markdown') {
+    if (mdBox) {
+      mdBox.style.display = 'block';
+      mdBox.classList.remove('hidden');
+      mdBox.innerHTML = renderMarkdown(content);
+    }
+  } else {
+    // Plain code -> show formatted guidance in preview pane instead of black screen
+    if (mdBox) {
+      mdBox.style.display = 'block';
+      mdBox.classList.remove('hidden');
+      mdBox.innerHTML = `
+        <div style="padding: 48px 24px; text-align: center; color: var(--text-muted); max-width: 480px; margin: 0 auto;">
+          <div style="font-size: 36px; margin-bottom: 16px;">📄</div>
+          <h3 style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin: 0 0 8px 0;">Source Code Artifact (${escapeHtml(art.language || 'code')})</h3>
+          <p style="font-size: 13px; line-height: 1.6; color: var(--text-secondary); margin: 0 0 20px 0;">This artifact contains raw source code without an interactive DOM runtime. Click below to inspect, edit, or copy the source code.</p>
+          <button class="btn btn-secondary btn-sm" onclick="switchArtifactView('code')">Open Code Tab</button>
+        </div>
+      `;
+    }
+    switchArtifactView('code');
+  }
+}
+
+function buildCssSandboxDoc(cssCode) {
+  let cleanCss = (cssCode || '')
+    .replace(/^\s*```[a-zA-Z0-9_\-\+]*\s*\n?/gi, '')
+    .replace(/\n?```\s*$/gi, '')
+    .trim();
+
+  const styleTag = cleanCss.includes('<style') ? cleanCss : `<style>${cleanCss}</style>`;
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <base href="${window.location.origin}/"/>
+  <style>
+    :root {
+      --viz-bg: #0b0f19;
+      --viz-card: rgba(255, 255, 255, 0.05);
+      --viz-border: rgba(255, 255, 255, 0.12);
+      --viz-text: #f1f5f9;
+      --viz-muted: #94a3b8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 32px 20px;
+      background: radial-gradient(circle at 50% 0%, #1e1b4b 0%, #0b0f19 80%);
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      gap: 24px;
+    }
+    .sandbox-preview-container {
+      width: 100%;
+      max-width: 680px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 24px;
+    }
+    .sandbox-stage {
+      width: 100%;
+      padding: 40px 24px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 20px;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+    }
+    .sandbox-header {
+      text-align: center;
+    }
+    .sandbox-title {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0 0 6px 0;
+      color: #fff;
+    }
+    .sandbox-subtitle {
+      font-size: 13px;
+      color: var(--viz-muted);
+      margin: 0;
+    }
+    .sandbox-hint {
+      font-size: 12px;
+      color: #64748b;
+      margin-top: 8px;
+    }
+  </style>
+  ${styleTag}
+</head>
+<body>
+  <div class="sandbox-preview-container">
+    <div class="sandbox-header">
+      <h2 class="sandbox-title">Interactive CSS Preview</h2>
+      <p class="sandbox-subtitle">Styles applied live to the interactive test elements below</p>
+    </div>
+
+    <div class="sandbox-stage" id="css-dynamic-stage">
+      <button class="btn btn-primary glass-btn glass-button glassmorphism">Primary Action</button>
+      <button class="btn btn-secondary glass-btn glass-button glassmorphism-secondary">Secondary</button>
+      <button class="btn btn-glow glass-btn-glow glass-button-glow">Glow Effect</button>
+      <button class="btn btn-accent glass-accent" disabled>Disabled</button>
+    </div>
+
+    <div class="sandbox-stage" style="flex-direction: column; align-items: stretch; gap: 16px;">
+      <div class="glass-card card glassmorphism-card" style="padding: 20px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.15); background: rgba(255,255,255,0.05); backdrop-filter: blur(12px);">
+        <h4 style="margin: 0 0 8px 0; font-size: 15px; color: #fff;">Glassmorphism Surface</h4>
+        <p style="margin: 0 0 16px 0; font-size: 13px; color: #94a3b8;">Interactive test container with glass backdrop and button actions.</p>
+        <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+          <button class="glass-btn glass-button btn">Click State</button>
+          <button class="glass-btn glass-button btn" style="opacity: 0.85;">Hover State</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sandbox-hint">Switch to the "Code" tab at top right to copy the full stylesheet.</div>
+  </div>
+
+  <script>
+    try {
+      const stage = document.getElementById('css-dynamic-stage');
+      const cssRules = [];
+      for (const sheet of document.styleSheets) {
+        try {
+          for (const rule of sheet.cssRules || []) {
+            if (rule.selectorText) {
+              const selectors = rule.selectorText.split(',');
+              selectors.forEach(sel => {
+                const match = sel.trim().match(/^\\.([a-zA-Z0-9_\\-]+)(?::[a-zA-Z0-9_\\-]+)?$/);
+                if (match && match[1] && !match[1].startsWith('sandbox') && !match[1].startsWith('btn')) {
+                  cssRules.push(match[1]);
+                }
+              });
+            }
+          }
+        } catch(e) {}
+      }
+      const uniqueClasses = [...new Set(cssRules)];
+      if (uniqueClasses.length > 0) {
+        uniqueClasses.slice(0, 6).forEach(cls => {
+          const btn = document.createElement('button');
+          btn.className = cls;
+          btn.textContent = '.' + cls;
+          btn.style.cursor = 'pointer';
+          stage.appendChild(btn);
+        });
+      }
+    } catch(e) {}
+  </script>
+</body>
+</html>`;
+}
+
+function buildReactSandboxHtml(jsxCode) {
+  let cleanCode = jsxCode || '';
+
+  // 0. Universal Markdown Code-Fence Stripper
+  cleanCode = cleanCode.replace(/^\s*```[a-zA-Z0-9_\-\+]*\s*\n?/gi, '');
+  cleanCode = cleanCode.replace(/\n?```\s*$/gi, '').trim();
+
+  // 1. Universal Import Stripper & Identifier Collector
+  const importedIcons = new Set();
+  cleanCode = cleanCode.replace(/import\s+(?:(?:\*\s+as\s+([a-zA-Z0-9_$]+))|(?:([a-zA-Z0-9_$]+)\s*,?\s*)?(?:\{([^}]+)\})?)\s+from\s*['"][^'"]+['"]\s*;?/g, (m, star, def, named) => {
+    if (star) importedIcons.add(star.trim());
+    if (named) {
+      named.split(',').forEach(n => {
+        const cleanName = n.trim().split(/\s+as\s+/)[0].trim();
+        if (cleanName) importedIcons.add(cleanName);
+      });
+    }
+    return '';
+  });
+  // Strip any remaining imports safely (both single-line and multiline without eating code)
+  cleanCode = cleanCode.replace(/import\s+(?:[\s\S]*?)\s+from\s+['"][^'"]+['"]\s*;?/g, '');
+  cleanCode = cleanCode.replace(/import\s+['"][^'"]+['"]\s*;?/g, '');
+
+  // 2. Export default handler
+  let detectedName = null;
+  const funcMatch = cleanCode.match(/export\s+default\s+function\s+([a-zA-Z0-9_$]+)/);
+  if (funcMatch) {
+    detectedName = funcMatch[1];
+    cleanCode = cleanCode.replace(/export\s+default\s+function\s+([a-zA-Z0-9_$]+)/, 'function $1');
+  } else {
+    const identMatch = cleanCode.match(/export\s+default\s+([a-zA-Z0-9_$]+);?/);
+    if (identMatch) {
+      detectedName = identMatch[1];
+      cleanCode = cleanCode.replace(/export\s+default\s+([a-zA-Z0-9_$]+);?/, '');
+    } else {
+      cleanCode = cleanCode.replace(/export\s+default\s+/, 'const __AppExport = ');
+      detectedName = '__AppExport';
+    }
+  }
+  cleanCode = cleanCode.replace(/export\s*\{[^}]*\};?/g, '');
+  cleanCode = cleanCode.replace(/export\s+(const|let|var|function|class)\s+/g, '$1 ');
+
+  // Candidate component names
+  const candidateNames = [...new Set([...cleanCode.matchAll(/(?:function|const|let|var|class)\s+([A-Z][a-zA-Z0-9_$]*)/g)].map(m => m[1]))];
+
+  const safeCodeJson = JSON.stringify(cleanCode).replace(/<\/script/gi, '<\\/script');
+  const safeNameJson = JSON.stringify(detectedName || '');
+  const safeIconsJson = JSON.stringify([...importedIcons]);
+  const safeCandidatesJson = JSON.stringify(candidateNames);
+
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <base href="${window.location.origin}/"/>
+  <script src="/static/vendor/react.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/react@18/umd/react.production.min.js'"></script>
+  <script src="/static/vendor/react-dom.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/react-dom@18/umd/react-dom.production.min.js'"></script>
+  <script src="/static/vendor/babel.min.js" onerror="this.onerror=null;this.src='https://unpkg.com/@babel/standalone/babel.min.js'"></script>
+  <script src="https://cdn.tailwindcss.com" async></script>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 0;
+      background-color: #0b0f19;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+    }
+    #root { min-height: 100vh; }
+    #error-boundary {
+      display: none;
+      position: fixed;
+      top: 16px;
+      left: 16px;
+      right: 16px;
+      z-index: 999999;
+      padding: 16px;
+      background: rgba(220, 38, 38, 0.95);
+      border: 1px solid #ef4444;
+      border-radius: 8px;
+      color: #fff;
+      font-family: monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      max-height: 80vh;
+      overflow: auto;
+    }
+    /* Fallback styles for immediate rendering */
+    .bg-white\\/5 { background-color: rgba(255, 255, 255, 0.05); }
+    .bg-white\\/10 { background-color: rgba(255, 255, 255, 0.10); }
+    .bg-white\\/15 { background-color: rgba(255, 255, 255, 0.15); }
+    .bg-white\\/20 { background-color: rgba(255, 255, 255, 0.20); }
+    .border-white\\/10 { border-color: rgba(255, 255, 255, 0.10); }
+    .border-white\\/20 { border-color: rgba(255, 255, 255, 0.20); }
+    .backdrop-blur-xl { backdrop-filter: blur(24px); -webkit-backdrop-filter: blur(24px); }
+    .rounded-2xl { border-radius: 1rem; }
+    .rounded-3xl { border-radius: 1.5rem; }
+    .min-h-screen { min-height: 100vh; }
+    .flex { display: flex; }
+    .flex-1 { flex: 1 1 0%; }
+    .items-center { align-items: center; }
+    .justify-center { justify-content: center; }
+    .justify-between { justify-content: space-between; }
+    .text-center { text-align: center; }
+    .text-white { color: #ffffff; }
+    button { cursor: pointer; border-style: solid; }
+  </style>
+</head>
+<body>
+  <div id="error-boundary"></div>
+  <div id="root"></div>
+
+  <script>
+    function showError(title, msg) {
+      var box = document.getElementById('error-boundary');
+      if (box) {
+        box.style.display = 'block';
+        box.innerHTML = '<strong style="color:#ffffff">' + title + '</strong><br>' +
+          '<pre style="white-space:pre-wrap;font-size:12px;margin-top:6px;color:#fee2e2;max-height:300px;overflow:auto;">' +
+          String(msg || '').replace(/</g, '&lt;') +
+          '</pre>';
+      }
+    }
+
+    window.onerror = function(msg, src, line, col, err) {
+      showError('Uncaught Runtime Error:', (err && err.stack) ? err.stack : (msg + ' (line ' + line + ')'));
+    };
+
+    function waitForDependencies(callback, maxAttempts = 300) {
+      let attempts = 0;
+      function check() {
+        if (!window.React && window.parent && window.parent.React) window.React = window.parent.React;
+        if (!window.ReactDOM && window.parent && window.parent.ReactDOM) window.ReactDOM = window.parent.ReactDOM;
+        if (!window.Babel && window.parent && window.parent.Babel) window.Babel = window.parent.Babel;
+
+        if (window.React && window.ReactDOM && window.Babel && window.ReactDOM.createRoot) {
+          callback();
+        } else if (++attempts < maxAttempts) {
+          setTimeout(check, 30);
+        } else {
+          showError('Engine Initialization Error', 'Timeout loading React, ReactDOM, or Babel engine.');
+        }
+      }
+      check();
+    }
+
+    waitForDependencies(function() {
+      // 1. Universal ClassName helpers (cn, clsx, twMerge)
+      const cn = (...args) => args.flat(Infinity).filter(Boolean).map(x => {
+        if (typeof x === 'object' && x !== null) {
+          return Object.keys(x).filter(k => x[k]).join(' ');
+        }
+        return String(x);
+      }).join(' ');
+      const clsx = cn;
+      const twMerge = cn;
+
+      // 2. Universal Icon Proxy: returns crisp SVGs for requested icons
+      const ICON_PATHS = {
+        Minus: [React.createElement('line', { key: '1', x1: 5, y1: 12, x2: 19, y2: 12 })],
+        Plus: [
+          React.createElement('line', { key: '1', x1: 12, y1: 5, x2: 12, y2: 19 }),
+          React.createElement('line', { key: '2', x1: 5, y1: 12, x2: 19, y2: 12 })
+        ],
+        RotateCcw: [
+          React.createElement('path', { key: '1', d: 'M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8' }),
+          React.createElement('path', { key: '2', d: 'M3 3v5h5' })
+        ],
+        RotateCw: [
+          React.createElement('path', { key: '1', d: 'M21 12a9 9 0 1 1-9-9 9.75 9.75 0 0 1 6.74 2.74L21 8' }),
+          React.createElement('path', { key: '2', d: 'M21 3v5h-5' })
+        ],
+        RefreshCw: [
+          React.createElement('path', { key: '1', d: 'M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8' }),
+          React.createElement('path', { key: '2', d: 'M21 3v5h-5' }),
+          React.createElement('path', { key: '3', d: 'M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16' }),
+          React.createElement('path', { key: '4', d: 'M8 16H3v5' })
+        ],
+        Check: [React.createElement('polyline', { key: '1', points: '20 6 9 17 4 12' })],
+        X: [
+          React.createElement('line', { key: '1', x1: 18, y1: 6, x2: 6, y2: 18 }),
+          React.createElement('line', { key: '2', x1: 6, y1: 6, x2: 18, y2: 18 })
+        ],
+        Search: [
+          React.createElement('circle', { key: '1', cx: 11, cy: 11, r: 8 }),
+          React.createElement('line', { key: '2', x1: 21, y1: 21, x2: 16.65, y2: 16.65 })
+        ],
+        ArrowLeft: [
+          React.createElement('line', { key: '1', x1: 19, y1: 12, x2: 5, y2: 12 }),
+          React.createElement('polyline', { key: '2', points: '12 19 5 12 12 5' })
+        ],
+        ArrowRight: [
+          React.createElement('line', { key: '1', x1: 5, y1: 12, x2: 19, y2: 12 }),
+          React.createElement('polyline', { key: '2', points: '12 5 19 12 12 19' })
+        ],
+        ChevronLeft: [React.createElement('polyline', { key: '1', points: '15 18 9 12 15 6' })],
+        ChevronRight: [React.createElement('polyline', { key: '1', points: '9 18 15 12 9 6' })],
+        ChevronDown: [React.createElement('polyline', { key: '1', points: '6 9 12 15 18 9' })],
+        ChevronUp: [React.createElement('polyline', { key: '1', points: '18 15 12 9 6 15' })],
+        Heart: [React.createElement('path', { key: '1', d: 'M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z' })],
+        Star: [React.createElement('polygon', { key: '1', points: '12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2' })]
+      };
+
+      const LucideIcons = new Proxy({}, {
+        get: (target, prop) => {
+          if (prop === '__esModule') return true;
+          if (prop === 'default') return target;
+          const IconComp = (props = {}) => {
+            const s = props.size || props.width || 20;
+            const stroke = props.color || 'currentColor';
+            const sw = props.strokeWidth || 2;
+            const knownChildren = ICON_PATHS[prop];
+            return React.createElement('svg', {
+              width: s,
+              height: s,
+              viewBox: '0 0 24 24',
+              fill: 'none',
+              stroke: stroke,
+              strokeWidth: sw,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+              className: props.className || '',
+              style: props.style
+            },
+              knownChildren || [
+                React.createElement('circle', { key: 'c', cx: 12, cy: 12, r: 9, opacity: 0.25 }),
+                React.createElement('text', {
+                  key: 't',
+                  x: 12, y: 15,
+                  fontSize: 8,
+                  textAnchor: 'middle',
+                  fill: stroke,
+                  stroke: 'none',
+                  fontWeight: 'bold',
+                  fontFamily: 'sans-serif'
+                }, String(prop || '').substring(0, 3).toUpperCase())
+              ]
+            );
+          };
+          IconComp.displayName = String(prop || 'Icon');
+          return IconComp;
+        }
+      });
+
+      // 3. Mock animation library proxies (framer-motion)
+      const motion = new Proxy({}, {
+        get: (target, tag) => {
+          const MotionComp = ({ children, whileHover, whileTap, animate, initial, transition, ...rest } = {}) => {
+            return React.createElement(tag || 'div', rest, children);
+          };
+          MotionComp.displayName = 'motion.' + String(tag || 'div');
+          return MotionComp;
+        }
+      });
+      const AnimatePresence = ({ children }) => children;
+
+      // 4. React Error Boundary
+      class SandboxErrorBoundary extends React.Component {
+        constructor(props) {
+          super(props);
+          this.state = { hasError: false, error: null };
+        }
+        static getDerivedStateFromError(error) {
+          return { hasError: true, error };
+        }
+        componentDidCatch(error, info) {
+          console.error("Component Caught Error:", error, info);
+        }
+        render() {
+          if (this.state.hasError) {
+            const err = this.state.error;
+            const msg = (err && (err.stack || err.message)) ? String(err.stack || err.message) : 'Unknown render error';
+            return React.createElement('div', {
+              style: {
+                margin: '16px',
+                padding: '16px',
+                background: 'rgba(239, 68, 68, 0.9)',
+                border: '1px solid #ef4444',
+                borderRadius: '8px',
+                color: '#fff',
+                fontFamily: 'monospace',
+                fontSize: '13px',
+                lineHeight: '1.5',
+                whiteSpace: 'pre-wrap'
+              }
+            },
+              React.createElement('strong', { style: { color: '#ffffff' } }, 'React Component Render Error: '),
+              msg
+            );
+          }
+          return this.props.children;
+        }
+      }
+
+      // 5. Transform and execute
+      try {
+        const rawCode = ${safeCodeJson};
+        const detectedName = ${safeNameJson};
+        const importedIcons = ${safeIconsJson};
+        const candidateNames = ${safeCandidatesJson};
+
+        // Compile JSX / TSX via Babel directly
+        let compiled = '';
+        try {
+          compiled = Babel.transform(rawCode, { filename: 'app.tsx', presets: ['react', 'typescript'] }).code;
+        } catch (compileErr) {
+          showError('Component Compilation Error:', (compileErr.stack || compileErr.message));
+          return;
+        }
+
+        // Clean any residual export statements in compiled code so new Function never throws SyntaxError
+        compiled = compiled.replace(/export\\s+default\\s+(function\\s+[a-zA-Z0-9_$]+)/g, '$1');
+        compiled = compiled.replace(/export\\s+default\\s+/g, 'const __AppExport = ');
+        compiled = compiled.replace(/export\\s+(const|let|var|function|class)\\s+/g, '$1 ');
+        compiled = compiled.replace(/export\\s*\\{[^}]*\\};?/g, '');
+
+        const excluded = new Set([
+          'React', 'ReactDOM', 'useState', 'useEffect', 'useRef', 'useMemo', 'useCallback',
+          'createContext', 'useContext', 'useReducer', 'cn', 'clsx', 'twMerge', 'motion', 'AnimatePresence'
+        ]);
+        const iconDecls = importedIcons
+          .filter(id => id && !excluded.has(id) && /^[A-Z][a-zA-Z0-9_$]*$/.test(id))
+          .map(id => 'const ' + id + ' = LucideIcons.' + id + ';')
+          .join('\\n');
+
+        const probeCandidates = candidateNames
+          .filter(n => n && !excluded.has(n))
+          .map(n => 'if (!__Target && typeof ' + n + ' !== "undefined" && typeof ' + n + ' === "function") __Target = ' + n + ';')
+          .join('\\n');
+
+        const runnerCode = [
+          iconDecls,
+          compiled,
+          'let __Target = null;',
+          detectedName ? ('if (typeof ' + detectedName + ' !== "undefined" && typeof ' + detectedName + ' === "function") __Target = ' + detectedName + ';') : '',
+          probeCandidates,
+          'if (!__Target && typeof GlassCounter !== "undefined") __Target = GlassCounter;',
+          'if (!__Target && typeof App !== "undefined") __Target = App;',
+          'if (!__Target && typeof CounterApp !== "undefined") __Target = CounterApp;',
+          'if (!__Target && typeof Counter !== "undefined") __Target = Counter;',
+          'if (!__Target && typeof DarkGlassCounter !== "undefined") __Target = DarkGlassCounter;',
+          'if (!__Target && typeof DarkGlassmorphismCounter !== "undefined") __Target = DarkGlassmorphismCounter;',
+          'if (!__Target && typeof GlassButtonSystem !== "undefined") __Target = GlassButtonSystem;',
+          'if (!__Target && typeof ButtonSystem !== "undefined") __Target = ButtonSystem;',
+          'if (!__Target && typeof __AppExport !== "undefined" && typeof __AppExport === "function") __Target = __AppExport;',
+          'if (!__Target) {',
+          '  const globals = Object.keys(window).filter(k => /^[A-Z][a-zA-Z0-9]+$/.test(k) && typeof window[k] === "function");',
+          '  for (const k of globals) {',
+          '    if (k !== "React" && k !== "ReactDOM" && k !== "Babel") { __Target = window[k]; break; }',
+          '  }',
+          '}',
+          'return __Target;'
+        ].join('\\n');
+
+        let factory = null;
+        try {
+          factory = new Function(
+            'React', 'ReactDOM', 'useState', 'useEffect', 'useRef', 'useMemo', 'useCallback',
+            'createContext', 'useContext', 'useReducer', 'cn', 'clsx', 'twMerge', 'LucideIcons',
+            'motion', 'AnimatePresence',
+            runnerCode
+          );
+        } catch (fnErr) {
+          showError('Component Factory Creation Error:', (fnErr.stack || fnErr.message));
+          return;
+        }
+
+        let Component = null;
+        try {
+          Component = factory(
+            React, ReactDOM, React.useState, React.useEffect, React.useRef, React.useMemo, React.useCallback,
+            React.createContext, React.useContext, React.useReducer, cn, clsx, twMerge, LucideIcons,
+            motion, AnimatePresence
+          );
+        } catch (factoryExecErr) {
+          showError('Component Factory Call Error:', (factoryExecErr.stack || factoryExecErr.message));
+          return;
+        }
+
+        if (!Component || typeof Component !== 'function') {
+          showError('Component Mount Error:', 'No valid React component function was returned from the code.');
+          return;
+        }
+
+        try {
+          const rootEl = document.getElementById('root');
+          const root = ReactDOM.createRoot(rootEl);
+          root.render(React.createElement(SandboxErrorBoundary, null, React.createElement(Component)));
+        } catch (renderErr) {
+          showError('Component Render Error:', (renderErr.stack || renderErr.message));
+          return;
+        }
+      } catch (err) {
+        showError('Component Execution Error:', (err.stack || err.message));
+      }
+    });
+  </script>
+</body>
+</html>`;
+}
+
+function buildHtmlSandboxDoc(html) {
+  let cleanHtml = (html || '').replace(/^\s*```[a-zA-Z0-9_\-\+]*\s*\n?/gi, '').replace(/\n?```\s*$/gi, '').trim();
+
+  if (cleanHtml.includes('<!DOCTYPE html>') || cleanHtml.includes('<html')) {
+    return cleanHtml;
+  }
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <base href="${window.location.origin}/"/>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    :root {
+      --viz-text: #f1f5f9;
+      --viz-muted: #94a3b8;
+      --viz-panel: rgba(255, 255, 255, 0.05);
+      --viz-border: rgba(255, 255, 255, 0.15);
+      --viz-accent: #6366f1;
+      --viz-accent-bg: rgba(99, 102, 241, 0.2);
+    }
+    body {
+      margin: 0;
+      padding: 16px;
+      background: #0b0f19;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  ${cleanHtml}
+</body>
+</html>`;
+}
+
+async function renderMermaidDiagram(container, code) {
+  container.innerHTML = '<div style="color:var(--text-muted); font-size:12px; font-family:var(--font-mono);">Rendering diagram...</div>';
+  try {
+    if (!window.mermaid) {
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+      window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+    }
+    const id = 'mermaid-svg-' + Date.now();
+    const { svg } = await window.mermaid.render(id, code.trim());
+    container.innerHTML = svg;
+  } catch (err) {
+    container.innerHTML = `
+      <div style="padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 8px; color: #fca5a5; font-family: var(--font-mono); font-size: 12px;">
+        <strong>Mermaid Syntax / Render Notice:</strong><br>${escapeHtml(err.message || 'Syntax error')}<br><br>
+        <pre style="color: #cbd5e1; background: #0f172a; padding: 10px; border-radius: 6px; overflow: auto;">${escapeHtml(code)}</pre>
+      </div>
+    `;
+  }
+}
+
+function handleStreamingArtifact(content, isFinished = false) {
+  content = convertGenUiToArtifact(content);
+  const artifactRegex = /<antArtifact\s+([^>]+)>([\s\S]*?)(?:<\/antArtifact>|$)/gi;
+  let match;
+  while ((match = artifactRegex.exec(content)) !== null) {
+    const rawAttrs = match[1];
+    const extractedCode = match[2];
+    const isTagClosed = /<\/antArtifact\s*>/i.test(match[0]);
+    const attrs = parseXmlAttributes(rawAttrs);
+    const id = attrs.identifier;
+    if (!id) continue;
+
+    const type = attrs.type || 'application/vnd.ant.code';
+    const title = attrs.title || id;
+    const lang = attrs.language || '';
+    const cleanCode = stripArtifactCodeFences(extractedCode);
+
+    if (!state.artifacts[id]) {
+      state.artifacts[id] = {
+        identifier: id,
+        type: type,
+        title: title,
+        language: lang,
+        currentVersion: 1,
+        versions: [{ version: 1, content: cleanCode, timestamp: Date.now() }],
+        isStreaming: !isTagClosed && !isFinished,
+      };
+      openArtifact(id);
+    } else {
+      const art = state.artifacts[id];
+      if (!art.isStreaming && !isTagClosed && !isFinished) {
+        const newVer = art.versions.length + 1;
+        art.versions.push({ version: newVer, content: cleanCode, timestamp: Date.now() });
+        art.currentVersion = newVer;
+        art.title = title;
+        art.type = type;
+        art.language = lang;
+        art.isStreaming = true;
+        openArtifact(id, newVer);
+      } else {
+        const curVerIdx = (art.currentVersion || 1) - 1;
+        if (art.versions[curVerIdx]) {
+          art.versions[curVerIdx].content = cleanCode;
+        }
+        art.isStreaming = !isTagClosed && !isFinished;
+      }
+    }
+
+    if (state.activeArtifactId === id) {
+      const codeEl = document.getElementById('artifact-code-content');
+      const gutterEl = document.getElementById('artifact-code-gutter');
+      if (codeEl) {
+        codeEl.textContent = cleanCode;
+      }
+      if (gutterEl) {
+        const lines = cleanCode.length > 0 ? cleanCode.split('\n') : [''];
+        let gutterHtml = '';
+        for (let i = 1; i <= lines.length; i++) {
+          gutterHtml += `<div class="line-number">${i}</div>`;
+        }
+        gutterEl.innerHTML = gutterHtml;
+      }
+      if (isTagClosed || isFinished) {
+        const art = state.artifacts[id];
+        renderArtifactContent(art, art.currentVersion);
+        updateVersionStepper(art);
+      }
+    }
+  }
+}
+
+function initArtifactsWorkbench() {
+  const resizer = document.getElementById('artifact-resizer');
+  const wb = document.getElementById('artifact-workbench');
+  if (resizer) resizer.style.display = 'none';
+  if (wb) wb.style.display = 'none';
+
+  const toggle = document.getElementById('toggle-artifacts-enable');
+  if (toggle) {
+    toggle.checked = state.enableArtifacts;
+    toggle.addEventListener('change', () => {
+      state.enableArtifacts = toggle.checked;
+      showToast(state.enableArtifacts ? 'Singularity Artifacts enabled' : 'Singularity Artifacts disabled', 'info');
+    });
+  }
+
+  const btnPrev = document.getElementById('btn-artifact-preview');
+  const btnCode = document.getElementById('btn-artifact-code');
+  if (btnPrev) btnPrev.addEventListener('click', () => switchArtifactView('preview'));
+  if (btnCode) btnCode.addEventListener('click', () => switchArtifactView('code'));
+
+  const prevVerBtn = document.getElementById('btn-artifact-prev-ver');
+  const nextVerBtn = document.getElementById('btn-artifact-next-ver');
+  if (prevVerBtn) prevVerBtn.addEventListener('click', () => switchArtifactVersion(-1));
+  if (nextVerBtn) nextVerBtn.addEventListener('click', () => switchArtifactVersion(1));
+
+  const copyBtn = document.getElementById('btn-artifact-copy');
+  if (copyBtn) copyBtn.addEventListener('click', copyActiveArtifactCode);
+
+  const moreBtn = document.getElementById('btn-artifact-more');
+  if (moreBtn) moreBtn.addEventListener('click', toggleArtifactMenu);
+
+  document.addEventListener('click', (e) => {
+    const splitBtn = document.getElementById('artifact-split-btn');
+    const menu = document.getElementById('artifact-dropdown-menu');
+    if (menu && splitBtn && !splitBtn.contains(e.target)) {
+      menu.style.display = 'none';
+    }
+  });
+
+  const dlBtn = document.getElementById('btn-artifact-download');
+  if (dlBtn) dlBtn.addEventListener('click', downloadActiveArtifact);
+
+  const fsBtn = document.getElementById('btn-artifact-fullscreen');
+  if (fsBtn) fsBtn.addEventListener('click', toggleArtifactFullscreen);
+
+  const closeBtn = document.getElementById('btn-artifact-close');
+  if (closeBtn) closeBtn.addEventListener('click', closeArtifactWorkbench);
+
+  initArtifactResizer();
+}
+
+function initArtifactResizer() {
+  const resizer = document.getElementById('artifact-resizer');
+  const workspace = document.getElementById('playground-workspace');
+  if (!resizer || !workspace) return;
+
+  let isDragging = false;
+
+  const startDrag = (e) => {
+    isDragging = true;
+    resizer.classList.add('is-dragging');
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const doDrag = (e) => {
+    if (!isDragging) return;
+    const clientX = e.clientX || (e.touches && e.touches[0].clientX);
+    if (!clientX) return;
+    const rect = workspace.getBoundingClientRect();
+    const offset = clientX - rect.left;
+    const pct = Math.max(25, Math.min(75, (offset / rect.width) * 100));
+    workspace.style.setProperty('--chat-pane-width', `${pct}%`);
+  };
+
+  const stopDrag = () => {
+    if (isDragging) {
+      isDragging = false;
+      resizer.classList.remove('is-dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+  };
+
+  resizer.addEventListener('mousedown', startDrag);
+  window.addEventListener('mousemove', doDrag);
+  window.addEventListener('mouseup', stopDrag);
+
+  resizer.addEventListener('touchstart', startDrag, { passive: true });
+  window.addEventListener('touchmove', doDrag, { passive: true });
+  window.addEventListener('touchend', stopDrag, { passive: true });
+}
+
 function initPlayground() {
   const sendBtn = document.getElementById('btn-send-chat');
   const input = document.getElementById('chat-input');
@@ -2818,25 +4185,20 @@ function initPlayground() {
   document.getElementById('btn-voice-chat')?.addEventListener('click', () => {
     showToast('Voice conversation mode ready', 'info');
   });
-  document.getElementById('btn-user-avatar')?.addEventListener('click', () => {
-    switchTab('vault');
-    showToast('Account Vault & Model Fleet', 'info');
-  });
-  document.getElementById('plan-upgrade-link')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    switchTab('vault');
-    showToast('Account Stacking & Provider Limits', 'info');
-  });
-
   // Clear Chat Button Handler
   if (clearBtn) {
     clearBtn.addEventListener('click', () => {
       state.chatMessages = [];
+      state.artifacts = {};
+      state.activeArtifactId = null;
+      closeArtifactWorkbench();
       const history = document.getElementById('chat-history');
       const thread = history?.querySelector('.chat-thread-container');
       if (thread) thread.innerHTML = '';
       const workspace = document.getElementById('playground-workspace');
       if (workspace) workspace.classList.remove('has-messages');
+      document.body.classList.remove('dock-vertical');
+      window.SingularityGlassDock?.updateDockMode(false);
       const heroEl = document.getElementById('playground-hero');
       if (heroEl) heroEl.classList.remove('hidden');
       updateHeroGreeting(true);
@@ -2848,47 +4210,395 @@ function initPlayground() {
       showToast('Chat history cleared', 'info');
     });
   }
+
+  // Initialize Artifacts Workbench controls & resizer
+  initArtifactsWorkbench();
 }
 
-async function sendChatMessage() {
-  if (state.isStreaming) return;
+function formatShortMonthDate(date = new Date()) {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[date.getMonth()]} ${date.getDate()}`;
+}
 
-  const input = document.getElementById('chat-input');
-  const userText = input.value.trim();
-  if (!userText) return;
+function cleanTextForSpeech(raw) {
+  if (!raw) return '';
+  return raw
+    .replace(/<antArtifact[\s\S]*?<\/antArtifact>/gi, 'Interactive artifact rendered.')
+    .replace(/<[^>]+>/g, '')
+    .replace(/```[\s\S]*?```/g, 'Code block omitted.')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/[*_#~>]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-  // Toggle active chat workspace mode
-  const workspace = document.getElementById('playground-workspace');
-  if (workspace) {
-    workspace.classList.add('has-messages');
+function createResponseActionBar(assistantMsgEl, fullContent, promptText, modelName, elapsedMs, timestamp = new Date()) {
+  if (assistantMsgEl.querySelector('.response-actions')) {
+    return;
   }
 
-  // Hide the centered playground hero when sending message
-  const heroEl = document.getElementById('playground-hero');
-  if (heroEl) {
-    heroEl.classList.add('hidden');
+  const bar = document.createElement('div');
+  bar.className = 'response-actions';
+
+  const shortDate = formatShortMonthDate(timestamp);
+  const fullDateTime = timestamp.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+
+  // 1. Copy Button
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'response-action-btn btn-copy-response';
+  copyBtn.setAttribute('data-tooltip', 'Copy');
+  copyBtn.setAttribute('aria-label', 'Copy response');
+  copyBtn.innerHTML = `
+    <svg class="icon-copy" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+    </svg>
+  `;
+  copyBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      const textToCopy = (fullContent || '')
+        .replace(/<antArtifact\s+[^>]+>[\s\S]*?<\/antArtifact>/gi, '')
+        .replace(/data:image\/[a-zA-Z+]+;base64,[A-Za-z0-9+/=]+/g, '[Image]')
+        .trim();
+      await navigator.clipboard.writeText(textToCopy);
+      copyBtn.innerHTML = `
+        <svg class="icon-check" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      `;
+      copyBtn.setAttribute('data-tooltip', 'Copied!');
+      copyBtn.classList.add('active');
+      showToast('Copied to clipboard', 'success');
+
+      const tip = document.getElementById('singularity-tooltip');
+      if (tip && tip.classList.contains('visible')) {
+        tip.textContent = 'Copied!';
+      }
+
+      setTimeout(() => {
+        copyBtn.innerHTML = `
+          <svg class="icon-copy" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+        `;
+        copyBtn.setAttribute('data-tooltip', 'Copy');
+        copyBtn.classList.remove('active');
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy response:', err);
+      showToast('Failed to copy to clipboard', 'error');
+    }
+  });
+  bar.appendChild(copyBtn);
+
+  // 2. Read Aloud / Speaker Button
+  const speakBtn = document.createElement('button');
+  speakBtn.className = 'response-action-btn btn-speak-response';
+  speakBtn.setAttribute('data-tooltip', 'Read aloud');
+  speakBtn.setAttribute('aria-label', 'Read response aloud');
+  speakBtn.innerHTML = `
+    <svg class="icon-speak" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+      <path d="M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+    </svg>
+  `;
+  speakBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!('speechSynthesis' in window)) {
+      showToast('Speech synthesis not supported in this browser', 'info');
+      return;
+    }
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      document.querySelectorAll('.btn-speak-response.active').forEach(b => {
+        b.classList.remove('active');
+        b.setAttribute('data-tooltip', 'Read aloud');
+      });
+      return;
+    }
+
+    const speakText = cleanTextForSpeech(fullContent);
+    if (!speakText) return;
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(speakText);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    speakBtn.classList.add('active');
+    speakBtn.setAttribute('data-tooltip', 'Stop reading');
+
+    const tip = document.getElementById('singularity-tooltip');
+    if (tip && tip.classList.contains('visible')) {
+      tip.textContent = 'Stop reading';
+    }
+
+    utterance.onend = () => {
+      speakBtn.classList.remove('active');
+      speakBtn.setAttribute('data-tooltip', 'Read aloud');
+    };
+    utterance.onerror = () => {
+      speakBtn.classList.remove('active');
+      speakBtn.setAttribute('data-tooltip', 'Read aloud');
+    };
+
+    window.speechSynthesis.speak(utterance);
+  });
+  bar.appendChild(speakBtn);
+
+  // 3. Thumbs Up Button
+  const thumbsUpBtn = document.createElement('button');
+  thumbsUpBtn.className = 'response-action-btn btn-thumbs-up';
+  thumbsUpBtn.setAttribute('data-tooltip', 'Good response');
+  thumbsUpBtn.setAttribute('aria-label', 'Good response');
+  thumbsUpBtn.innerHTML = `
+    <svg class="icon-thumbs-up" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+    </svg>
+  `;
+  thumbsUpBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isCurrentlyActive = thumbsUpBtn.classList.contains('active');
+    thumbsDownBtn.classList.remove('active');
+    thumbsDownBtn.setAttribute('data-tooltip', 'Bad response');
+    if (isCurrentlyActive) {
+      thumbsUpBtn.classList.remove('active');
+      thumbsUpBtn.setAttribute('data-tooltip', 'Good response');
+    } else {
+      thumbsUpBtn.classList.add('active');
+      thumbsUpBtn.setAttribute('data-tooltip', 'Helpful');
+      showToast('Thanks for your feedback!', 'info');
+    }
+  });
+  bar.appendChild(thumbsUpBtn);
+
+  // 4. Thumbs Down Button
+  const thumbsDownBtn = document.createElement('button');
+  thumbsDownBtn.className = 'response-action-btn btn-thumbs-down';
+  thumbsDownBtn.setAttribute('data-tooltip', 'Bad response');
+  thumbsDownBtn.setAttribute('aria-label', 'Bad response');
+  thumbsDownBtn.innerHTML = `
+    <svg class="icon-thumbs-down" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zm7-13h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3"></path>
+    </svg>
+  `;
+  thumbsDownBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isCurrentlyActive = thumbsDownBtn.classList.contains('active');
+    thumbsUpBtn.classList.remove('active');
+    thumbsUpBtn.setAttribute('data-tooltip', 'Good response');
+    if (isCurrentlyActive) {
+      thumbsDownBtn.classList.remove('active');
+      thumbsDownBtn.setAttribute('data-tooltip', 'Bad response');
+    } else {
+      thumbsDownBtn.classList.add('active');
+      thumbsDownBtn.setAttribute('data-tooltip', 'Reported');
+      showToast('Feedback noted', 'info');
+    }
+  });
+  bar.appendChild(thumbsDownBtn);
+
+  // 5. Retry Button
+  const retryBtn = document.createElement('button');
+  retryBtn.className = 'response-action-btn btn-retry-response';
+  retryBtn.setAttribute('data-tooltip', 'Retry');
+  retryBtn.setAttribute('aria-label', 'Retry response');
+  retryBtn.innerHTML = `
+    <svg class="icon-retry" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="23 4 23 10 17 10"></polyline>
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+    </svg>
+  `;
+  retryBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (state.isStreaming) {
+      showToast('A message is already generating', 'warning');
+      return;
+    }
+    retryBtn.classList.add('spinning');
+    retryChatMessage(promptText, assistantMsgEl);
+  });
+  bar.appendChild(retryBtn);
+
+  // 6. Response Date Timestamp (short month like Aug, Sep, Oct + day)
+  const dateEl = document.createElement('span');
+  dateEl.className = 'response-date';
+  dateEl.textContent = shortDate;
+  dateEl.setAttribute('data-tooltip', `${fullDateTime} • ${modelName || state.selectedModel} (${elapsedMs}ms)`);
+  bar.appendChild(dateEl);
+
+  assistantMsgEl.appendChild(bar);
+}
+
+function createUserActionBar(userMsgEl, userText, timestamp = new Date()) {
+  if (userMsgEl.querySelector('.user-msg-actions')) {
+    return;
   }
 
-  input.value = '';
-  input.style.height = '24px';
+  const bar = document.createElement('div');
+  bar.className = 'user-msg-actions';
+
+  const shortDate = formatShortMonthDate(timestamp);
+  const fullDateTime = timestamp.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+
+  // 1. Date Timestamp (short month like Aug, Sep, Oct)
+  const dateEl = document.createElement('span');
+  dateEl.className = 'user-msg-date';
+  dateEl.textContent = shortDate;
+  dateEl.setAttribute('data-tooltip', fullDateTime);
+  bar.appendChild(dateEl);
+
+  // 2. Retry Button
+  const retryBtn = document.createElement('button');
+  retryBtn.className = 'response-action-btn btn-retry-user';
+  retryBtn.setAttribute('data-tooltip', 'Retry');
+  retryBtn.setAttribute('aria-label', 'Retry prompt');
+  retryBtn.innerHTML = `
+    <svg class="icon-retry" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="23 4 23 10 17 10"></polyline>
+      <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+    </svg>
+  `;
+  retryBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (state.isStreaming) {
+      showToast('A message is already generating', 'warning');
+      return;
+    }
+    retryBtn.classList.add('spinning');
+    retryUserMessage(userMsgEl, userMsgEl.dataset.promptText || userText);
+  });
+  bar.appendChild(retryBtn);
+
+  // 3. Edit Button
+  const editBtn = document.createElement('button');
+  editBtn.className = 'response-action-btn btn-edit-user';
+  editBtn.setAttribute('data-tooltip', 'Edit');
+  editBtn.setAttribute('aria-label', 'Edit message');
+  editBtn.innerHTML = `
+    <svg class="icon-edit" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+    </svg>
+  `;
+  editBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (state.isStreaming) {
+      showToast('A message is already generating', 'warning');
+      return;
+    }
+    startInlineUserEdit(userMsgEl, userMsgEl.dataset.promptText || userText, bar);
+  });
+  bar.appendChild(editBtn);
+
+  // 4. Copy Button
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'response-action-btn btn-copy-user';
+  copyBtn.setAttribute('data-tooltip', 'Copy');
+  copyBtn.setAttribute('aria-label', 'Copy message');
+  copyBtn.innerHTML = `
+    <svg class="icon-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+    </svg>
+  `;
+  copyBtn.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    try {
+      const textToCopy = userMsgEl.dataset.promptText || userText;
+      await navigator.clipboard.writeText(textToCopy);
+      copyBtn.innerHTML = `
+        <svg class="icon-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      `;
+      copyBtn.setAttribute('data-tooltip', 'Copied!');
+      copyBtn.classList.add('active');
+      showToast('Copied to clipboard', 'success');
+
+      const tip = document.getElementById('singularity-tooltip');
+      if (tip && tip.classList.contains('visible')) {
+        tip.textContent = 'Copied!';
+      }
+
+      setTimeout(() => {
+        copyBtn.innerHTML = `
+          <svg class="icon-copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+        `;
+        copyBtn.setAttribute('data-tooltip', 'Copy');
+        copyBtn.classList.remove('active');
+      }, 2000);
+    } catch (err) {
+      console.error('Failed to copy user message:', err);
+      showToast('Failed to copy to clipboard', 'error');
+    }
+  });
+  bar.appendChild(copyBtn);
+
+  userMsgEl.appendChild(bar);
+}
+
+function retryUserMessage(userMsgEl, userText) {
+  if (state.isStreaming) {
+    showToast('A message is already generating', 'warning');
+    return;
+  }
 
   const history = document.getElementById('chat-history');
-  let thread = history.querySelector('.chat-thread-container');
-  if (!thread) {
-    thread = document.createElement('div');
-    thread.className = 'chat-thread-container';
-    history.appendChild(thread);
+  const thread = history?.querySelector('.chat-thread-container');
+  if (!thread) return;
+
+  // Remove all siblings following userMsgEl in thread
+  let nextEl = userMsgEl.nextElementSibling;
+  while (nextEl) {
+    const toRemove = nextEl;
+    nextEl = nextEl.nextElementSibling;
+    toRemove.remove();
   }
 
-  // Append user message
-  const userMsgEl = document.createElement('div');
-  userMsgEl.className = 'chat-msg user';
-  userMsgEl.innerHTML = `<div class="msg-bubble">${escapeHtml(userText)}</div>`;
-  thread.appendChild(userMsgEl);
+  // Find index of this user message among all .chat-msg.user in thread
+  const allUserEls = Array.from(thread.querySelectorAll('.chat-msg.user'));
+  const userIdx = allUserEls.indexOf(userMsgEl);
 
-  state.chatMessages.push({ role: 'user', content: userText });
+  // Slice state.chatMessages up to this user message
+  if (userIdx !== -1) {
+    let countUsers = 0;
+    const newChatMessages = [];
+    for (const msg of state.chatMessages) {
+      if (msg.role === 'user') {
+        if (countUsers === userIdx) {
+          newChatMessages.push({ role: 'user', content: userText });
+          break;
+        }
+        countUsers++;
+      }
+      newChatMessages.push(msg);
+    }
+    state.chatMessages = newChatMessages;
+  } else {
+    state.chatMessages = [{ role: 'user', content: userText }];
+  }
 
-  // Detect modality: 'image', 'video', or 'text'
   const modality = detectQueryModality(state.selectedModel, userText);
 
   // Append assistant message container
@@ -2906,8 +4616,152 @@ async function sendChatMessage() {
 
   history.scrollTop = history.scrollHeight;
 
-  state.isStreaming = true;
+  runAssistantStream(assistantMsgEl, bubbleEl, loaderObj, userText, modality);
+}
+
+function startInlineUserEdit(userMsgEl, userText, actionBar) {
+  const bubble = userMsgEl.querySelector('.msg-bubble');
+  if (!bubble) return;
+
+  if (userMsgEl.classList.contains('is-editing')) return;
+  userMsgEl.classList.add('is-editing');
+  if (actionBar) actionBar.style.display = 'none';
+
+  const originalHtml = bubble.innerHTML;
+  const currentText = userMsgEl.dataset.promptText || userText;
+
+  // Replace bubble with editor
+  bubble.innerHTML = `
+    <div class="user-msg-edit-box">
+      <textarea class="user-msg-edit-textarea" rows="1" placeholder="Edit your message..."></textarea>
+      <div class="user-msg-edit-actions">
+        <button type="button" class="user-msg-btn-cancel">Cancel</button>
+        <button type="button" class="user-msg-btn-submit">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+          Send
+        </button>
+      </div>
+    </div>
+  `;
+
+  const textarea = bubble.querySelector('.user-msg-edit-textarea');
+  const cancelBtn = bubble.querySelector('.user-msg-btn-cancel');
+  const submitBtn = bubble.querySelector('.user-msg-btn-submit');
+
+  textarea.value = currentText;
+
+  const cancelEdit = () => {
+    userMsgEl.classList.remove('is-editing');
+    bubble.innerHTML = originalHtml;
+    if (actionBar) actionBar.style.display = '';
+  };
+
+  const autoResize = () => {
+    if (!textarea) return;
+    textarea.style.height = 'auto';
+    textarea.style.height = Math.min(Math.max(textarea.scrollHeight, 24), 260) + 'px';
+    if (textarea.scrollHeight > 260) {
+      textarea.style.overflowY = 'auto';
+    } else {
+      textarea.style.overflowY = 'hidden';
+    }
+  };
+
+  textarea.addEventListener('input', autoResize);
+  setTimeout(() => {
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+    autoResize();
+  }, 30);
+
+  cancelBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    cancelEdit();
+  });
+
+  const submitEdit = () => {
+    const newText = textarea.value.trim();
+    if (!newText) {
+      showToast('Message cannot be empty', 'warning');
+      return;
+    }
+
+    userMsgEl.classList.remove('is-editing');
+    userMsgEl.dataset.promptText = newText;
+    bubble.innerHTML = escapeHtml(newText);
+    if (actionBar) {
+      actionBar.style.display = '';
+      actionBar.remove();
+      createUserActionBar(userMsgEl, newText, new Date());
+    }
+
+    retryUserMessage(userMsgEl, newText);
+  };
+
+  submitBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    submitEdit();
+  });
+
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      cancelEdit();
+    } else if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      submitEdit();
+    }
+  });
+}
+
+async function retryChatMessage(promptText, failedAssistantEl = null) {
+  if (state.isStreaming) {
+    showToast('A message is already generating', 'warning');
+    return;
+  }
+
+  const history = document.getElementById('chat-history');
+  const thread = history?.querySelector('.chat-thread-container');
+  if (!thread) return;
+
+  // Remove the previous assistant element if supplied
+  if (failedAssistantEl && failedAssistantEl.parentNode) {
+    failedAssistantEl.remove();
+  }
+
+  // Pop previous assistant message from state.chatMessages if present
+  if (state.chatMessages.length && state.chatMessages[state.chatMessages.length - 1].role === 'assistant') {
+    state.chatMessages.pop();
+  }
+
+  const modality = detectQueryModality(state.selectedModel, promptText);
+
+  // Append fresh assistant message container
+  const assistantMsgEl = document.createElement('div');
+  assistantMsgEl.className = 'chat-msg assistant';
+
+  const bubbleEl = document.createElement('div');
+  bubbleEl.className = 'msg-bubble playground-loader-bubble';
+
+  const loaderObj = createThinkingLoader(modality, promptText);
+  bubbleEl.appendChild(loaderObj.el);
+  assistantMsgEl.appendChild(bubbleEl);
+  thread.appendChild(assistantMsgEl);
+
+  history.scrollTop = history.scrollHeight;
+
+  await runAssistantStream(assistantMsgEl, bubbleEl, loaderObj, promptText, modality);
+}
+
+async function runAssistantStream(assistantMsgEl, bubbleEl, loaderObj, userText, modality) {
+  const history = document.getElementById('chat-history');
+  const input = document.getElementById('chat-input');
   const sendBtn = document.getElementById('btn-send-chat');
+
+  state.isStreaming = true;
   if (sendBtn) sendBtn.disabled = true;
 
   const systemPrompt = document.getElementById('system-prompt-input')?.value.trim();
@@ -2930,13 +4784,17 @@ async function sendChatMessage() {
   try {
     const response = await fetch('/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'x-singularity-artifacts': state.enableArtifacts ? 'true' : 'false',
+      },
       body: JSON.stringify({
         model: state.selectedModel,
         messages: messagesPayload,
         temperature: temperature,
         max_tokens: maxTokens,
         thinking_budget: thinkingBudget,
+        artifacts: state.enableArtifacts,
         stream: true,
       }),
     });
@@ -2946,8 +4804,10 @@ async function sendChatMessage() {
       if (loaderObj.finish) loaderObj.finish();
       bubbleEl.classList.remove('playground-loader-bubble');
       bubbleEl.innerHTML = `<span style="color: var(--color-error);">Error: ${escapeHtml(errText)}</span>`;
+      const elapsed = Math.round(performance.now() - startTime);
+      createResponseActionBar(assistantMsgEl, `Error: ${errText}`, userText, state.selectedModel, elapsed, new Date());
       state.isStreaming = false;
-      sendBtn.disabled = false;
+      if (sendBtn) sendBtn.disabled = false;
       return;
     }
 
@@ -2993,19 +4853,50 @@ async function sendChatMessage() {
 
           // Main Content Delta
           if (delta.content) {
-            fullContent += delta.content;
+            const cleanDelta = delta.content
+              .replace(/[※\u203B][^\s]*/g, '')
+              .replace(/\bcite[a-zA-Z0-9_]*turn[a-zA-Z0-9_]*\b/gi, '')
+              .replace(/\bturn\d+[a-zA-Z0-9_]*\b/gi, '')
+              .replace(/[\uE200-\uE20F]message_reaction[\uE200-\uE20F][^\uE200-\uE20F]*[\uE200-\uE20F]/g, '')
+              .replace(/[\uE200-\uE20F]/g, '');
+            fullContent += cleanDelta;
+
+            // Stream thinking trace if tag is present (e.g. from models outputting <antThinking>)
+            const thinkingMatch = fullContent.match(/<antThinking>([\s\S]*?)(?:<\/antThinking>|$)/i);
+            if (thinkingMatch && thinkingMatch[1] && !delta.reasoning_content) {
+              const streamedThinking = thinkingMatch[1].trim();
+              if (streamedThinking) {
+                if (!reasoningBox) {
+                  reasoningBox = document.createElement('div');
+                  reasoningBox.className = 'reasoning-box';
+                  reasoningBox.innerHTML = `
+                    <div class="reasoning-summary">
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 14 14"></polyline></svg>
+                      Thinking Process Trace
+                    </div>
+                    <div class="reasoning-content"></div>
+                  `;
+                  assistantMsgEl.insertBefore(reasoningBox, bubbleEl);
+                }
+                const reasoningContentEl = reasoningBox.querySelector('.reasoning-content');
+                if (reasoningContentEl) reasoningContentEl.textContent = streamedThinking;
+              }
+            }
+
+            // Realtime streaming artifact extraction
+            const displayContent = convertGenUiToArtifact(fullContent);
+            if (state.enableArtifacts && (displayContent.includes('<antArtifact') || fullContent.includes('※genui※'))) {
+              handleStreamingArtifact(displayContent, false);
+            }
 
             // Check if chunks contain base64 image or video data
             const isBase64Stream = fullContent.includes('data:image/') || fullContent.includes('data:video/') || /[A-Za-z0-9+/=]{180,}/.test(fullContent);
 
             if (isBase64Stream) {
-              // NEVER dump raw base64 chunks to screen!
-              // Keep the media motion graphic active and push progress forward
               if (loaderObj.updateProgress) {
                 loaderObj.updateProgress(92);
               }
             } else {
-              // Standard text model streaming with dynamic markdown formatting
               if (!hasTransformedToText) {
                 hasTransformedToText = true;
                 if (loaderObj.finish) loaderObj.finish();
@@ -3014,9 +4905,9 @@ async function sendChatMessage() {
               }
               const contentBox = bubbleEl.querySelector('.chat-md-content');
               if (contentBox) {
-                contentBox.innerHTML = renderMarkdown(fullContent);
+                contentBox.innerHTML = renderMarkdown(displayContent);
               } else {
-                bubbleEl.innerHTML = `<div class="chat-md-content">${renderMarkdown(fullContent)}</div>`;
+                bubbleEl.innerHTML = `<div class="chat-md-content">${renderMarkdown(displayContent)}</div>`;
               }
             }
           }
@@ -3027,33 +4918,98 @@ async function sendChatMessage() {
       history.scrollTop = history.scrollHeight;
     }
 
+    // Finalize streaming artifact once stream finishes
+    const finalDisplayContent = convertGenUiToArtifact(fullContent);
+    if (state.enableArtifacts && (finalDisplayContent.includes('<antArtifact') || fullContent.includes('※genui※'))) {
+      handleStreamingArtifact(finalDisplayContent, true);
+    }
+
     if (loaderObj.finish) loaderObj.finish();
     bubbleEl.classList.remove('playground-loader-bubble');
 
     const elapsed = Math.round(performance.now() - startTime);
-    state.chatMessages.push({ role: 'assistant', content: fullContent });
+    state.chatMessages.push({ role: 'assistant', content: finalDisplayContent });
 
     // Parse and render rich interactive media cards (without any raw base64!)
     parseAndRenderMediaContent(assistantMsgEl, bubbleEl, fullContent, fullReasoning, userText, modality);
 
-    // Append meta badge
-    const metaBadge = document.createElement('div');
-    metaBadge.style.fontSize = '10px';
-    metaBadge.style.fontFamily = 'var(--font-mono)';
-    metaBadge.style.color = 'var(--text-muted)';
-    metaBadge.style.marginTop = '4px';
-    metaBadge.textContent = `${state.selectedModel} • ${elapsed}ms`;
-    assistantMsgEl.appendChild(metaBadge);
+    // Create Claude-grade interactive response action bar
+    createResponseActionBar(assistantMsgEl, fullContent, userText, state.selectedModel, elapsed, new Date());
 
   } catch (err) {
     if (loaderObj.finish) loaderObj.finish();
     bubbleEl.classList.remove('playground-loader-bubble');
     bubbleEl.innerHTML = `<span style="color: var(--color-error);">Stream Failed: ${escapeHtml(err.message)}</span>`;
+    const elapsed = Math.round(performance.now() - startTime);
+    createResponseActionBar(assistantMsgEl, `Stream Failed: ${err.message}`, userText, state.selectedModel, elapsed, new Date());
   } finally {
     state.isStreaming = false;
-    if (sendBtn) sendBtn.disabled = !input.value.trim();
+    if (sendBtn && input) sendBtn.disabled = !input.value.trim();
     history.scrollTop = history.scrollHeight;
   }
+}
+
+async function sendChatMessage() {
+  if (state.isStreaming) return;
+
+  const input = document.getElementById('chat-input');
+  const userText = input.value.trim();
+  if (!userText) return;
+
+  // Toggle active chat workspace mode & shift dock to left vertical format
+  const workspace = document.getElementById('playground-workspace');
+  if (workspace) {
+    workspace.classList.add('has-messages');
+  }
+  document.body.classList.add('dock-vertical');
+  window.SingularityGlassDock?.updateDockMode(true);
+
+  // Hide the centered playground hero when sending message
+  const heroEl = document.getElementById('playground-hero');
+  if (heroEl) {
+    heroEl.classList.add('hidden');
+  }
+
+  input.value = '';
+  input.style.height = '24px';
+
+  const history = document.getElementById('chat-history');
+  let thread = history.querySelector('.chat-thread-container');
+  if (!thread) {
+    thread = document.createElement('div');
+    thread.className = 'chat-thread-container';
+    history.appendChild(thread);
+  }
+
+  // Append user message
+  const userMsgEl = document.createElement('div');
+  userMsgEl.className = 'chat-msg user';
+  userMsgEl.dataset.promptText = userText;
+  userMsgEl.innerHTML = `<div class="msg-bubble">${escapeHtml(userText)}</div>`;
+  createUserActionBar(userMsgEl, userText, new Date());
+  thread.appendChild(userMsgEl);
+
+  state.chatMessages.push({ role: 'user', content: userText });
+
+  // Detect modality: 'image', 'video', or 'text'
+  const modality = detectQueryModality(state.selectedModel, userText);
+
+  // Append assistant message container
+  const assistantMsgEl = document.createElement('div');
+  assistantMsgEl.className = 'chat-msg assistant';
+
+  const bubbleEl = document.createElement('div');
+  bubbleEl.className = 'msg-bubble playground-loader-bubble';
+
+  // Mount the motion graphic thinking loader
+  const loaderObj = createThinkingLoader(modality, userText);
+  bubbleEl.appendChild(loaderObj.el);
+  assistantMsgEl.appendChild(bubbleEl);
+  thread.appendChild(assistantMsgEl);
+
+  history.scrollTop = history.scrollHeight;
+
+  await runAssistantStream(assistantMsgEl, bubbleEl, loaderObj, userText, modality);
 }
 
 // ===================================================================
@@ -3594,7 +5550,6 @@ document.addEventListener('DOMContentLoaded', () => {
   initTheme();
   initSidebar();
   initTooltips();
-  initSimulationToggle();
   initNavigation();
   initModelFilters();
   initCookieTabs();
@@ -3652,4 +5607,37 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }, 10000);
 });
+
+// ===================================================================
+// Tavern Studio External Integration
+// ===================================================================
+async function openTavernStudio() {
+  let targetUrl = 'http://localhost:5173';
+  try {
+    const res = await fetch('/api/tavern/status');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.client_url) {
+        targetUrl = data.client_url;
+      }
+    }
+  } catch (e) {
+    // fallback to standard url
+  }
+  window.open(targetUrl, '_blank', 'noopener,noreferrer');
+}
+
+// Global exports for modular UI integrations (e.g. Glass Dock, Artifacts)
+window.switchTab = switchTab;
+window.openTavernStudio = openTavernStudio;
+window.showToast = showToast;
+window.openArtifact = openArtifact;
+window.closeArtifactWorkbench = closeArtifactWorkbench;
+window.switchArtifactView = switchArtifactView;
+window.switchArtifactVersion = switchArtifactVersion;
+window.copyActiveArtifactCode = copyActiveArtifactCode;
+window.downloadActiveArtifact = downloadActiveArtifact;
+window.toggleArtifactFullscreen = toggleArtifactFullscreen;
+
+
 

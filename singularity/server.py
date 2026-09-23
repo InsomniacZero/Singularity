@@ -9,6 +9,8 @@ import base64
 import json
 import os
 import time
+import uuid
+import re
 import inspect
 from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional
@@ -154,6 +156,14 @@ try:
     from singularity import engines
 except ImportError:
     import engines
+try:
+    from singularity import personas
+except ImportError:
+    import personas
+try:
+    from singularity import artifacts
+except ImportError:
+    import artifacts
 from providers import (
     MODELS_CATALOG,
     PROVIDERS_CONFIG,
@@ -181,7 +191,7 @@ def resolve_model_provider(model_name: str) -> str:
             return item["provider"]
 
     # 2. Explicit prefixes or known names
-    if m.startswith("claude"):
+    if m.startswith("claude") or "fable" in m or "flable" in m or "opus" in m or "sonnet" in m or "haiku" in m:
         return "claude"
     if m.startswith("gemini") or m.startswith("imagen") or m.startswith("nano-banana"):
         return "gemini"
@@ -341,7 +351,97 @@ def _get_simulated_response_payload(model_name: str, provider_id: str, prompt_te
             f"![Generated Image]({img_url})"
         )
 
+    # Detect Artifact / App creation request in simulation mode
+    if any(k in p_lower for k in ("artifact", "react", "component", "calculator", "game", "dashboard", "counter", "timer", "mermaid", "flowchart", "svg", "vector")):
+        if "mermaid" in p_lower or "flowchart" in p_lower or "diagram" in p_lower:
+            return (
+                f"Here is the architecture diagram:\n\n"
+                f'<antArtifact identifier="system-architecture" type="application/vnd.ant.mermaid" title="System Architecture Flowchart">\n'
+                f"graph TD\n"
+                f"    Client[Playground Web UI] -->|SSE / REST| Gateway[Singularity Gateway:9000]\n"
+                f"    Gateway --> Router[Universal Model Router]\n"
+                f"    Router --> Workers[Provider Workers 8000-8088]\n"
+                f"    Router --> Sandbox[Universal Artifacts Engine]\n"
+                f"    Sandbox --> Frame[Isolated iframe / React 18 / SVG]\n"
+                f"</antArtifact>\n\n"
+                f"The diagram above illustrates the Singularity architecture pipeline."
+            )
+        elif "svg" in p_lower or "icon" in p_lower or "vector" in p_lower:
+            return (
+                f"Here is the scalable vector graphic you requested:\n\n"
+                f'<antArtifact identifier="singularity-core-logo" type="image/svg+xml" title="Singularity Cybernetic Core">\n'
+                f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">\n'
+                f'  <defs>\n'
+                f'    <linearGradient id="neonGlow" x1="0%" y1="0%" x2="100%" y2="100%">\n'
+                f'      <stop offset="0%" stop-color="#00f2fe"/>\n'
+                f'      <stop offset="100%" stop-color="#4facfe"/>\n'
+                f'    </linearGradient>\n'
+                f'    <linearGradient id="accentPurple" x1="0%" y1="0%" x2="100%" y2="100%">\n'
+                f'      <stop offset="0%" stop-color="#b176f2"/>\n'
+                f'      <stop offset="100%" stop-color="#f857a6"/>\n'
+                f'    </linearGradient>\n'
+                f'    <filter id="bloom" x="-20%" y="-20%" width="140%" height="140%">\n'
+                f'      <feGaussianBlur stdDeviation="8" result="blur"/>\n'
+                f'      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>\n'
+                f'    </filter>\n'
+                f'  </defs>\n'
+                f'  <rect width="100%" height="100%" rx="24" fill="#0b0f19"/>\n'
+                f'  <circle cx="250" cy="250" r="160" stroke="url(#neonGlow)" stroke-width="3" fill="none" stroke-dasharray="10 6" opacity="0.6"/>\n'
+                f'  <circle cx="250" cy="250" r="120" stroke="url(#accentPurple)" stroke-width="4" fill="none" filter="url(#bloom)"/>\n'
+                f'  <polygon points="250,150 340,310 160,310" fill="none" stroke="url(#neonGlow)" stroke-width="4" filter="url(#bloom)"/>\n'
+                f'  <circle cx="250" cy="250" r="32" fill="#00f2fe" filter="url(#bloom)"/>\n'
+                f'  <text x="250" y="380" font-family="system-ui, sans-serif" font-size="18" font-weight="600" fill="#94a3b8" text-anchor="middle" letter-spacing="4">SINGULARITY ARTIFACTS</text>\n'
+                f'</svg>\n'
+                f"</antArtifact>\n\n"
+                f"You can view and inspect the SVG in the artifact workbench."
+            )
+        else:
+            return (
+                "I've built an interactive React component for you:\n\n"
+                '<antArtifact identifier="interactive-counter" type="application/vnd.ant.react" title="Interactive Glass Counter">\n'
+                "import React, { useState } from 'react';\n"
+                "import { Sparkles, Plus, Minus, RotateCcw, Zap } from 'lucide-react';\n\n"
+                "export default function CounterApp() {\n"
+                "  const [count, setCount] = useState(0);\n"
+                "  return (\n"
+                '    <div className="min-h-screen bg-slate-950 text-white flex flex-col items-center justify-center p-6">\n'
+                '      <div className="w-full max-w-sm p-8 rounded-3xl bg-slate-900/80 border border-slate-800 shadow-2xl flex flex-col items-center gap-6 backdrop-blur-xl">\n'
+                '        <div className="flex items-center gap-2 text-cyan-400 text-xs font-semibold uppercase tracking-widest">\n'
+                '          <Zap className="w-4 h-4" /> Singularity Universal Engine\n'
+                "        </div>\n"
+                '        <div className="text-7xl font-extrabold tracking-tight bg-gradient-to-r from-cyan-400 via-indigo-300 to-pink-400 bg-clip-text text-transparent">\n'
+                "          {count}\n"
+                "        </div>\n"
+                '        <div className="flex items-center gap-3 w-full justify-center">\n'
+                '          <button onClick={() => setCount(c => c - 1)} className="p-3 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-95 transition-all text-white">\n'
+                '            <Minus className="w-5 h-5" />\n'
+                "          </button>\n"
+                '          <button onClick={() => setCount(0)} className="p-3 rounded-2xl bg-slate-800 hover:bg-slate-700 active:scale-95 transition-all text-slate-400 hover:text-white">\n'
+                '            <RotateCcw className="w-5 h-5" />\n'
+                "          </button>\n"
+                '          <button onClick={() => setCount(c => c + 1)} className="p-3 rounded-2xl bg-cyan-500 hover:bg-cyan-400 active:scale-95 transition-all text-slate-950 font-bold shadow-lg shadow-cyan-500/30">\n'
+                '            <Plus className="w-5 h-5" />\n'
+                "          </button>\n"
+                "        </div>\n"
+                "      </div>\n"
+                "    </div>\n"
+                "  );\n"
+                "}\n"
+                "</antArtifact>\n\n"
+                "This component is rendered live in your interactive workbench on the right."
+            )
+
     # Standard Text Response
+    p_cfg = personas.get_persona_config(model_name) if personas else None
+    if p_cfg:
+        return (
+            f"⚡ **Singularity Portable Gateway** (Simulated Response)\n\n"
+            f"• **Model:** `{model_name}` ({p_cfg.name})\n"
+            f"• **Provider:** `{provider_id.upper()}`\n"
+            f"• **Architecture:** Frontier Neural Persona Engine\n\n"
+            f"Hello! I am {p_cfg.name}. I am verified and running in Singularity Gateway."
+        )
+
     return (
         f"⚡ **Singularity Portable Gateway** (Simulated Response)\n\n"
         f"• **Model:** `{model_name}`\n"
@@ -425,6 +525,25 @@ async def chat_completions(request: Request):
         body = {}
 
     model_name = body.get("model", "gpt-5-6-mini")
+    requested_model = model_name
+
+    # Check persona mapping (e.g. GPT-6 Astra, Claude 5.1 Fable, Claude 5 Fable, and thinking variants)
+    persona_cfg = personas.get_persona_config(model_name) if personas else None
+    if persona_cfg:
+        backend_model = persona_cfg.backend_model
+        body["model"] = backend_model
+        body["messages"] = personas.inject_persona_messages(body.get("messages", []), persona_cfg)
+        if persona_cfg.thinking_budget and "thinking_budget" not in body:
+            body["thinking_budget"] = persona_cfg.thinking_budget
+    else:
+        backend_model = model_name
+
+    # Universal Artifacts system prompt injection (supports all models: GPT, Claude, Gemini, DeepSeek, Qwen, etc.)
+    if "artifacts" in locals() or "artifacts" in globals():
+        artifacts_enabled = body.get("artifacts") is True or request.headers.get("x-singularity-artifacts") == "true"
+        if artifacts_enabled:
+            body["messages"] = artifacts.inject_artifacts_prompt(body.get("messages", []), enabled=True)
+
     res = resolve_model_provider(model_name)
     if isinstance(res, tuple):
         provider_id, target_port = res
@@ -596,14 +715,58 @@ async def chat_completions(request: Request):
                 },
             )
 
-    # 1. Direct in-process execution for thread workers (bypasses loopback socket entirely)
+    # 1. Direct in-process execution for all native engines (bypasses loopback socket entirely)
     # This prevents loopback socket disconnects, avoids BaseHTTP keepalive issues, and is 10x faster.
-    if worker.is_worker_in_thread(provider_id):
+    if True:
         if is_stream:
             async def direct_stream_generator() -> AsyncIterator[bytes]:
+                rewriter = personas.PersonaStreamRewriter(persona_cfg) if persona_cfg else None
                 try:
-                    async for chunk in engines.stream_chat(provider_id, model_name, body.get("messages", []), stream=True, **forward_kwargs):
+                    async for chunk in engines.stream_chat(provider_id, backend_model, body.get("messages", []), stream=True, **forward_kwargs):
+                        chunk["model"] = requested_model
+                        choices = chunk.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {})
+                            if "content" in delta and isinstance(delta["content"], str):
+                                delta["content"] = re.sub(r"※[^\s]*", "", delta["content"])
+                                delta["content"] = re.sub(r"\bcite[a-zA-Z0-9_]*turn[a-zA-Z0-9_]*\b", "", delta["content"])
+                                delta["content"] = re.sub(r"\bturn\d+[a-zA-Z0-9_]*\b", "", delta["content"])
+                                delta["content"] = re.sub(r"[\ue200-\ue20f]message_reaction[\ue200-\ue20f][^\ue200-\ue20f]*[\ue200-\ue20f]", "", delta["content"])
+                                delta["content"] = re.sub(r"[\ue200-\ue20f]", "", delta["content"])
+                        if rewriter:
+                            choices = chunk.get("choices", [])
+                            if choices:
+                                delta = choices[0].get("delta", {})
+                                finish_reason = choices[0].get("finish_reason")
+                                if "content" in delta:
+                                    new_c = rewriter.process(delta["content"])
+                                    if new_c:
+                                        delta["content"] = new_c
+                                        yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                                    continue
+                                if finish_reason:
+                                    rem = rewriter.finish()
+                                    if rem:
+                                        flush_chunk = {
+                                            "id": chunk.get("id", f"chatcmpl-{uuid.uuid4().hex[:8]}"),
+                                            "object": "chat.completion.chunk",
+                                            "created": chunk.get("created", int(time.time())),
+                                            "model": requested_model,
+                                            "choices": [{"index": 0, "delta": {"content": rem}, "finish_reason": None}],
+                                        }
+                                        yield f"data: {json.dumps(flush_chunk)}\n\n".encode("utf-8")
                         yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                    if rewriter:
+                        rem = rewriter.finish()
+                        if rem:
+                            flush_chunk = {
+                                "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": requested_model,
+                                "choices": [{"index": 0, "delta": {"content": rem}, "finish_reason": None}],
+                            }
+                            yield f"data: {json.dumps(flush_chunk)}\n\n".encode("utf-8")
                     yield b"data: [DONE]\n\n"
                 except Exception as inner_e:
                     p_name = meta.get("name", provider_id)
@@ -623,7 +786,12 @@ async def chat_completions(request: Request):
             )
         else:
             try:
-                data = await engines.generate_chat(provider_id, model_name, body.get("messages", []), **forward_kwargs)
+                data = await engines.generate_chat(provider_id, backend_model, body.get("messages", []), **forward_kwargs)
+                if persona_cfg:
+                    data["model"] = requested_model
+                    for c in data.get("choices", []):
+                        if "message" in c and "content" in c["message"]:
+                            c["message"]["content"] = personas.sanitize_text(c["message"]["content"], persona_cfg)
                 return JSONResponse(status_code=200, content=data)
             except Exception as inner_e:
                 p_name = meta.get("name", provider_id)
@@ -636,14 +804,69 @@ async def chat_completions(request: Request):
         async def stream_generator() -> AsyncIterator[bytes]:
             client = httpx.AsyncClient(timeout=120.0)
             yielded_any_bytes = False
+            rewriter = personas.PersonaStreamRewriter(persona_cfg) if persona_cfg else None
             try:
                 async with client.stream("POST", target_url, json=body, headers=headers) as upstream:
                     if upstream.status_code < 400:
-                        async for chunk in upstream.aiter_bytes():
-                            if chunk:
-                                yielded_any_bytes = True
-                                yield chunk
-                        return
+                        if persona_cfg:
+                            async for line in upstream.aiter_lines():
+                                if not line:
+                                    continue
+                                line = line.strip()
+                                if line.startswith("data: "):
+                                    data_str = line[6:].strip()
+                                    if data_str == "[DONE]":
+                                        break
+                                    try:
+                                        chunk = json.loads(data_str)
+                                        chunk["model"] = requested_model
+                                        choices = chunk.get("choices", [])
+                                        if choices:
+                                            delta = choices[0].get("delta", {})
+                                            finish_reason = choices[0].get("finish_reason")
+                                            if "content" in delta:
+                                                new_c = rewriter.process(delta["content"])
+                                                if new_c:
+                                                    delta["content"] = new_c
+                                                    yielded_any_bytes = True
+                                                    yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                                                continue
+                                            if finish_reason:
+                                                rem = rewriter.finish()
+                                                if rem:
+                                                    flush_chunk = {
+                                                        "id": chunk.get("id", f"chatcmpl-{uuid.uuid4().hex[:8]}"),
+                                                        "object": "chat.completion.chunk",
+                                                        "created": chunk.get("created", int(time.time())),
+                                                        "model": requested_model,
+                                                        "choices": [{"index": 0, "delta": {"content": rem}, "finish_reason": None}],
+                                                    }
+                                                    yielded_any_bytes = True
+                                                    yield f"data: {json.dumps(flush_chunk)}\n\n".encode("utf-8")
+                                        yielded_any_bytes = True
+                                        yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                                    except Exception:
+                                        yielded_any_bytes = True
+                                        yield f"{line}\n\n".encode("utf-8")
+                            if rewriter:
+                                rem = rewriter.finish()
+                                if rem:
+                                    flush_chunk = {
+                                        "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
+                                        "object": "chat.completion.chunk",
+                                        "created": int(time.time()),
+                                        "model": requested_model,
+                                        "choices": [{"index": 0, "delta": {"content": rem}, "finish_reason": None}],
+                                    }
+                                    yield f"data: {json.dumps(flush_chunk)}\n\n".encode("utf-8")
+                            yield b"data: [DONE]\n\n"
+                            return
+                        else:
+                            async for chunk in upstream.aiter_bytes():
+                                if chunk:
+                                    yielded_any_bytes = True
+                                    yield chunk
+                            return
             except Exception:
                 pass
             finally:
@@ -656,8 +879,42 @@ async def chat_completions(request: Request):
 
             # Direct in-process native engine fallback (when upstream daemon is down or returned >= 400)
             try:
-                async for chunk in engines.stream_chat(provider_id, model_name, body.get("messages", []), stream=True, **forward_kwargs):
+                async for chunk in engines.stream_chat(provider_id, backend_model, body.get("messages", []), stream=True, **forward_kwargs):
+                    chunk["model"] = requested_model
+                    if rewriter:
+                        choices = chunk.get("choices", [])
+                        if choices:
+                            delta = choices[0].get("delta", {})
+                            finish_reason = choices[0].get("finish_reason")
+                            if "content" in delta:
+                                new_c = rewriter.process(delta["content"])
+                                if new_c:
+                                    delta["content"] = new_c
+                                    yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                                continue
+                            if finish_reason:
+                                rem = rewriter.finish()
+                                if rem:
+                                    flush_chunk = {
+                                        "id": chunk.get("id", f"chatcmpl-{uuid.uuid4().hex[:8]}"),
+                                        "object": "chat.completion.chunk",
+                                        "created": chunk.get("created", int(time.time())),
+                                        "model": requested_model,
+                                        "choices": [{"index": 0, "delta": {"content": rem}, "finish_reason": None}],
+                                    }
+                                    yield f"data: {json.dumps(flush_chunk)}\n\n".encode("utf-8")
                     yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+                if rewriter:
+                    rem = rewriter.finish()
+                    if rem:
+                        flush_chunk = {
+                            "id": f"chatcmpl-{uuid.uuid4().hex[:8]}",
+                            "object": "chat.completion.chunk",
+                            "created": int(time.time()),
+                            "model": requested_model,
+                            "choices": [{"index": 0, "delta": {"content": rem}, "finish_reason": None}],
+                        }
+                        yield f"data: {json.dumps(flush_chunk)}\n\n".encode("utf-8")
                 yield b"data: [DONE]\n\n"
                 return
             except Exception as inner_e:
@@ -684,6 +941,11 @@ async def chat_completions(request: Request):
             if resp.status_code < 400:
                 try:
                     data = resp.json()
+                    if persona_cfg:
+                        data["model"] = requested_model
+                        for c in data.get("choices", []):
+                            if "message" in c and "content" in c["message"]:
+                                c["message"]["content"] = personas.sanitize_text(c["message"]["content"], persona_cfg)
                     return JSONResponse(status_code=resp.status_code, content=data)
                 except Exception:
                     return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get("content-type"))
@@ -692,7 +954,12 @@ async def chat_completions(request: Request):
 
     # Direct in-process native engine fallback
     try:
-        data = await engines.generate_chat(provider_id, model_name, body.get("messages", []), **forward_kwargs)
+        data = await engines.generate_chat(provider_id, backend_model, body.get("messages", []), **forward_kwargs)
+        if persona_cfg:
+            data["model"] = requested_model
+            for c in data.get("choices", []):
+                if "message" in c and "content" in c["message"]:
+                    c["message"]["content"] = personas.sanitize_text(c["message"]["content"], persona_cfg)
         return JSONResponse(status_code=200, content=data)
     except Exception as inner_e:
         raise HTTPException(
@@ -767,6 +1034,30 @@ async def api_get_services():
         "cookie_label": "System Master Gateway",
     }
     return {"services": services, "hub": singularity_info}
+
+
+@app.get("/api/tavern/status")
+async def api_tavern_status():
+    """Detect if Tavern Web Studio is running on default or alternate ports."""
+    import socket
+
+    def is_port_open(port: int) -> bool:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.2)
+                return s.connect_ex(("127.0.0.1", port)) == 0
+        except Exception:
+            return False
+
+    for client_port, api_port in [(5173, 3001), (5180, 3002)]:
+        if is_port_open(client_port) or is_port_open(api_port):
+            return {
+                "running": True,
+                "client_url": f"http://localhost:{client_port}",
+                "api_url": f"http://localhost:{api_port}",
+            }
+
+    return {"running": False, "client_url": "http://localhost:5173", "api_url": "http://localhost:3001"}
 
 
 @app.post("/api/services/start_all")
@@ -1005,7 +1296,11 @@ async def api_save_authtoken(request: Request):
 @app.head("/")
 async def serve_index():
     index_path = STATIC_DIR / "index.html"
-    return FileResponse(index_path, media_type="text/html")
+    return FileResponse(
+        index_path,
+        media_type="text/html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 @app.get("/logo.svg")

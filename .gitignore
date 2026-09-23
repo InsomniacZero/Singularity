@@ -12,6 +12,7 @@ config.json
 .env
 *.log
 TAVERN/
+TAV-TEST/
 .scene_location_memory.json
 *.json.bak
 grok2api/cookies.txt
@@ -26,5 +27,11 @@ singularity/data/*
 singularity/credentials_export*.json
 legacy/
 .vscode/
-*.zip
 singularity/static/fonts/*-fontiko/
+MISTAKES.md
+DESIGN-SYS.md
+AGENTS.md
+components.json
+tsconfig.json
+lib/
+*.zip

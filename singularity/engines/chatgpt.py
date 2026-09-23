@@ -39,10 +39,15 @@ import httpx
 try:
     from singularity import db, providers
     from singularity.providers import get_provider_host
+    from singularity import personas
 except ImportError:
     import db
     import providers
     from providers import get_provider_host
+    try:
+        import personas
+    except ImportError:
+        personas = None
 
 
 # -------------------------------------------------------------------
@@ -69,9 +74,9 @@ TEXT_MODEL_ALIASES = {
     "luna": "gpt-5-6-t-mini",
     "gpt-5.6-luna": "gpt-5-6-t-mini",
     "gpt-5-6-luna": "gpt-5-6-t-mini",
-    "gpt-6-astra": "gpt-6-astra",
-    "gpt-6": "gpt-6-astra",
-    "astra": "gpt-6-astra",
+    "gpt-6-astra": "gpt-5-6",
+    "gpt-6": "gpt-5-6",
+    "astra": "gpt-5-6",
     "default": "auto",
     "chatgpt-default": "auto",
 }
@@ -632,6 +637,35 @@ def _api_messages_to_conversation_messages(messages: List[Dict[str, Any]]) -> Li
     return conv_messages
 
 
+def is_thought_message(message: Dict[str, Any]) -> bool:
+    """Filter to internal thinking / reasoning chain-of-thought messages."""
+    if not isinstance(message, dict):
+        return False
+    channel = str(message.get("channel") or "").strip().lower()
+    if channel in ("thought", "analysis", "commentary"):
+        return True
+    content = message.get("content") or {}
+    if isinstance(content, dict):
+        c_type = str(content.get("content_type") or "").strip().lower()
+        if c_type in ("thought", "reasoning", "thinking"):
+            return True
+    return False
+
+
+def thought_message_text(message: Dict[str, Any]) -> str:
+    """Extract assistant reasoning / chain-of-thought text."""
+    content = message.get("content") or {}
+    parts = content.get("parts") or []
+    if isinstance(parts, list) and parts:
+        text = "".join(part for part in parts if isinstance(part, str))
+        if text:
+            return text
+    text_field = str(content.get("text") or "")
+    if text_field:
+        return text_field
+    return ""
+
+
 def is_visible_assistant_message(message: Dict[str, Any]) -> bool:
     """Filter to only assistant responses intended for user visibility."""
     if not isinstance(message, dict):
@@ -666,6 +700,100 @@ def assistant_message_text(message: Dict[str, Any]) -> str:
     if text_field:
         return text_field
     return ""
+
+
+def assistant_history_text(messages: Sequence[Dict[str, Any]]) -> str:
+    """Extract concatenated assistant content from prior conversational turns."""
+    texts = []
+    for m in messages:
+        if m.get("role") == "assistant":
+            c = m.get("content", "")
+            if isinstance(c, str):
+                texts.append(c)
+            elif isinstance(c, list):
+                for part in c:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        texts.append(str(part.get("text", "")))
+                    elif isinstance(part, str):
+                        texts.append(part)
+    return "".join(texts).strip()
+
+
+def assistant_history_messages(messages: Sequence[Dict[str, Any]]) -> List[str]:
+    """Extract individual assistant messages from prior conversational turns."""
+    msgs = []
+    for m in messages:
+        if m.get("role") == "assistant":
+            c = m.get("content", "")
+            if isinstance(c, str) and c.strip():
+                msgs.append(c.strip())
+            elif isinstance(c, list):
+                sub = []
+                for part in c:
+                    if isinstance(part, dict) and part.get("type") == "text":
+                        sub.append(str(part.get("text", "")))
+                    elif isinstance(part, str):
+                        sub.append(part)
+                combined = "".join(sub).strip()
+                if combined:
+                    msgs.append(combined)
+    return msgs
+
+
+def strip_history(text: str, history_text: str = "", history_messages: Optional[List[str]] = None) -> str:
+    """Strip prior conversation history prefixes that ChatGPT web echoes in the assistant output."""
+    if not text:
+        return ""
+
+    s_text = text.strip()
+    if not s_text:
+        return ""
+
+    # Build candidates list
+    candidates: List[str] = []
+    if history_text:
+        ht = history_text.strip()
+        if ht and ht not in candidates:
+            candidates.append(ht)
+    if history_messages:
+        for hm in reversed(history_messages):
+            hms = hm.strip()
+            if hms and hms not in candidates:
+                candidates.append(hms)
+
+    # In-flight check: if incoming stream text is currently just an initial prefix of any history candidate,
+    # suppress output until we have gotten past the echoed history turn.
+    for cand in candidates:
+        if cand.startswith(s_text):
+            return ""
+
+    # Iteratively strip matched history from the beginning of text
+    changed = True
+    while changed:
+        changed = False
+        cur_lstrip = text.lstrip()
+        for cand in candidates:
+            if cur_lstrip.startswith(cand):
+                text = cur_lstrip[len(cand):].lstrip()
+                changed = True
+                break
+
+    return text
+
+
+def sanitize_output_text(text: str) -> str:
+    """Remove ChatGPT web internal citation tokens (※...※) and PUA tags (message_reaction...)."""
+    if not text:
+        return ""
+    # Strip citation sequence starting with ※ up to whitespace or end-of-string
+    text = re.sub(r"※[^\s]*", "", text)
+    # Strip residual citation words (e.g. citeturn0search2, turn0news10)
+    text = re.sub(r"\bcite[a-zA-Z0-9_]*turn[a-zA-Z0-9_]*\b", "", text)
+    text = re.sub(r"\bturn\d+[a-zA-Z0-9_]*\b", "", text)
+    # Strip OpenAI private unicode PUA markers and message reactions (e.g. message_reaction👍)
+    text = re.sub(r"[\ue200-\ue20f]message_reaction[\ue200-\ue20f][^\ue200-\ue20f]*[\ue200-\ue20f]", "", text)
+    text = re.sub(r"[\ue200-\ue20f]", "", text)
+    return text
 
 
 def apply_text_patch(event: Dict[str, Any], current_text: str = "") -> str:
@@ -867,9 +995,14 @@ async def stream_chatgpt_chat(
         }
         return
 
-    # Map target model slug
+    # Map target model slug & check persona mapping (e.g. GPT-6 Astra)
     model_lower = model.lower().strip()
-    target_model_slug = TEXT_MODEL_ALIASES.get(model_lower, model)
+    persona_cfg = personas.get_persona_config(model) if personas else None
+    if persona_cfg:
+        messages = personas.inject_persona_messages(messages, persona_cfg)
+        target_model_slug = persona_cfg.backend_model
+    else:
+        target_model_slug = TEXT_MODEL_ALIASES.get(model_lower, model)
     if target_model_slug in ("default", "chatgpt-default", "auto"):
         target_model_slug = "auto"
 
@@ -1011,7 +1144,14 @@ async def stream_chatgpt_chat(
                         "choices": [{"index": 0, "delta": {"role": "assistant"}, "finish_reason": None}],
                     }
 
+                    is_reasoning_model = any(k in model.lower() for k in ("sol", "gpt-5", "o1", "o3", "reasoner", "thinking")) or int(kwargs.get("thinking_budget") or 0) > 0
+                    hist_text = assistant_history_text(messages)
+                    hist_msgs = assistant_history_messages(messages)
+                    raw_text = ""
                     prev_text = ""
+                    raw_thought = ""
+                    prev_thought = ""
+                    emitted_thought = False
                     emitted_any = False
 
                     async for line in resp.aiter_lines():
@@ -1026,12 +1166,27 @@ async def stream_chatgpt_chat(
                             try:
                                 evt = json.loads(data_str)
                                 msg = evt.get("message")
-                                if msg and is_visible_assistant_message(msg):
-                                    full_text = assistant_message_text(msg)
-                                    if full_text:
-                                        delta = full_text[len(prev_text):] if full_text.startswith(prev_text) else full_text
+                                if msg and is_thought_message(msg):
+                                    raw_thought = thought_message_text(msg)
+                                    if raw_thought:
+                                        delta_thought = raw_thought[len(prev_thought):] if raw_thought.startswith(prev_thought) else raw_thought
+                                        if delta_thought:
+                                            prev_thought = raw_thought
+                                            emitted_thought = True
+                                            yield {
+                                                "id": chat_id,
+                                                "object": "chat.completion.chunk",
+                                                "created": created_ts,
+                                                "model": model,
+                                                "choices": [{"index": 0, "delta": {"reasoning_content": delta_thought}, "finish_reason": None}],
+                                            }
+                                elif msg and is_visible_assistant_message(msg):
+                                    raw_text = assistant_message_text(msg)
+                                    cleaned_text = sanitize_output_text(strip_history(raw_text, hist_text, hist_msgs))
+                                    if cleaned_text:
+                                        delta = cleaned_text[len(prev_text):] if cleaned_text.startswith(prev_text) else cleaned_text
                                         if delta:
-                                            prev_text = full_text
+                                            prev_text = cleaned_text
                                             emitted_any = True
                                             yield {
                                                 "id": chat_id,
@@ -1042,19 +1197,22 @@ async def stream_chatgpt_chat(
                                             }
                                 # Handle JSON patch operations for continuous token streaming
                                 elif evt.get("o") == "patch" or evt.get("p"):
-                                    patched = apply_text_patch(evt, prev_text)
-                                    if patched != prev_text:
-                                        delta = patched[len(prev_text):] if patched.startswith(prev_text) else patched
-                                        if delta:
-                                            prev_text = patched
-                                            emitted_any = True
-                                            yield {
-                                                "id": chat_id,
-                                                "object": "chat.completion.chunk",
-                                                "created": created_ts,
-                                                "model": model,
-                                                "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
-                                            }
+                                    raw_patched = apply_text_patch(evt, raw_text)
+                                    if raw_patched != raw_text:
+                                        raw_text = raw_patched
+                                        cleaned_text = sanitize_output_text(strip_history(raw_text, hist_text, hist_msgs))
+                                        if cleaned_text:
+                                            delta = cleaned_text[len(prev_text):] if cleaned_text.startswith(prev_text) else cleaned_text
+                                            if delta:
+                                                prev_text = cleaned_text
+                                                emitted_any = True
+                                                yield {
+                                                    "id": chat_id,
+                                                    "object": "chat.completion.chunk",
+                                                    "created": created_ts,
+                                                    "model": model,
+                                                    "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
+                                                }
                             except Exception:
                                 continue
 

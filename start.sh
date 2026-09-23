@@ -71,7 +71,36 @@ case "$1" in
         ;;
     server|"")
         [ "$1" == "server" ] && shift
-        exec "$PYTHON_BIN" server.py "$@"
+
+        # Auto-launch Tavern Studio if TAVERN directory exists
+        TAVERN_DIR="$DIR/TAVERN"
+        TAVERN_PID=""
+        if [ -d "$TAVERN_DIR" ] && [ -f "$TAVERN_DIR/package.json" ]; then
+            if ! (echo > /dev/tcp/127.0.0.1/5173) 2>/dev/null && ! nc -z 127.0.0.1 5173 2>/dev/null; then
+                echo "  [🏰] Starting Tavern Studio alongside Singularity (ports 5173 / 3001)..."
+                (
+                    cd "$TAVERN_DIR"
+                    export NVM_DIR="$HOME/.nvm"
+                    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && nvm use 24 >/dev/null 2>&1 || true
+                    npm run dev > /dev/null 2>&1
+                ) &
+                TAVERN_PID=$!
+            else
+                echo "  [🏰] Tavern Studio is already running."
+            fi
+        fi
+
+        cleanup() {
+            if [ -n "$TAVERN_PID" ]; then
+                kill "$TAVERN_PID" 2>/dev/null || true
+            fi
+        }
+        trap cleanup INT TERM EXIT
+
+        "$PYTHON_BIN" server.py "$@"
+        EXIT_CODE=$?
+        cleanup
+        exit $EXIT_CODE
         ;;
     *)
         exec "$PYTHON_BIN" server.py "$@"

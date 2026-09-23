@@ -1,0 +1,669 @@
+/* ===================================================================
+   Singularity Glass Dock Navigation & Centered Workspace Architecture
+   Complies strictly with DESIGN-SYS.md & MISTAKES.md
+   =================================================================== */
+
+/* 1. Global App & Main Viewport Layout (100dvh Lock, Full 100vw Width) */
+#app {
+  display: flex;
+  height: 100dvh;
+  width: 100vw;
+  overflow: hidden;
+  background-color: var(--bg-primary);
+  position: relative;
+}
+
+.main-content {
+  flex: 1;
+  width: 100vw !important;
+  max-width: 100vw !important;
+  height: 100%;
+  margin-left: 0 !important;
+  position: relative;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* 2. Dead-Center Chatbox Positioning in Empty State */
+.claude-playground-container:not(.has-messages) {
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: center !important;
+  align-items: center !important;
+  height: 100% !important;
+  width: 100% !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.claude-playground-container:not(.has-messages) .claude-flow-wrapper {
+  margin: auto !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 100% !important;
+  max-width: 900px !important;
+  padding: 0 20px !important;
+  /* Balanced vertical offset so the chatbox sits in the middle of the viewport */
+  transform: translateY(-24px) !important;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+/* 3. Active Chat State: Chatbox glides to the very bottom */
+.claude-playground-container.has-messages .claude-flow-wrapper {
+  position: absolute !important;
+  bottom: 14px !important;
+  left: 50% !important;
+  transform: translateX(-50%) !important;
+  width: min(860px, 92vw) !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+  z-index: 50 !important;
+  background: transparent !important;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.claude-playground-container.has-messages .claude-input-card {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-medium);
+}
+
+.claude-playground-container.has-messages .claude-chat-scroll {
+  display: flex !important;
+  flex: 1;
+  width: 100%;
+  overflow-y: auto;
+  padding: 68px 24px 150px !important; /* Ample room above bottom chatbox */
+  scroll-behavior: smooth;
+}
+
+/* Hide hero greeting and pills in chat mode smoothly */
+.claude-playground-container.has-messages .claude-hero-section {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  margin-bottom: 0 !important;
+  transform: translateY(-16px) !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+  transition: all 0.35s ease !important;
+}
+
+.claude-playground-container.has-messages .claude-suggestion-pills {
+  max-height: 0 !important;
+  opacity: 0 !important;
+  margin-top: 0 !important;
+  transform: translateY(16px) !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+  transition: all 0.35s ease !important;
+}
+
+/* Buffer for non-playground dashboard views so tables are never clipped */
+.tab-pane:not(#pane-playground) {
+  padding-bottom: 96px;
+}
+
+/* 4. Motion Design Floating Glass Dock */
+.glass-dock-container {
+  position: fixed;
+  z-index: 1000;
+  pointer-events: auto;
+  user-select: none;
+  display: flex;
+  
+  /* Initial State: Horizontal Bottom Center */
+  bottom: 22px;
+  left: 50%;
+  top: auto;
+  transform: translate3d(-50%, 0, 0);
+  
+  /* Fluid Motion Design Interpolation */
+  transition: left 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+              bottom 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+              top 0.55s cubic-bezier(0.16, 1, 0.3, 1),
+              transform 0.55s cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: left, top, bottom, transform;
+}
+
+.glass-dock {
+  position: relative;
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  background-color: rgba(21, 20, 19, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 16px 40px -6px rgba(0, 0, 0, 0.55),
+              0 0 0 1px rgba(255, 255, 255, 0.05),
+              inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  transition: flex-direction 0.45s ease,
+              padding 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+              gap 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+              border-radius 0.45s cubic-bezier(0.16, 1, 0.3, 1),
+              background-color 0.25s ease;
+}
+
+[data-theme="light"] .glass-dock {
+  background-color: rgba(252, 252, 251, 0.88);
+  border: 1px solid rgba(0, 0, 0, 0.09);
+  box-shadow: 0 16px 40px -6px rgba(0, 0, 0, 0.16),
+              0 0 0 1px rgba(0, 0, 0, 0.04),
+              inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+/* ===================================================================
+   Vertical Format: Shifts to Left Side When Chatting or in Subviews
+   =================================================================== */
+body.dock-vertical .glass-dock-container {
+  left: 18px !important;
+  top: 50% !important;
+  bottom: auto !important;
+  transform: translate3d(0, -50%, 0) !important;
+}
+
+body.dock-vertical .glass-dock {
+  flex-direction: column !important;
+  padding: 12px 7px !important;
+  gap: 8px !important;
+  border-radius: 22px !important;
+}
+
+/* Divider formatting */
+.glass-dock-divider {
+  width: 1px;
+  height: 22px;
+  background-color: var(--border-subtle, #2b2826);
+  margin: 0 3px;
+  flex-shrink: 0;
+  transition: all 0.3s ease;
+}
+
+body.dock-vertical .glass-dock-divider {
+  width: 20px !important;
+  height: 1px !important;
+  margin: 3px 0 !important;
+}
+
+/* 5. Tooltip (Horizontal & Vertical Support) */
+.glass-dock-tooltip {
+  position: absolute;
+  pointer-events: none;
+  z-index: 1050;
+  opacity: 0;
+  will-change: transform, opacity;
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.18s ease;
+}
+
+/* Horizontal default: floats on top */
+body:not(.dock-vertical) .glass-dock-tooltip {
+  top: -46px;
+  left: 0;
+  transform: translate3d(0, 8px, 0) scale(0.92);
+}
+
+/* Vertical mode: floats on the RIGHT of the vertical dock */
+body.dock-vertical .glass-dock-tooltip {
+  top: 0;
+  left: calc(100% + 14px);
+  transform: translate3d(-8px, 0, 0) scale(0.92);
+}
+
+.glass-dock-tooltip.visible {
+  opacity: 1 !important;
+}
+
+.glass-dock-tooltip-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 12px;
+  min-width: 60px;
+  background-color: #161514;
+  color: var(--text-primary, #ede9e3);
+  border: 1px solid var(--border-medium, #3d3936);
+  border-radius: var(--radius-md, 8px);
+  box-shadow: var(--shadow-md, 0 4px 12px rgba(0, 0, 0, 0.45));
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+[data-theme="light"] .glass-dock-tooltip-inner {
+  background-color: #ffffff;
+  color: #1c1917;
+  border-color: #d6d3ce;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.glass-dock-tooltip-text {
+  display: inline-block;
+  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.2s ease,
+              filter 0.2s ease;
+}
+
+.glass-dock-tooltip-text.slide-from-right {
+  transform: translateX(16px);
+  opacity: 0;
+  filter: blur(4px);
+}
+
+.glass-dock-tooltip-text.slide-from-left {
+  transform: translateX(-16px);
+  opacity: 0;
+  filter: blur(4px);
+}
+
+.glass-dock-tooltip-text.slide-from-top {
+  transform: translateY(-12px);
+  opacity: 0;
+  filter: blur(4px);
+}
+
+.glass-dock-tooltip-text.slide-from-bottom {
+  transform: translateY(12px);
+  opacity: 0;
+  filter: blur(4px);
+}
+
+.glass-dock-tooltip-text.slide-in {
+  transform: translate(0, 0);
+  opacity: 1;
+  filter: blur(0px);
+}
+
+/* 6. Dock Interactive Items */
+.glass-dock-item {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--text-secondary, #a8a29e);
+  background: transparent;
+  border: none;
+  padding: 0;
+  outline: none;
+  -webkit-tap-highlight-color: transparent !important;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1),
+              color 0.18s ease,
+              background-color 0.18s ease;
+}
+
+.glass-dock-item:hover {
+  transform: translateY(-4px) scale(1.14);
+  color: var(--text-primary, #ede9e3);
+  background-color: rgba(255, 255, 255, 0.07);
+}
+
+body.dock-vertical .glass-dock-item:hover {
+  transform: translateX(4px) scale(1.14);
+}
+
+[data-theme="light"] .glass-dock-item:hover {
+  color: #1c1917;
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+.glass-dock-item:active {
+  transform: translate(0, 0) scale(0.92) !important;
+}
+
+.glass-dock-item.active {
+  color: var(--text-primary, #ede9e3);
+  background-color: rgba(255, 255, 255, 0.09);
+}
+
+[data-theme="light"] .glass-dock-item.active {
+  color: #1c1917;
+  background-color: rgba(0, 0, 0, 0.08);
+}
+
+/* Active Terracotta Pip */
+.glass-dock-item.active::after {
+  content: '';
+  position: absolute;
+  bottom: 3px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background-color: var(--brand-primary, #d97757);
+  box-shadow: 0 0 6px var(--brand-primary, #d97757);
+}
+
+body.dock-vertical .glass-dock-item.active::after {
+  bottom: auto;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.glass-dock-item svg {
+  width: 19px;
+  height: 19px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 2;
+  transform-origin: center center;
+  transition: transform 260ms var(--ease-spring), color var(--duration-fast) var(--ease-spring);
+  will-change: transform;
+  pointer-events: none;
+}
+
+.glass-dock-item svg rect,
+.glass-dock-item svg path,
+.glass-dock-item svg polyline,
+.glass-dock-item svg line,
+.glass-dock-item svg circle,
+.glass-dock-item svg polygon {
+  transform-origin: center center;
+  transition: transform 260ms var(--ease-spring), stroke-width var(--duration-fast) var(--ease-spring), stroke var(--duration-fast) var(--ease-spring);
+}
+
+/* 1. Playground - Kinetic Play Launcher */
+.glass-dock-item[data-tab="playground"]:hover svg {
+  transform: translateX(3px) scale(1.18);
+  color: var(--brand-primary, #d97757);
+}
+.glass-dock-item[data-tab="playground"]:active svg {
+  transform: translateX(1px) scale(0.95);
+}
+
+/* 2. Control Center - 4-Square Blossom Bloom */
+.glass-dock-item[data-tab="control"]:hover svg {
+  transform: scale(1.1) rotate(-4deg);
+  color: var(--brand-primary, #d97757);
+}
+.glass-dock-item[data-tab="control"]:hover svg rect:nth-child(1) {
+  transform: translate(-1.5px, -1.5px);
+}
+.glass-dock-item[data-tab="control"]:hover svg rect:nth-child(2) {
+  transform: translate(1.5px, -1.5px);
+}
+.glass-dock-item[data-tab="control"]:hover svg rect:nth-child(3) {
+  transform: translate(1.5px, 1.5px);
+}
+.glass-dock-item[data-tab="control"]:hover svg rect:nth-child(4) {
+  transform: translate(-1.5px, 1.5px);
+}
+
+/* 3. Limits & Quotas - Elastic Dollar Bounce */
+.glass-dock-item[data-tab="limits"]:hover svg {
+  animation: navDollarBounce 0.44s var(--ease-spring) forwards;
+  color: var(--brand-primary, #d97757);
+}
+.glass-dock-item[data-tab="limits"]:hover svg path {
+  stroke-width: 2.2px;
+}
+
+/* 4. Available Models - 3D Isometric Hexagon Twist */
+.glass-dock-item[data-tab="models"]:hover svg {
+  animation: navCubeTwist 0.48s var(--ease-spring) forwards;
+  color: var(--brand-primary, #d97757);
+}
+
+/* 5. Cookie Stacker - Character Nod & Shoulders */
+.glass-dock-item[data-tab="cookies"]:hover svg {
+  transform: scale(1.15);
+  color: var(--brand-primary, #d97757);
+}
+.glass-dock-item[data-tab="cookies"]:hover svg circle {
+  transform: translateY(-2px);
+}
+.glass-dock-item[data-tab="cookies"]:hover svg path {
+  transform: scaleY(0.95);
+}
+
+/* 6. Singularity-Access - Orbital Spin */
+.glass-dock-item[data-tab="tunnel"]:hover svg {
+  transform: rotate(45deg) scale(1.16);
+  color: var(--brand-primary, #d97757);
+}
+
+/* 7. Tavern Studio - Swinging Wooden Tavern Sign Motion */
+.glass-dock-item[data-dock-id="tavern"]:hover svg,
+.glass-dock-item[data-tab="tavern"]:hover svg {
+  transform-origin: 50% 10% !important;
+  animation: tavernSignSwing 0.52s var(--ease-spring) forwards !important;
+  color: var(--brand-primary, #d97757);
+}
+@keyframes navDollarBounce {
+  0% { transform: translateY(0) scale(1) rotate(0deg); }
+  35% { transform: translateY(-3.5px) scale(1.18) rotate(-5deg); }
+  70% { transform: translateY(1px) scale(0.96) rotate(2deg); }
+  100% { transform: translateY(0) scale(1.1) rotate(0deg); }
+}
+
+@keyframes navCubeTwist {
+  0% { transform: rotate(0deg) scale(1); }
+  45% { transform: rotate(14deg) scale(1.2); }
+  80% { transform: rotate(4deg) scale(1.08); }
+  100% { transform: rotate(8deg) scale(1.12); }
+}
+
+@keyframes tavernSignSwing {
+  0% { transform: rotate(0deg) scale(1); }
+  25% { transform: rotate(-14deg) scale(1.18); }
+  55% { transform: rotate(9deg) scale(1.12); }
+  80% { transform: rotate(-4deg) scale(1.08); }
+  100% { transform: rotate(0deg) scale(1.1); }
+}
+
+
+/* 7. User Profile Popover & Theme Toggler */
+.user-profile-wrap {
+  position: relative;
+  display: inline-block;
+}
+
+.user-profile-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 280px;
+  background-color: rgba(24, 23, 22, 0.95);
+  border: 1px solid var(--border-medium, #3d3936);
+  border-radius: var(--radius-md, 10px);
+  box-shadow: var(--shadow-lg, 0 12px 32px rgba(0, 0, 0, 0.55));
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  padding: 14px;
+  z-index: 1000;
+  display: none;
+  animation: popoverFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+[data-theme="light"] .user-profile-dropdown {
+  background-color: rgba(255, 255, 255, 0.96);
+  border-color: #d6d3ce;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
+}
+
+.user-profile-dropdown.open {
+  display: block;
+}
+
+@keyframes popoverFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.user-profile-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-profile-avatar-circle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  background: var(--bg-surface, #21201f);
+  border: 1.5px solid var(--brand-primary, #d97757);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--brand-primary, #d97757);
+  flex-shrink: 0;
+}
+
+.user-profile-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-profile-name {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.user-profile-role {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.user-profile-divider {
+  height: 1px;
+  background-color: var(--border-subtle, #2b2826);
+  margin: 12px 0;
+}
+
+.user-profile-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.user-profile-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+/* Theme Segmented Control in Profile */
+.theme-segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  background-color: var(--bg-primary, #151515);
+  border: 1px solid var(--border-subtle, #2b2826);
+  border-radius: 8px;
+  padding: 3px;
+}
+
+[data-theme="light"] .theme-segmented-control {
+  background-color: #f0eee9;
+  border-color: #e2dfd9;
+}
+
+.theme-seg-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.theme-seg-btn:hover {
+  color: var(--text-primary);
+}
+
+.theme-seg-btn.active {
+  background-color: var(--brand-primary, #d97757);
+  color: #ffffff !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.user-profile-endpoint-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: var(--bg-primary, #151515);
+  border: 1px solid var(--border-subtle, #2b2826);
+  border-radius: 6px;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.user-profile-endpoint-row:hover {
+  border-color: var(--border-medium, #3d3936);
+}
+
+.user-profile-endpoint-text {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-primary);
+}
+
+.user-profile-copy-hint {
+  font-size: 11px;
+  color: var(--brand-primary, #d97757);
+  font-weight: 600;
+}
+
+.user-profile-links {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.user-profile-link-btn {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.18s ease;
+  width: 100%;
+}
+
+.user-profile-link-btn:hover {
+  background-color: var(--bg-surface-hover, #282726);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .user-profile-link-btn:hover {
+  background-color: #f4f2ee;
+}

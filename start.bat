@@ -108,6 +108,7 @@ if "%ARG1%"=="export" goto :RUN_CLI
 if "%ARG1%"=="simulate" goto :RUN_CLI
 if "%ARG1%"=="host" goto :RUN_CLI
 if "%ARG1%"=="chat" goto :RUN_CLI
+if "%ARG1%"=="thinking" goto :RUN_CLI
 if "%ARG1%"=="service" goto :RUN_CLI
 if "%ARG1%"=="-h" goto :RUN_CLI
 if "%ARG1%"=="--help" goto :RUN_CLI
@@ -123,6 +124,12 @@ echo   API Base:   http://localhost:9000/v1
 echo   Providers:  ChatGPT, Claude, Gemini, Grok, Kimi, GLM
 echo ======================================================================
 echo.
+
+:: Launch Tavern Studio alongside Singularity if present
+if exist "%ROOT_DIR%TAVERN\package.json" (
+    echo [*] Starting Tavern Studio alongside Singularity (ports 5173 / 3001)...
+    start "Tavern Studio" /min cmd /c "cd /d "%ROOT_DIR%TAVERN" && npm run dev"
+)
 
 "%PYTHON_EXE%" %PYTHON_ARGS% server.py %*
 goto :AFTER_RUN
