@@ -117,11 +117,13 @@ if "%ARG1%"=="help" goto :RUN_CLI
 :: Launch Gateway Server
 cls
 echo ======================================================================
-echo   SINGULARITY UNIFIED AI GATEWAY (Windows)
+echo   SINGULARITY UNIFIED AI GATEWAY & TAVERN (Windows)
 echo ======================================================================
-echo   Dashboard:  http://localhost:9000
-echo   API Base:   http://localhost:9000/v1
-echo   Providers:  ChatGPT, Claude, Gemini, Grok, Kimi, GLM
+echo   Dashboard:       http://localhost:9000
+echo   Tavern Studio:   http://localhost:5173
+echo   API Base:        http://localhost:9000/v1
+echo   Phone / Remote:  http://^<YOUR_PC_IP^>:5173 (Check Wi-Fi IP)
+echo   NOTE: Do NOT type 0.0.0.0 on phones - always use your PC's LAN IP!
 echo ======================================================================
 echo.
 

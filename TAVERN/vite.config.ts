@@ -80,6 +80,8 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: Number(process.env.PORT) || 5173,
+    cors: true,
+    allowedHosts: true,
     // Directories that are not app source and that another process writes to while Vite is up —
     // Vite's file watcher crashes the whole dev client with EBUSY the moment one of those files is
     // briefly locked (seen with `presets/`, and again when the sprite generator in `tools/comfy/`

@@ -5040,6 +5040,28 @@ function initCopyAction() {
       }
     });
   }
+
+  const tavChip = document.getElementById('chip-tavern-studio');
+  if (tavChip) {
+    tavChip.addEventListener('click', () => {
+      openTavernStudio();
+    });
+  }
+
+  const mobChip = document.getElementById('chip-mobile-url');
+  if (mobChip) {
+    mobChip.addEventListener('click', () => {
+      const mobCode = document.getElementById('mobile-chip-url');
+      const copyVal = mobCode ? mobCode.textContent : '';
+      if (copyVal && !copyVal.includes('Detecting')) {
+        navigator.clipboard.writeText(copyVal).then(() => {
+          showToast('Copied Phone/LAN endpoint to clipboard: ' + copyVal, 'success');
+        });
+      } else {
+        showToast('Detecting LAN IP address...', 'info');
+      }
+    });
+  }
 }
 
 // ===================================================================
@@ -5588,6 +5610,7 @@ document.addEventListener('DOMContentLoaded', () => {
   fetchLimits();
   fetchModels();
   fetchTunnelStatus();
+  updateTavernAndMobileChips();
 
   // Background Telemetry Polling (every 3.5s)
   setInterval(() => {
@@ -5600,8 +5623,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }, 3500);
 
-  // Periodic tunnel status refresh (every 10s to keep sidebar badge updated)
+  // Periodic status refresh (every 10s)
   setInterval(() => {
+    updateTavernAndMobileChips();
     if (state.currentTab !== 'tunnel') {
       fetchTunnelStatus();
     }
@@ -5609,11 +5633,35 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ===================================================================
-// Tavern Studio External Integration
+// Tavern Studio & Phone LAN Integration
 // ===================================================================
+async function updateTavernAndMobileChips() {
+  try {
+    const res = await fetch('/api/tavern/status');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.lan_ip) state.lanIp = data.lan_ip;
+
+    const tavCode = document.getElementById('tavern-chip-url');
+    if (tavCode) {
+      tavCode.textContent = data.lan_url || `http://${data.lan_ip || window.location.hostname}:5173`;
+    }
+    const mobCode = document.getElementById('mobile-chip-url');
+    if (mobCode && data.lan_ip) {
+      mobCode.textContent = `http://${data.lan_ip}:9000`;
+    }
+  } catch (_) {}
+}
+
 async function openTavernStudio() {
-  const currentHost = window.location.hostname || 'localhost';
+  const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 800;
+  let currentHost = window.location.hostname || 'localhost';
   let targetUrl = `${window.location.protocol}//${currentHost}:5173`;
+
+  if (isMobile && typeof showToast === 'function') {
+    showToast('Opening Tavern Web Studio...', 'info', 2000);
+  }
+
   try {
     let res = await fetch('/api/tavern/status');
     let data = res.ok ? await res.json() : null;
@@ -5639,20 +5687,48 @@ async function openTavernStudio() {
       }
     }
 
+    const lanIp = data?.lan_ip || state.lanIp;
+    if (lanIp) state.lanIp = lanIp;
+
+    // Resolve accurate host: if accessed via 0.0.0.0 or if mobile is on loopback, swap to real LAN IP
+    if (currentHost === '0.0.0.0' || (isMobile && (currentHost === 'localhost' || currentHost === '127.0.0.1'))) {
+      if (lanIp) currentHost = lanIp;
+    }
+
     if (data && data.client_url) {
       try {
         const u = new URL(data.client_url);
-        u.hostname = currentHost;
+        if (u.hostname === '0.0.0.0' || (isMobile && (u.hostname === 'localhost' || u.hostname === '127.0.0.1'))) {
+          u.hostname = (currentHost !== '0.0.0.0' && currentHost !== '127.0.0.1' && currentHost !== 'localhost') ? currentHost : (lanIp || currentHost);
+        }
         u.protocol = window.location.protocol;
         targetUrl = u.toString();
       } catch {
         targetUrl = data.client_url;
       }
+    } else if (data && data.lan_url) {
+      targetUrl = data.lan_url;
     }
   } catch (e) {
     // fallback to standard url
   }
-  window.open(targetUrl, '_blank', 'noopener,noreferrer');
+
+  // Never allow 0.0.0.0 in targetUrl
+  if (targetUrl.includes('0.0.0.0')) {
+    targetUrl = targetUrl.replace('0.0.0.0', state.lanIp || 'localhost');
+  }
+
+  if (isMobile) {
+    // Direct navigation is 100% reliable on phones and avoids mobile popup blockers
+    window.location.href = targetUrl;
+  } else {
+    const win = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+    if (!win || win.closed || typeof win.closed === 'undefined') {
+      if (typeof showToast === 'function') {
+        showToast(`Tavern ready: <a href="${targetUrl}" target="_blank" style="color:var(--accent);text-decoration:underline;">Click here to open</a>`, 'success');
+      }
+    }
+  }
 }
 
 // Global exports for modular UI integrations (e.g. Glass Dock, Artifacts)

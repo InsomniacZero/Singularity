@@ -1036,6 +1036,18 @@ async def api_get_services():
     return {"services": services, "hub": singularity_info}
 
 
+def get_lan_ip() -> str:
+    """Detect the host machine's primary local network IP."""
+    import socket
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.settimeout(0.2)
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+
+
 @app.get("/api/tavern/status")
 async def api_tavern_status(request: Request):
     """Detect if Tavern Web Studio is running on default or alternate ports."""
@@ -1049,18 +1061,30 @@ async def api_tavern_status(request: Request):
         except Exception:
             return False
 
+    lan_ip = get_lan_ip()
     req_host = request.headers.get("host", "localhost:9000").split(":")[0]
     scheme = request.url.scheme or "http"
+
+    # If the user accessed via 0.0.0.0, replace with real LAN IP because browsers cannot navigate to 0.0.0.0
+    effective_host = lan_ip if req_host == "0.0.0.0" else req_host
 
     for client_port, api_port in [(5173, 3001), (5180, 3002)]:
         if is_port_open(client_port) or is_port_open(api_port):
             return {
                 "running": True,
-                "client_url": f"{scheme}://{req_host}:{client_port}",
-                "api_url": f"{scheme}://{req_host}:{api_port}",
+                "client_url": f"{scheme}://{effective_host}:{client_port}",
+                "api_url": f"{scheme}://{effective_host}:{api_port}",
+                "lan_url": f"http://{lan_ip}:{client_port}",
+                "lan_ip": lan_ip,
             }
 
-    return {"running": False, "client_url": f"{scheme}://{req_host}:5173", "api_url": f"{scheme}://{req_host}:3001"}
+    return {
+        "running": False,
+        "client_url": f"{scheme}://{effective_host}:5173",
+        "api_url": f"{scheme}://{effective_host}:3001",
+        "lan_url": f"http://{lan_ip}:5173",
+        "lan_ip": lan_ip,
+    }
 
 
 @app.post("/api/tavern/start")
@@ -1414,6 +1438,20 @@ async def on_startup():
 def main():
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "9000"))
+    lan_ip = get_lan_ip()
+    print("\n" + "=" * 66, flush=True)
+    print("  🚀 SINGULARITY UNIFIED AI GATEWAY & TAVERN WEB STUDIO", flush=True)
+    print("=" * 66, flush=True)
+    print(f"  📍 Localhost Dashboard:  http://localhost:{port}", flush=True)
+    print(f"  📍 Localhost Tavern:     http://localhost:5173", flush=True)
+    print("  " + "-" * 62, flush=True)
+    print("  📱 PHONE / TABLET / LAN ACCESS (Connect to same Wi-Fi):", flush=True)
+    print(f"  📲 Mobile Dashboard:     http://{lan_ip}:{port}", flush=True)
+    print(f"  📲 Mobile Tavern:        http://{lan_ip}:5173", flush=True)
+    print("  ⚠️  NOTE FOR PHONES: Do NOT type '0.0.0.0' on your mobile browser!", flush=True)
+    print(f"     Always use the LAN IP: http://{lan_ip}:5173", flush=True)
+    print("=" * 66 + "\n", flush=True)
+
     try:
         worker.ensure_supervisor_running()
         for p in ["chatgpt", "kimi", "grok", "glm", "deepseek", "qwen"]:

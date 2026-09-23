@@ -6,7 +6,7 @@
 
 import type { RequestHandler } from 'express'
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '0.0.0.0'])
 
 function isLocalOrPrivateHost(hostname: string): boolean {
   if (LOOPBACK_HOSTS.has(hostname)) return true
