@@ -14,7 +14,7 @@ if %errorlevel% equ 0 (
     where node >nul 2>&1
     if errorlevel 1 (
         echo [ERROR] Node.js or Bun is required to run Tavern Studio.
-        echo Please install Node.js (v22+) from https://nodejs.org
+        echo Please install Node.js [v22+] from https://nodejs.org
         pause
         exit /b 1
     )
@@ -24,7 +24,7 @@ if %errorlevel% equ 0 (
 :: First-time dependency install
 if not exist "node_modules" (
     echo ======================================================================
-    echo   [TAVERN] Installing dependencies (first-time setup)...
+    echo   [TAVERN] Installing dependencies [first-time setup]...
     echo   This may take 1-2 minutes. Please keep this window open!
     echo ======================================================================
     if "!RUNNER!"=="bun" (
