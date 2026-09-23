@@ -5047,21 +5047,6 @@ function initCopyAction() {
       openTavernStudio();
     });
   }
-
-  const mobChip = document.getElementById('chip-mobile-url');
-  if (mobChip) {
-    mobChip.addEventListener('click', () => {
-      const mobCode = document.getElementById('mobile-chip-url');
-      const copyVal = mobCode ? mobCode.textContent : '';
-      if (copyVal && !copyVal.includes('Detecting')) {
-        navigator.clipboard.writeText(copyVal).then(() => {
-          showToast('Copied Phone/LAN endpoint to clipboard: ' + copyVal, 'success');
-        });
-      } else {
-        showToast('Detecting LAN IP address...', 'info');
-      }
-    });
-  }
 }
 
 // ===================================================================
@@ -5640,15 +5625,10 @@ async function updateTavernAndMobileChips() {
     const res = await fetch('/api/tavern/status');
     if (!res.ok) return;
     const data = await res.json();
-    if (data.lan_ip) state.lanIp = data.lan_ip;
-
     const tavCode = document.getElementById('tavern-chip-url');
     if (tavCode) {
-      tavCode.textContent = data.lan_url || `http://${data.lan_ip || window.location.hostname}:5173`;
-    }
-    const mobCode = document.getElementById('mobile-chip-url');
-    if (mobCode && data.lan_ip) {
-      mobCode.textContent = `http://${data.lan_ip}:9000`;
+      const host = window.location.hostname || '0.0.0.0';
+      tavCode.textContent = `http://${host}:5173`;
     }
   } catch (_) {}
 }
@@ -5687,39 +5667,23 @@ async function openTavernStudio() {
       }
     }
 
-    const lanIp = data?.lan_ip || state.lanIp;
-    if (lanIp) state.lanIp = lanIp;
-
-    // Resolve accurate host: if accessed via 0.0.0.0 or if mobile is on loopback, swap to real LAN IP
-    if (currentHost === '0.0.0.0' || (isMobile && (currentHost === 'localhost' || currentHost === '127.0.0.1'))) {
-      if (lanIp) currentHost = lanIp;
-    }
-
     if (data && data.client_url) {
       try {
         const u = new URL(data.client_url);
-        if (u.hostname === '0.0.0.0' || (isMobile && (u.hostname === 'localhost' || u.hostname === '127.0.0.1'))) {
-          u.hostname = (currentHost !== '0.0.0.0' && currentHost !== '127.0.0.1' && currentHost !== 'localhost') ? currentHost : (lanIp || currentHost);
-        }
+        u.hostname = currentHost;
         u.protocol = window.location.protocol;
         targetUrl = u.toString();
       } catch {
         targetUrl = data.client_url;
       }
-    } else if (data && data.lan_url) {
-      targetUrl = data.lan_url;
+    } else {
+      targetUrl = `${window.location.protocol}//${currentHost}:5173`;
     }
   } catch (e) {
     // fallback to standard url
   }
 
-  // Never allow 0.0.0.0 in targetUrl
-  if (targetUrl.includes('0.0.0.0')) {
-    targetUrl = targetUrl.replace('0.0.0.0', state.lanIp || 'localhost');
-  }
-
   if (isMobile) {
-    // Direct navigation is 100% reliable on phones and avoids mobile popup blockers
     window.location.href = targetUrl;
   } else {
     const win = window.open(targetUrl, '_blank', 'noopener,noreferrer');

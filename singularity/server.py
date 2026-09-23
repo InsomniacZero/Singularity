@@ -1064,9 +1064,7 @@ async def api_tavern_status(request: Request):
     lan_ip = get_lan_ip()
     req_host = request.headers.get("host", "localhost:9000").split(":")[0]
     scheme = request.url.scheme or "http"
-
-    # If the user accessed via 0.0.0.0, replace with real LAN IP because browsers cannot navigate to 0.0.0.0
-    effective_host = lan_ip if req_host == "0.0.0.0" else req_host
+    effective_host = req_host
 
     for client_port, api_port in [(5173, 3001), (5180, 3002)]:
         if is_port_open(client_port) or is_port_open(api_port):
