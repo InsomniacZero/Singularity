@@ -1,0 +1,33 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.env
+.env.*
+
+# Your actual character/chat/world data — lives on disk now, not in the browser.
+data/
+
+# Dropped-in SillyTavern preset library for reference / bulk import (Settings → Generation →
+# "Import ST preset"). Not part of the app; keep it out of the tree and out of Vite's watcher.
+presets/
+
+# ComfyUI sprite-generator scratch + backups
+tools/comfy/out/
+tools/comfy/backups/
+
+# Local Comfy MCP registration — hardcodes this machine's absolute paths (see tools/comfy/README.md)
+.mcp.json
+
+# Universal Gift local credentials & caches
+cookie*.txt
+universal-gift/cookie*.txt
+config.json
+universal-gift/config.json
+.scene_location_memory.json
+universal-gift/.scene_location_memory.json
+*.log
+__pycache__/
+*.py[cod]
+*$py.class

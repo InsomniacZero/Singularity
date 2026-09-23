@@ -72,16 +72,26 @@ case "$1" in
     server|"")
         [ "$1" == "server" ] && shift
 
-        # Auto-launch Tavern Studio if TAVERN directory exists
-        TAVERN_DIR="$DIR/TAVERN"
+        # Auto-launch Tavern Studio if TAV-TEST or TAVERN directory exists
+        TAVERN_DIR=""
+        if [ -d "$DIR/TAV-TEST" ] && [ -f "$DIR/TAV-TEST/package.json" ]; then
+            TAVERN_DIR="$DIR/TAV-TEST"
+        elif [ -d "$DIR/TAVERN" ] && [ -f "$DIR/TAVERN/package.json" ]; then
+            TAVERN_DIR="$DIR/TAVERN"
+        fi
+
         TAVERN_PID=""
-        if [ -d "$TAVERN_DIR" ] && [ -f "$TAVERN_DIR/package.json" ]; then
+        if [ -n "$TAVERN_DIR" ]; then
             if ! (echo > /dev/tcp/127.0.0.1/5173) 2>/dev/null && ! nc -z 127.0.0.1 5173 2>/dev/null; then
                 echo "  [🏰] Starting Tavern Studio alongside Singularity (ports 5173 / 3001)..."
                 (
                     cd "$TAVERN_DIR"
                     export NVM_DIR="$HOME/.nvm"
                     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && nvm use 24 >/dev/null 2>&1 || true
+                    if [ ! -d "node_modules" ]; then
+                        echo "  [🏰] Installing Tavern dependencies (first-time boot)..."
+                        npm install --silent > /dev/null 2>&1
+                    fi
                     npm run dev > /dev/null 2>&1
                 ) &
                 TAVERN_PID=$!

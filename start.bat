@@ -126,9 +126,16 @@ echo ======================================================================
 echo.
 
 :: Launch Tavern Studio alongside Singularity if present
-if exist "%ROOT_DIR%TAVERN\package.json" (
+set "TAV_DIR="
+if exist "%ROOT_DIR%TAV-TEST\package.json" (
+    set "TAV_DIR=%ROOT_DIR%TAV-TEST"
+) else if exist "%ROOT_DIR%TAVERN\package.json" (
+    set "TAV_DIR=%ROOT_DIR%TAVERN"
+)
+
+if defined TAV_DIR (
     echo [*] Starting Tavern Studio alongside Singularity (ports 5173 / 3001)...
-    start "Tavern Studio" /min cmd /c "cd /d "%ROOT_DIR%TAVERN" && npm run dev"
+    start "Tavern Studio" /min cmd /c "cd /d "!TAV_DIR!" && if not exist node_modules npm install && npm run dev"
 )
 
 "%PYTHON_EXE%" %PYTHON_ARGS% server.py %*

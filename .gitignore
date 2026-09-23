@@ -11,8 +11,13 @@ cookie-safe.txt
 config.json
 .env
 *.log
-TAVERN/
 TAV-TEST/
+TAVERN/node_modules/
+TAVERN/dist/
+TAVERN/dist-bun/
+TAVERN/data/
+TAVERN/graphify-out/
+TAVERN/.claude/
 .scene_location_memory.json
 *.json.bak
 grok2api/cookies.txt

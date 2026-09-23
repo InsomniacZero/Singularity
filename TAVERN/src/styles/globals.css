@@ -1,0 +1,590 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Theme tokens are RGB triplets (no "rgb()" wrapper) so Tailwind's
+  <alpha-value> substitution works for per-use transparency.
+  Values here are DEFAULTS; ThemeEditor overwrites them as inline
+  style props on :root, which always win over these rules.
+*/
+:root {
+  /* Warm Stone & Terracotta (Light Mode: Linen Canvas) */
+  --c-bg: 252 252 251;
+  --c-bg-elevated: 255 255 255;
+  --c-bg-sunken: 247 246 243;
+  --c-border: 231 229 225;
+  --c-text: 28 25 23;
+  --c-text-muted: 140 133 127;
+  --c-accent: 217 119 87;
+  --c-accent-text: 255 255 255;
+  --c-msg-user: 245 244 241;
+  --c-msg-char: 255 255 255;
+  --c-danger: 239 68 68;
+  --c-success: 16 185 129;
+  --c-warning: 245 158 11;
+  --c-romance: 217 119 87;
+  --c-romance-text: 255 255 255;
+
+  /* Strict Geometric Radii - No Pill Rule */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius: 0.5rem;
+  --chat-width: 56rem;
+  --font-scale: 1;
+  --chat-blur: 0px;
+  --shadow-strength: 1;
+  --motion-duration: 150ms;
+  --font-display: 'Plus Jakarta Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+:root.dark {
+  /* Warm Stone & Terracotta (Dark Mode: Deep Obsidian) */
+  --c-bg: 21 21 21;
+  --c-bg-elevated: 45 43 41;
+  --c-bg-sunken: 25 24 23;
+  --c-border: 43 40 38;
+  --c-text: 237 233 227;
+  --c-text-muted: 120 113 108;
+  --c-accent: 217 119 87;
+  --c-accent-text: 255 255 255;
+  --c-msg-user: 33 32 31;
+  --c-msg-char: 27 27 27;
+  --c-danger: 239 68 68;
+  --c-success: 16 185 129;
+  --c-warning: 245 158 11;
+  --c-romance: 217 119 87;
+  --c-romance-text: 255 255 255;
+}
+
+:root.reduced-motion * {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  height: 100dvh;
+  width: 100%;
+  width: 100vw;
+  overflow: hidden;
+}
+
+body {
+  background-color: rgb(var(--c-bg));
+  color: rgb(var(--c-text));
+  font-family:
+    'Plus Jakarta Sans',
+    'Inter Variable',
+    system-ui,
+    -apple-system,
+    sans-serif;
+  line-height: 1.6;
+  /* Tabular figures so a changing number (warmth %, token counts, coin totals, timestamps) never
+     jitters in width as its digits change, plus a dotted/slashed zero so it's never mistaken for
+     the letter O in an id or a stat. Both are "on" by default in Inter's OpenType table but most
+     browsers don't enable them without being asked. */
+  font-feature-settings: 'tnum' 1, 'zero' 1;
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  line-height: 1.25;
+}
+
+::selection {
+  background-color: rgb(var(--c-accent) / 0.35);
+}
+
+/* Native form controls (checkbox, radio, range) pick up the theme accent instead of the
+   browser's default blue/grey — set once here rather than a per-instance `accent-*` class. */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: rgb(var(--c-accent));
+}
+input[type='checkbox'],
+input[type='radio'] {
+  cursor: pointer;
+}
+
+/* Inline code — one style everywhere it appears in prose, instead of a hand-rolled
+   `rounded bg-bg-sunken px-1` on some and a bare unstyled `<code>` on others. */
+code {
+  border-radius: 0.375rem;
+  background-color: rgb(var(--c-bg-sunken));
+  padding: 0.1em 0.35em;
+  font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+}
+
+/*
+  One consistent keyboard-focus affordance for every interactive element, in one place instead of
+  a per-component `focus-visible:` class that half the buttons in the app were missing. Only shows
+  for keyboard navigation (`:focus-visible`, never a plain mouse `:focus`), matching the reference
+  screens' "focus ring, not a border-colour change" convention. Text controls (input/textarea/
+  select) opt out here because they render their own inset ring via the shared Field control class.
+*/
+:focus:not(:focus-visible) {
+  outline: none;
+}
+:focus-visible {
+  outline: 2px solid rgb(var(--c-accent) / 0.6);
+  outline-offset: 2px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[contenteditable]:focus-visible {
+  outline: none;
+}
+
+/* Modal panels and toasts ease in rather than snapping — both are covered for free by the
+   `:root.reduced-motion *` duration override above and the reduced-motion media query below. */
+@keyframes overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-overlay-in { animation: overlay-in 120ms ease-out; }
+.animate-panel-in { animation: panel-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.animate-toast-in { animation: toast-in 180ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+@media (prefers-reduced-motion: reduce) {
+  .animate-overlay-in,
+  .animate-panel-in,
+  .animate-toast-in {
+    animation: none;
+  }
+}
+
+@keyframes cursor-blink {
+  0%, 45% { opacity: 1; }
+  50%, 95% { opacity: 0; }
+  100% { opacity: 1; }
+}
+.cursor-blink {
+  display: inline-block;
+  animation: cursor-blink 1s step-start infinite;
+  color: rgb(var(--c-accent));
+}
+@media (prefers-reduced-motion: reduce) {
+  .cursor-blink { animation: none; opacity: 1; }
+}
+
+@keyframes vn-sprite-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.vn-sprite {
+  animation: vn-sprite-bob 6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-sprite { animation: none; }
+}
+
+/* Sprite staging: a cast member slides+fades in the first time they appear (a chat's very first
+   render counts), and out again the moment they leave the roster — VNStage keeps them mounted a
+   beat longer under `phase="exiting"` specifically so this has something to animate. */
+@keyframes vn-sprite-enter {
+  0% { opacity: 0; transform: translateY(18px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+.vn-sprite-enter-anim {
+  animation: vn-sprite-enter 450ms ease-out both;
+}
+@keyframes vn-sprite-exit {
+  0% { opacity: 1; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(18px) scale(0.96); }
+}
+.vn-sprite-exit-anim {
+  animation: vn-sprite-exit 450ms ease-in both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-sprite-enter-anim,
+  .vn-sprite-exit-anim {
+    animation: none;
+  }
+}
+
+/* CG reveal ceremony: a brief beat when a gallery CG first surfaces full-bleed, instead of it just
+   quietly replacing the background. VNStage remounts the <img> per distinct CG id (`key`), which is
+   what makes this replay each time a *different* CG appears. */
+@keyframes vn-cg-reveal {
+  0% { opacity: 0; transform: scale(1.03); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.vn-cg-reveal {
+  animation: vn-cg-reveal 600ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-cg-reveal { animation: none; }
+}
+
+/* `vnChoiceStyle: 'centered'` — the full-stage choice screen fades/scales in as a decision beat. */
+@keyframes vn-centered-choices-in {
+  0% { opacity: 0; transform: scale(0.98); }
+  100% { opacity: 1; transform: scale(1); }
+}
+.vn-centered-choices {
+  animation: vn-centered-choices-in 250ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-centered-choices { animation: none; }
+}
+
+/* The quick menu's Auto toggle — a small pulsing dot on the icon while auto-advance is running. */
+@keyframes vn-auto-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+.vn-auto-pulse {
+  animation: vn-auto-pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-auto-pulse { animation: none; }
+}
+
+/* The ADV "more/done" glyph in VNStage's dialogue box — appears once a reply has fully typed out. */
+@keyframes vn-next-glyph-bob {
+  0%, 100% { transform: translateY(0); opacity: 0.55; }
+  50% { transform: translateY(3px); opacity: 0.95; }
+}
+.vn-next-glyph {
+  animation: vn-next-glyph-bob 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-next-glyph { animation: none; opacity: 0.75; }
+}
+
+/* A handful of sakura petals drifting down behind the scene — VNStage renders this layer only
+   for outdoor backgrounds (park/forest/rooftop/city-street/beach) where falling petals actually
+   make sense, and never at all when the app's own reducedMotion setting is on. The @media rule
+   is a second, independent guard for the OS-level prefers-reduced-motion, same convention as
+   .cursor-blink/.vn-sprite above, for anyone who reaches this layer some other way. */
+@keyframes sakura-fall {
+  0% { transform: translate3d(0, -10%, 0) rotate(0deg); opacity: 0; }
+  10% { opacity: 0.75; }
+  90% { opacity: 0.75; }
+  100% { transform: translate3d(var(--drift, 40px), 110vh, 0) rotate(340deg); opacity: 0; }
+}
+.sakura-petal {
+  position: absolute;
+  top: 0;
+  left: var(--x, 50%);
+  width: var(--size, 14px);
+  height: var(--size, 14px);
+  animation: sakura-fall var(--duration, 14s) linear infinite;
+  animation-delay: var(--delay, 0s);
+  will-change: transform, opacity;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sakura-petal { display: none; }
+}
+
+/*
+  VN mode's one glass material. Every floating surface over the scene (dialogue box, HUD card,
+  quick menu, choice bars) is built from this rather than each hand-rolling its own
+  bg-black/NN + backdrop-blur combination, which is how they drifted into four different
+  translucencies. Deliberately dark and low-contrast: the art behind it is the subject.
+*/
+.vn-glass {
+  background-color: rgb(26 24 22 / 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgb(51 48 45 / 0.75);
+  box-shadow: 0 12px 32px -8px rgb(0 0 0 / 0.6);
+}
+/* The dialogue box specifically — solid, quiet, and legible. */
+.vn-glass-solid {
+  background-color: rgb(26 24 22 / 0.92);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgb(51 48 45 / 0.85);
+  box-shadow: 0 16px 40px -12px rgb(0 0 0 / 0.7);
+}
+
+/*
+  The bottom stack's column: the floating strip (location caption, assist bar, choices, quick
+  replies), the dialogue box, and the docked composer bar all sit in it. One class rather than the
+  same Tailwind string written out three times — written out, they drifted: the strip applied its
+  padding to a full-width parent and centred the capped column *inside* that, while the box capped
+  and centred the padded element itself, which put the two 20px apart on any window wider than the
+  cap. Alignment here is structural, not a convention to remember.
+*/
+.vn-stack {
+  width: 100%;
+  max-width: 64rem;
+  margin-inline: auto;
+  padding-inline: 0.75rem;
+}
+@media (min-width: 640px) {
+  .vn-stack {
+    padding-inline: 1.25rem;
+  }
+}
+
+/*
+  The dialogue box's read <-> write swap. Same frame, same height; only the nameplate identity, a
+  soft accent ring and the caret change, so the state is unmistakable without anything moving.
+
+  The heights live here rather than in Tailwind classes because the two states have to agree to the
+  pixel: read state is body + footer strip ("Say something as …"), write state is one taller body
+  with the composer's own control row inside it. Deriving the write height from the read one with
+  `calc` makes that equality structural instead of two clamps that have to be kept in sync by hand.
+*/
+.vn-box {
+  --vn-box-body: clamp(112px, 21vh, 168px);
+  --vn-box-foot: 42px;
+}
+@media (min-width: 640px) {
+  .vn-box {
+    --vn-box-body: clamp(124px, 19vh, 184px);
+  }
+}
+.vn-box-body {
+  height: var(--vn-box-body);
+}
+.vn-box-body-write {
+  height: calc(var(--vn-box-body) + var(--vn-box-foot));
+}
+.vn-box-foot {
+  height: var(--vn-box-foot);
+}
+
+/* A background change cross-dissolves instead of cutting — VNStage keys the incoming layer by its
+   resolved background id, so this replays only when the scene actually moves somewhere else. */
+@keyframes vn-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.vn-backdrop-in {
+  animation: vn-backdrop-in 700ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-backdrop-in { animation: none; }
+}
+
+/* Choice bars land one after another rather than all at once — a beat of ceremony for a real
+   decision point. `--i` is the row index, set inline. */
+@keyframes vn-choice-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+.vn-choice-row {
+  animation: vn-choice-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
+@media (prefers-reduced-motion: reduce) {
+  .vn-choice-row { animation: none; }
+}
+
+/*
+  Menus over the VN scene. A panel built on the shared `Modal`/`ConfirmDialog`/`TuningPanel` shells
+  is app chrome — in the light theme, a white slab dropped on top of a night-time scene. Rather than
+  restyling a dozen panels one by one, this re-points the theme tokens *within the panel's own
+  subtree*, so every `bg-bg-elevated` / `text-text` / `border-border` inside it resolves to the same
+  glass material as the stage. Scoped, never global: the sidebar and everything outside the panel
+  keep the user's actual theme.
+*/
+.vn-chrome {
+  --c-bg: 26 24 22;
+  --c-bg-elevated: 40 37 35;
+  --c-bg-sunken: 33 31 29;
+  --c-border: 51 48 45;
+  --c-text: 237 233 227;
+  --c-text-muted: 168 162 158;
+  --c-msg-char: 40 37 35;
+  color: rgb(var(--c-text));
+  background-color: rgb(40 37 35 / 0.95) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgb(51 48 45) !important;
+  box-shadow: 0 20px 48px -16px rgb(0 0 0 / 0.8);
+}
+
+/* thin, theme-aware scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-border)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--c-border));
+  border-radius: 4px;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent !important;
+}
+*::-webkit-resizer {
+  background: transparent !important;
+  display: none !important;
+}
+
+.themed-shadow {
+  box-shadow: 0 1px 2px rgb(0 0 0 / calc(0.04 * var(--shadow-strength))),
+    0 4px 12px rgb(0 0 0 / calc(0.06 * var(--shadow-strength)));
+}
+
+/* Character/world portrait grid hover: a soft accent glow around the frame plus a contained,
+   gentle zoom on the art itself — cheap depth cue alongside the card's existing lift-on-hover,
+   short of real cursor-tracking parallax. Shared by CharacterList and WorldsView. */
+.portrait-frame {
+  position: relative;
+  overflow: hidden;
+  transition: box-shadow 200ms ease;
+}
+.group:hover .portrait-frame {
+  box-shadow: 0 0 0 2px rgb(var(--c-accent) / 0.45), 0 10px 28px -6px rgb(var(--c-accent) / 0.35);
+}
+.portrait-frame > img,
+.portrait-frame > div {
+  transition: transform 200ms ease;
+}
+.group:hover .portrait-frame > img,
+.group:hover .portrait-frame > div {
+  transform: scale(1.06);
+}
+@media (prefers-reduced-motion: reduce) {
+  .portrait-frame,
+  .portrait-frame > img,
+  .portrait-frame > div {
+    transition: none;
+  }
+  .group:hover .portrait-frame > img,
+  .group:hover .portrait-frame > div {
+    transform: none;
+  }
+}
+
+/* The manga-mood display face — deliberately scoped to character name-plates (VNStage,
+   MessageBubble sender name), not swept across editor/settings chrome, which stays plain Inter. */
+.font-display {
+  font-family: var(--font-display);
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+.prose-rp em {
+  color: rgb(var(--c-text-muted));
+  font-style: italic;
+}
+.prose-rp q,
+.prose-rp .rp-quote {
+  color: rgb(var(--c-text));
+  font-weight: 500;
+}
+.prose-rp p + p {
+  margin-top: 0.6em;
+}
+
+/* Manga-style sound-effect bursts — a standalone onomatopoeia clause ("BOOM", "knock knock")
+   the message parser tagged as `sfx`. A restrained typographic treatment (display face, heavier
+   weight, tracked-out caps feel) rather than the huge rotated lettering of a real comic panel,
+   which would wreck line layout in a chat bubble. */
+.rp-sfx {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-style: normal;
+  font-size: 1.12em;
+  letter-spacing: 0.06em;
+}
+.prose-rp .rp-sfx {
+  color: rgb(var(--c-accent));
+}
+
+/* VNStage's dialogue box sits on a background image with fixed white text, not the themed
+   surface `.prose-rp` assumes — same action/quote emphasis convention, its own contrast-safe colors. */
+.vn-dialogue em {
+  color: rgb(255 255 255 / 75%);
+  font-style: italic;
+}
+.vn-dialogue .rp-quote {
+  color: rgb(255 255 255 / 100%);
+  font-weight: 600;
+}
+
+/* A user-turn bubble (bubbles chat style, and VN's inline "last message" bubble) fills with the
+   saturated `--c-msg-user`/accent colour, not one of the neutral bg-elevated/bg-sunken surfaces
+   `.prose-rp em`/`.rp-quote`'s default colours (`--c-text-muted`, `--c-text`) were tuned against —
+   on an accent fill those read as low-contrast, barely-legible text (reported live: "I can barely
+   see what I wrote"). Both surfaces already set their base text to `--c-accent-text`, the colour
+   actually authored to contrast with that fill, so shade *that* instead of switching families. */
+.rp-bubble-user em,
+.vn-user-bubble em {
+  color: rgb(var(--c-accent-text) / 72%);
+  font-style: italic;
+}
+.rp-bubble-user .rp-quote,
+.vn-user-bubble .rp-quote {
+  color: rgb(var(--c-accent-text));
+  font-weight: 600;
+}
+/* In the cinematic VN dialogue box a burst gets more theatre: a glow and a quick pop-in as the
+   line streams. Chat mode deliberately stays static — it's a scroll-back log, not a scene. */
+.vn-dialogue .rp-sfx {
+  color: rgb(255 255 255);
+  display: inline-block;
+  text-shadow: 0 0 14px rgb(var(--c-romance) / 0.6), 0 1px 3px rgb(0 0 0 / 0.6);
+  animation: sfx-pop var(--motion-duration, 150ms) ease-out;
+}
+@keyframes sfx-pop {
+  from { transform: scale(0.7) rotate(-3deg); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+:root.reduced-motion .vn-dialogue .rp-sfx { animation: none; }
+@media (prefers-reduced-motion: reduce) {
+  .vn-dialogue .rp-sfx { animation: none; }
+}
+
+/* Speech-bubble tails — only in the `bubbles` chat style. A small triangle off the top of the
+   bubble, pointing toward its avatar and leaning gently up (as if the line came from the speaker),
+   filled to match the bubble. Each message is its own bubble here (no run-grouping), so every
+   bubble gets one. The protrusion (7px) sits comfortably inside the 12px avatar gap. */
+.rp-bubble {
+  position: relative;
+}
+.rp-bubble::before {
+  content: '';
+  position: absolute;
+  top: 6px;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 8px solid transparent;
+  /* `box-shadow` tracks the 0x0 border box, not the visible triangle — `drop-shadow` tracks the
+     pixels, so the tail carries the same soft edge as the bubble's `themed-shadow`. */
+  filter: drop-shadow(0 1px 1px rgb(0 0 0 / calc(0.05 * var(--shadow-strength))));
+}
+.rp-bubble-char::before {
+  left: -6px;
+  border-right: 7px solid rgb(var(--c-msg-char));
+}
+.rp-bubble-user::before {
+  right: -6px;
+  border-left: 7px solid rgb(var(--c-msg-user));
+}
