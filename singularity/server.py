@@ -1164,49 +1164,114 @@ async def api_tavern_start(request: Request = None):
         extra_paths.append(fnm_dir)
 
     if sys.platform == "win32":
-        for p in [r"C:\Program Files\nodejs", r"C:\Program Files (x86)\nodejs"]:
-            if os.path.isdir(p):
+        win_candidates = [
+            os.path.join(os.environ.get("ProgramFiles", r"C:\Program Files"), "nodejs"),
+            os.path.join(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"), "nodejs"),
+            os.path.join(os.environ.get("APPDATA", ""), "npm"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "node"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "nodejs"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), "Programs", "bun"),
+            os.path.join(os.environ.get("USERPROFILE", ""), ".bun", "bin"),
+            os.path.join(os.environ.get("USERPROFILE", ""), "scoop", "shims"),
+            os.environ.get("NVM_SYMLINK", ""),
+            os.environ.get("NVM_HOME", ""),
+            r"C:\ProgramData\chocolatey\bin",
+            r"C:\tools\node",
+        ]
+        for p in win_candidates:
+            if p and os.path.isdir(p) and p not in extra_paths:
                 extra_paths.append(p)
 
     if extra_paths:
         env["PATH"] = os.pathsep.join(extra_paths) + os.pathsep + env.get("PATH", "")
 
-    has_bun = shutil.which("bun", path=env.get("PATH")) is not None
-    has_npm = shutil.which("npm", path=env.get("PATH")) is not None
+    # Resolve exact runner path (supports bun.exe, npm.cmd, npm.exe)
+    runner = (
+        shutil.which("bun", path=env.get("PATH"))
+        or shutil.which("bun.exe", path=env.get("PATH"))
+        or shutil.which("npm", path=env.get("PATH"))
+        or shutil.which("npm.cmd", path=env.get("PATH"))
+        or shutil.which("npm.exe", path=env.get("PATH"))
+    )
 
-    if not has_bun and not has_npm:
+    if not runner and sys.platform == "win32":
+        for cand_dir in extra_paths:
+            for bin_name in ["bun.exe", "npm.cmd", "npm.exe"]:
+                target = os.path.join(cand_dir, bin_name)
+                if os.path.isfile(target):
+                    runner = target
+                    break
+            if runner:
+                break
+
+    if not runner:
         return {
             "status": "error",
             "error": "Node.js (v20+) or Bun is required to launch Tavern Studio. Please install from https://nodejs.org",
         }
 
+    # Windowless process flags for Windows
+    startupinfo = None
+    creationflags = 0
+    if sys.platform == "win32":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0  # SW_HIDE
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+
     # Auto-install dependencies if node_modules is missing (first-time setup)
     nm_path = os.path.join(tav_dir, "node_modules")
     if not os.path.isdir(nm_path):
-        install_cmd = ["bun", "install"] if has_bun else ["npm", "install"]
         try:
-            subprocess.run(
-                install_cmd,
-                cwd=tav_dir,
-                env=env,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=180,
-            )
+            if sys.platform == "win32":
+                subprocess.run(
+                    f'"{runner}" install',
+                    cwd=tav_dir,
+                    env=env,
+                    shell=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    startupinfo=startupinfo,
+                    creationflags=creationflags,
+                    timeout=180,
+                )
+            else:
+                subprocess.run(
+                    [runner, "install"],
+                    cwd=tav_dir,
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=180,
+                )
         except Exception:
             pass
 
     # Launch Tavern server natively in background
-    run_cmd = ["bun", "run", "dev"] if has_bun else ["npm", "run", "dev"]
     try:
-        subprocess.Popen(
-            run_cmd,
-            cwd=tav_dir,
-            env=env,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        if sys.platform == "win32":
+            cmd_str = f'"{runner}" run dev'
+            subprocess.Popen(
+                cmd_str,
+                cwd=tav_dir,
+                env=env,
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                startupinfo=startupinfo,
+                creationflags=creationflags,
+            )
+        else:
+            subprocess.Popen(
+                [runner, "run", "dev"],
+                cwd=tav_dir,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
     except Exception as e:
         return {"status": "error", "error": str(e)}
 
