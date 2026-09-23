@@ -1,116 +1,150 @@
 # <img src="singularity/static/logo.svg" width="36" height="36" alt="Singularity Logo" style="vertical-align: middle; margin-right: 8px;" /> Singularity
 
-> **One localhost endpoint. Six AI providers. 186+ models. Zero API keys needed.**
+> **One localhost endpoint. Eight AI providers. 216+ models. Zero API keys needed.**
 
-Singularity is a unified AI gateway that aggregates **ChatGPT, Claude, Gemini, Grok, Kimi, and GLM** into a single OpenAI-compatible API endpoint at `http://localhost:9000/v1`. Stack multiple accounts per provider, monitor live quotas, and control everything from a premium dark-mode dashboard.
+Singularity is a unified AI gateway and playground that aggregates **ChatGPT, Claude, Gemini, Grok, Kimi, GLM, DeepSeek, and Qwen** into a single OpenAI-compatible API endpoint at `http://localhost:9000/v1`. Stack multiple accounts per provider, monitor live quotas, test models in a Claude-inspired playground with interactive artifacts, and launch an integrated character visual-novel suite with **Tavern Studio**.
 
 ---
 
 ## 🌟 Key Highlights
 
-- **Universal `/v1` Endpoint** — Drop-in OpenAI-compatible API serving 186+ models from 6 providers through one URL
-- **Cookie Stacker** — Stack multiple free accounts per provider and rotate them automatically for higher throughput
-- **Live Quotas & Limits** — Real-time monitoring of remaining image gens, reasoning tokens, and message caps per provider
-- **Singularity-Access (ngrok)** — One-click tunnel to expose your local gateway to the internet for mobile & remote access
-- **Interactive Playground** — Test any model with live streaming directly in the dashboard
-- **Full Streaming & Vision** — SSE streaming, multimodal image input, tool calling, and image generation across all providers
-- **Dynamic Model Catalog** — Models auto-lock/unlock based on which accounts you've stacked
+- **Universal `/v1` Endpoint** — Drop-in OpenAI-compatible API serving 216+ models across 8 providers through one URL.
+- **🏰 Integrated Tavern Studio** — Bundled character roleplay, visual novel stage, and storytelling studio running on ports `5173`/`3001` alongside Singularity.
+- **🎨 Interactive Code Artifacts** — Real-time interactive previews for React components, HTML/CSS, SVGs, and formatted Markdown with version tracking.
+- **🍪 Cookie Stacker & Vault** — Stack multiple free accounts per provider with automatic round-robin rotation, session persistence, and token extraction guides.
+- **📊 Live Quotas & Limits** — Real-time tracking of remaining image gens, reasoning budgets, context limits, and hourly rate limits.
+- **🧠 Thinking / Reasoning Controls** — Inspect and set custom thinking budget caps per model with real-time thought-process disclosure.
+- **🎭 Persona System** — Switch between customized agent personas and custom instructions directly within the playground.
+- **🧪 Device Simulation Mode** — Test and develop against all 216 models locally without requiring live network sessions (`./singular simulate on`).
+- **🌐 Singularity-Access** — Remote and mobile access via ngrok or cloud tunnels with one click.
+- **✨ Sleek Glass UI** — Claude-inspired dark mode interface with official Anthropic typography, responsive sidebar, and floating glass dock.
 
 ---
 
-## 📱 Dashboard Preview
+## 📱 Dashboard & Features
 
 The Singularity dashboard runs at `http://localhost:9000` and provides:
 
-| Tab | What It Does |
+| View | What It Does |
 |---|---|
-| **Control Center** | Start/stop provider daemons, view fleet status, copy API endpoint |
-| **Limits & Quotas** | Live remaining queries, image gens, and reasoning budgets per provider |
-| **Available Models** | Browse all 186+ models with lock/unlock status and provider filters |
-| **Cookie Stacker** | Add accounts per provider with built-in token extraction guides |
-| **Playground** | Interactive chat with model selector, temperature control, and streaming |
-| **Singularity-Access** | ngrok tunnel for remote/mobile access with one click |
+| **Control Center** | Monitor provider fleet daemons, launch Tavern Studio, view gateway status, and copy API URLs |
+| **Limits & Quotas** | Inspect real-time queries, image generation credits, and reasoning budgets per provider |
+| **Available Models** | Browse all 216+ models with capability badges (Vision, CoT, Search, Web) and active lock/unlock status |
+| **Cookie Stacker** | Stack multiple credentials per provider with step-by-step token extraction guides |
+| **Playground** | Claude-style chat interface with streaming, thinking toggles, temperature control, and persona selector |
+| **Artifacts Workbench**| Multi-view interactive code previewer supporting React, HTML/JS, SVG, and Markdown |
+| **Tavern Studio** | Visual novel stage, reactive character portraits, lorebooks, and multi-character storytelling (`:5173`) |
+| **Singularity-Access** | One-click ngrok tunnel for mobile and remote access |
 
 ---
 
 ## ⚡ Quick Start
 
-### 🪟 Windows (1-Click or Command Line)
+### 🪟 Windows (1-Click or CLI)
 
-1. **Prerequisite:** Make sure [Python 3.10+](https://www.python.org/downloads/) is installed.
-   > ⚠️ **Important:** During Python setup, check the box: **"Add python.exe to PATH"**.
+1. **Prerequisite:** Ensure [Python 3.10+](https://www.python.org/downloads/) and [Node.js 18+](https://nodejs.org/) are installed.
+   > ⚠️ **Important:** During Python setup, ensure **"Add python.exe to PATH"** is checked.
 
 2. **Download & Run:**
-   - **Option A (Zip Download):**
-     1. Click **`< > Code`** ➔ **[Download ZIP](https://github.com/InsomniacZero/Singularity/archive/refs/heads/main.zip)**.
-     2. Extract the ZIP file.
-     3. Double-click **`start.bat`**. (It auto-creates the virtualenv, installs required packages, and launches the gateway!).
-   - **Option B (Git):**
+   - **Option A (Git):**
      ```cmd
      git clone https://github.com/InsomniacZero/Singularity.git
      cd Singularity
      start.bat
      ```
+   - **Option B (Zip):**
+     Download and extract the ZIP, then double-click **`start.bat`**.
 
-3. **Windows CLI:**
-   From Command Prompt or PowerShell, you can also pass CLI arguments to `start.bat`:
+3. **What happens on boot:**
+   - Auto-creates Python virtualenv and installs backend dependencies.
+   - Automatically spins up **Singularity Gateway** on `http://localhost:9000`.
+   - Automatically spins up **Tavern Studio** on `http://localhost:5173` (backend `:3001`).
+
+4. **Windows CLI:**
+   You can run all Singularity commands directly with `start.bat`:
    ```cmd
-   start.bat status      :: Inspect accounts and fleet status
-   start.bat limits      :: Live quotas for ChatGPT, Kimi, Grok, etc.
-   start.bat accounts    :: List stacked accounts in SQLite vault
-   start.bat chat "Hi"   :: Quick test inference
+   start.bat status               :: Inspect fleet health and account count
+   start.bat limits               :: Live quotas for ChatGPT, Claude, Grok, etc.
+   start.bat accounts             :: List stacked accounts in SQLite vault
+   start.bat chat "Hello world"   :: Quick terminal streaming chat test
+   start.bat simulate on          :: Enable offline simulation mode
    ```
-
-The dashboard opens at **`http://localhost:9000`** and the API is live at **`http://localhost:9000/v1`**.
 
 ---
 
 ### 🐧 Linux / macOS
 
 ```bash
-# Clone the repo
+# 1. Clone the repository
 git clone https://github.com/InsomniacZero/Singularity.git
 cd Singularity
 
-# Launch gateway (auto-detects python and dependencies)
+# 2. Launch (boots Singularity :9000 + Tavern Studio :5173)
 ./start.sh
 ```
 
-> **Tip:** To launch anytime using the `singular` command, add the alias:
+> **Tip:** You can also run CLI commands or chat using `./start.sh` or the built-in symlink `./singular`:
 > ```bash
-> echo "alias singular='$(pwd)/start.sh'" >> ~/.bashrc && source ~/.bashrc
+> ./singular status
+> ./singular limits
+> ./singular chat "Explain quantum computing" -m gpt-5-6-mini
 > ```
-
-The dashboard opens at **`http://localhost:9000`** and the API is live at **`http://localhost:9000/v1`**.
 
 ---
 
 ### 📱 Android (Termux)
 
-Open **[Termux](https://f-droid.org/en/packages/com.termux/)** and paste this one-liner:
+Open **[Termux](https://f-droid.org/en/packages/com.termux/)** and run:
 
 ```bash
-rm -rf Singularity && pkg update -y && pkg install -y python git && pip install --break-system-packages starlette uvicorn httpx && git clone https://github.com/InsomniacZero/Singularity.git && cd Singularity && chmod +x start.sh && ln -sf $(pwd)/start.sh $PREFIX/bin/singular && ./start.sh
+pkg update -y && pkg install -y python git nodejs-lts && git clone https://github.com/InsomniacZero/Singularity.git && cd Singularity && chmod +x start.sh && ./start.sh
 ```
 
-* **Next time:** Simply type **`singular`** from anywhere in Termux to launch!
-* **To update:** `cd ~/Singularity && git pull && singular`
-* **Access from phone browser:** Open `http://localhost:9000`
-* **Access from PC on same Wi-Fi:** Use `http://<PHONE_IP>:9000/v1` (check `ifconfig` in Termux).
+- **Next time:** Type **`singular`** from anywhere in Termux to launch.
+- **Access locally:** Open `http://localhost:9000` in your mobile browser.
+- **Access over local Wi-Fi:** Open `http://<PHONE_IP>:9000` from your PC or tablet.
 
 ---
 
-### 🔄 Updating
+## 🎯 Provider Fleet (8 Providers / 216+ Models)
 
-To pull the latest updates and start Singularity:
+Singularity manages 8 native reverse-proxy worker engines:
 
-```bash
-cd ~/Singularity && git pull && singular
-```
+| Provider | Port | Models | Flagship Models & Capabilities |
+|---|---|---|---|
+| **ChatGPT** | 8000 | 20 | GPT-5.6-Mini/Sol/Terra, GPT-6-Astra, GPT-Image-2.5, Multimodal Vision |
+| **Claude** | 8080 | 20 | Claude 3.7 Sonnet (Thinking), Claude 4 Opus/Sonnet, Claude Fable |
+| **Gemini** | 8084 | 21 | Gemini 3.8 Flash, 3.1 Pro, Imagen 3, Nano Banana vision models |
+| **Grok** | 8087 | 8 | Grok 3, Grok 3 Mini, Grok Imagine, Real-time X search |
+| **Kimi** | 8086 | 31 | Kimi K3 Flagship, K3 Thinking/Search, K2.8 (200k context) |
+| **GLM** | 8085 | 86 | GLM 5.3, GLM 5.3 Thinking/Search, CogView 4, GLM-5 Turbo |
+| **DeepSeek** | 8088 | 12 | DeepSeek V3, R1 Reasoner, DeepSeek V4, V4-Pro, V4.1-Flash |
+| **Qwen** | 8089 | 18 | Qwen 2.5 (72B), Qwen Max, Qwen Plus, Qwen Coder (128k context) |
 
 ---
 
-## 🔌 How to Connect
+## 🏰 Tavern Studio Integration
+
+Singularity bundles **Tavern Studio**, an immersive visual novel storytelling and character chat client:
+- **Zero Config:** Automatically launches alongside Singularity on `http://localhost:5173`.
+- **Direct Pipeline:** Connects out-of-the-box to `http://localhost:9000/v1` with all 216 models ready to generate text and expressions.
+- **Features:** Reactive 2D portraits, dynamic background stages, audio/BGM channels, world lorebooks, day planners, and Singularity image generation.
+- **Fast Access:** Launch Tavern with one click from the dashboard sidebar or the floating Glass Dock.
+
+---
+
+## 🎨 Interactive Artifacts Sandbox
+
+When testing models in the Playground, Singularity automatically detects and isolates executable code blocks into live interactive artifacts:
+- **React Apps:** Render live JSX/React components directly in the browser via Babel & React 18.
+- **HTML / CSS / JS:** Live interactive websites, games, and web apps with instant hot reloading.
+- **Vector Graphics:** Render and inspect raw SVG diagrams and vector illustrations.
+- **Version History:** Track iterations and switch back and forth between generated artifact versions.
+- **Exporting:** One-click code copying or raw artifact file downloads.
+
+---
+
+## 🔌 Connecting Clients
 
 Once running, point any OpenAI-compatible client to:
 
@@ -119,15 +153,15 @@ Once running, point any OpenAI-compatible client to:
 | **Base URL** | `http://localhost:9000/v1` |
 | **API Key** | `sk-singularity-local` (or any string) |
 
-### SillyTavern
+### SillyTavern / Third-Party Frontends
 - **API Type:** Chat Completion (OpenAI)
 - **Server URL:** `http://localhost:9000/v1/chat/completions`
 - **API Key:** `sk-singularity-local`
 
-### Cursor / VS Code / Continue / Cline
+### Cursor / VS Code / Cline / Continue
 - **Provider:** OpenAI Compatible
 - **Base URL:** `http://localhost:9000/v1`
-- **Model:** Pick any from the catalog (e.g. `gpt-5-6-mini`, `claude-3-7-sonnet`, `gemini-3.8-flash`)
+- **Model:** Any model from the catalog (e.g. `claude-3-7-sonnet`, `deepseek-v4`, `gpt-5-6-mini`, `gemini-3.8-flash`)
 
 ### Python SDK
 ```python
@@ -139,10 +173,11 @@ client = OpenAI(
 )
 
 response = client.chat.completions.create(
-    model="gpt-5-6-mini",
-    messages=[{"role": "user", "content": "Hello from Singularity!"}],
+    model="claude-3-7-sonnet",
+    messages=[{"role": "user", "content": "Explain quantum teleportation."}],
     stream=True
 )
+
 for chunk in response:
     if chunk.choices[0].delta.content:
         print(chunk.choices[0].delta.content, end="", flush=True)
@@ -154,98 +189,92 @@ curl http://localhost:9000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-singularity-local" \
   -d '{
-    "model": "gemini-3.8-flash",
-    "messages": [{"role": "user", "content": "What is Singularity?"}],
+    "model": "deepseek-v4",
+    "messages": [{"role": "user", "content": "Hello Singularity!"}],
     "stream": true
   }'
 ```
 
 ---
 
-## 🎯 Provider Fleet
+## 🛠️ CLI Cheatsheet (`./singular` / `start.bat`)
 
-Singularity orchestrates six provider backends:
+Singularity features a unified CLI engine accessible via `./singular` (Linux/macOS) or `start.bat` (Windows):
 
-| Provider | Port | Models | Highlights |
-|---|---|---|---|
-| **ChatGPT** | 8000 | 20 | GPT-5.6-Mini/Sol/Terra, GPT-6-Astra, GPT-Image-2.5 |
-| **Claude** | 8080 | 20 | Claude 3.7 Sonnet, Claude 4 Opus/Sonnet, Claude Fable |
-| **Gemini** | 8084 | 21 | Gemini 3.8 Flash, 3.1 Pro, Nano Banana image models |
-| **Grok** | 8087 | 8 | Grok 3, Grok 3 Mini, Grok Imagine |
-| **Kimi** | 8086 | 31 | Kimi K3 Flagship, K3 Thinking/Search, K2.8 (200k context) |
-| **GLM** | 8085 | 86 | GLM 5.3, GLM 5.3 Thinking/Search, CogView 4, GLM-5 Turbo |
+```bash
+# 1. Fleet & System Status
+./singular status                    # Live status of all 8 providers & stacked accounts
+./singular status --json             # Compact JSON output for scripts
 
----
+# 2. Live Limits & Quotas Across All Providers
+./singular limits                    # Real-time limits (ChatGPT, Claude, Gemini, Grok, Kimi, GLM, etc.)
 
-## 🍪 Cookie Stacker
+# 3. Account Vault Management (SQLite)
+./singular accounts                  # List all stacked accounts across providers
+./singular accounts chatgpt          # Filter accounts by provider
+./singular import <path_or_json>     # Import credentials dump into SQLite vault
+./singular export [backup.json]      # Export portable credential vault to JSON
 
-The **Cookie Stacker** tab lets you add multiple free accounts per provider to increase throughput and avoid rate limits. Each provider has a built-in guide showing exactly how to extract your session tokens:
+# 4. Device Simulation Mode (Portable / Offline Testing)
+./singular simulate on               # Test all 216 models locally without upstream network
+./singular simulate off              # Reconnect to live backend sessions
+./singular simulate status           # Inspect simulation status
 
-- **ChatGPT** → `chatgpt.com/api/auth/session` (use separate Chrome profiles)
-- **Claude** → Session key from `claude.ai` cookies
-- **Grok** → `x.com` auth cookies
-- **Kimi** → `kimi.com` refresh token
-- **Gemini** → Google `__Secure-1PSID` cookie
-- **GLM** → No credentials needed (free tier)
-
-> ⚠️ Always use **separate Chrome profiles** per account. Never log out of accounts you're using for stacking.
-
----
-
-## 🌐 Singularity-Access (Remote / Mobile)
-
-The **Singularity-Access** tab lets you expose your local server to the internet via ngrok:
-
-1. Click **Start ngrok Tunnel**
-2. Get a public URL like `https://your-subdomain.ngrok-free.dev`
-3. Use this URL on your phone, tablet, or any remote device
-4. SillyTavern mobile → paste the public URL + `/v1/chat/completions`
-
-> Requires [ngrok](https://ngrok.com/) installed. Free tier works out of the box.
+# 5. Fast Model Inference & Testing
+./singular chat "Hello" -m claude-3-7-sonnet          # Quick terminal streaming completion
+./singular chat "Write code" -m deepseek-v4           # Test DeepSeek
+./singular chat "Hello" --simulate                    # Force simulated completion
+```
 
 ---
 
-## 📁 Project Structure
+## 📁 Repository Structure
 
 ```
 Singularity/
-├── singularity/
-│   ├── server.py          # FastAPI gateway (port 9000)
-│   ├── providers.py       # Provider engine, model catalog, cookie management
-│   ├── tunnel.py          # ngrok tunnel manager
-│   └── static/
-│       ├── index.html     # Dashboard UI
-│       ├── app.js         # Frontend logic
-│       ├── style.css      # Styles
-│       ├── tokens.css     # Design tokens
-│       ├── logo.svg       # Singularity logo
-│       └── icons/         # Provider SVG icons
-├── requirements.txt
-├── .gitignore
-└── README.md
+├── singularity/                         # Core Python package & UI
+│   ├── engines/                         # Provider Web2API engines
+│   │   ├── chatgpt.py                   # ChatGPT Sentinel PoW & reverse proxy
+│   │   ├── claude.py                    # Claude session & stream driver
+│   │   ├── deepseek.py                  # DeepSeek native solver & driver
+│   │   ├── gemini.py                    # Gemini SNlM0e & Google session driver
+│   │   ├── glm.py                       # Zhipu GLM guest & session driver
+│   │   ├── grok.py                      # Grok xAI websocket & REST driver
+│   │   ├── kimi.py                      # Kimi Moonshot driver
+│   │   ├── qwen.py                      # Qwen Alibaba Cloud driver
+│   │   └── __init__.py
+│   ├── static/                          # Control Center Web UI
+│   │   ├── index.html                   # Dashboard & Playground HTML
+│   │   ├── style.css                    # Sleek Claude-style design system
+│   │   ├── app.js                       # Frontend logic & WebSocket streaming
+│   │   ├── glass-dock.css / .js         # Floating Glass Dock navigation
+│   │   ├── fonts/                       # Official Anthropic Sans & Serif typography
+│   │   ├── icons/                       # Provider & UI SVGs
+│   │   └── vendor/                      # Offline Prism & React compilers
+│   ├── artifacts.py                     # Artifact sandbox & preview runner
+│   ├── personas.py                      # Persona system & system prompts
+│   ├── cli.py                           # Singularity unified CLI engine
+│   ├── db.py                            # SQLite credential vault
+│   ├── providers.py                     # Model catalog & live limit aggregators
+│   ├── server.py                        # FastAPI / ASGI Universal Gateway
+│   ├── tunnel.py                        # Cloudflare / ngrok tunnel engine
+│   └── worker.py                        # Provider daemon supervisor
+│
+├── TAVERN/                              # Integrated Tavern Studio
+│   ├── src/                             # React / Vite visual novel frontend
+│   ├── server/                          # Fast SQLite character & world backend
+│   └── package.json
+│
+├── start.sh                             # Linux / macOS / Termux unified launcher
+├── start.bat                            # Windows native batch launcher
+├── singular -> start.sh                 # Linux / Termux CLI symlink
+├── requirements.txt                     # Python dependencies
+├── logo.svg                             # Singularity branding
+└── README.md                            # Documentation
 ```
-
----
-
-## ⚙️ API Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/v1/models` | List all available models (OpenAI format) |
-| `POST` | `/v1/chat/completions` | Chat completion (streaming & non-streaming) |
-| `GET` | `/api/services` | Provider fleet status |
-| `POST` | `/api/services/{id}/start` | Start a specific provider |
-| `POST` | `/api/services/{id}/stop` | Stop a specific provider |
-| `GET` | `/api/limits` | Live quota data for all providers |
-| `GET` | `/api/models` | Full model catalog with lock/unlock status |
-| `GET` | `/api/cookies` | View stacked accounts per provider |
-| `POST` | `/api/cookies` | Add/stack new account credentials |
-| `GET` | `/api/tunnel/status` | ngrok tunnel status |
-| `POST` | `/api/tunnel/start` | Start ngrok tunnel |
-| `POST` | `/api/tunnel/stop` | Stop ngrok tunnel |
 
 ---
 
 ## 📄 License
 
-MIT License. Built by **InsomniacZero**.
+MIT License. Built by **[InsomniacZero](https://github.com/InsomniacZero)**.
