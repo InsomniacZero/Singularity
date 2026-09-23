@@ -86,8 +86,12 @@ case "$1" in
                 echo "  [🏰] Starting Tavern Studio alongside Singularity (ports 5173 / 3001)..."
                 (
                     cd "$TAVERN_DIR"
+                    export PATH="$HOME/.bun/bin:$PATH"
                     export NVM_DIR="$HOME/.nvm"
                     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && nvm use 24 >/dev/null 2>&1 || true
+                    for nvm_node in "$HOME/.nvm/versions/node"/v2[0-9]*/bin; do
+                        [ -d "$nvm_node" ] && export PATH="$nvm_node:$PATH"
+                    done
                     export API_HOST="0.0.0.0"
                     export RP_ALLOWED_ORIGINS="*"
                     if [ ! -d "node_modules" ]; then

@@ -1063,6 +1063,58 @@ async def api_tavern_status(request: Request):
     return {"running": False, "client_url": f"{scheme}://{req_host}:5173", "api_url": f"{scheme}://{req_host}:3001"}
 
 
+@app.post("/api/tavern/start")
+async def api_tavern_start():
+    """Start Tavern Studio in background if not already running."""
+    import socket, subprocess, os
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(0.2)
+            if s.connect_ex(("127.0.0.1", 5173)) == 0:
+                return {"status": "already_running"}
+    except Exception:
+        pass
+
+    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    tav_dir = None
+    for candidate in ["TAV-TEST", "TAVERN"]:
+        d = os.path.join(root_dir, candidate)
+        if os.path.isdir(d) and os.path.isfile(os.path.join(d, "package.json")):
+            tav_dir = d
+            break
+
+    if not tav_dir:
+        return {"status": "not_found", "error": "Tavern directory not found"}
+
+    env = dict(os.environ)
+    env["API_HOST"] = "0.0.0.0"
+    env["RP_ALLOWED_ORIGINS"] = "*"
+
+    # Prepend modern Node from nvm if available
+    nvm_dir = os.path.expanduser("~/.nvm/versions/node")
+    if os.path.isdir(nvm_dir):
+        versions = sorted(os.listdir(nvm_dir), reverse=True)
+        for v in versions:
+            bin_path = os.path.join(nvm_dir, v, "bin")
+            if os.path.isdir(bin_path):
+                env["PATH"] = f"{bin_path}:{env.get('PATH', '')}"
+                break
+    bun_bin = os.path.expanduser("~/.bun/bin")
+    if os.path.isdir(bun_bin):
+        env["PATH"] = f"{bun_bin}:{env.get('PATH', '')}"
+
+    subprocess.Popen(
+        ["npm", "run", "dev"],
+        cwd=tav_dir,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    return {"status": "started", "directory": os.path.basename(tav_dir)}
+
+
 @app.post("/api/services/start_all")
 async def api_start_all():
     return start_all_services()
@@ -1351,6 +1403,10 @@ async def on_startup():
                 start_provider(p)
             except Exception:
                 pass
+    except Exception:
+        pass
+    try:
+        await api_tavern_start()
     except Exception:
         pass
 

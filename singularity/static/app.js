@@ -5615,18 +5615,38 @@ async function openTavernStudio() {
   const currentHost = window.location.hostname || 'localhost';
   let targetUrl = `${window.location.protocol}//${currentHost}:5173`;
   try {
-    const res = await fetch('/api/tavern/status');
-    if (res.ok) {
-      const data = await res.json();
-      if (data.client_url) {
+    let res = await fetch('/api/tavern/status');
+    let data = res.ok ? await res.json() : null;
+
+    if (!data || !data.running) {
+      if (typeof showToast === 'function') {
+        showToast('Starting Tavern Studio in background...', 'info');
+      }
+      try {
+        await fetch('/api/tavern/start', { method: 'POST' });
+      } catch (err) {}
+
+      // Poll up to 10 seconds for server to report ready
+      for (let i = 0; i < 15; i++) {
+        await new Promise(r => setTimeout(r, 600));
         try {
-          const u = new URL(data.client_url);
-          u.hostname = currentHost;
-          u.protocol = window.location.protocol;
-          targetUrl = u.toString();
-        } catch {
-          targetUrl = data.client_url;
-        }
+          res = await fetch('/api/tavern/status');
+          if (res.ok) {
+            data = await res.json();
+            if (data && data.running) break;
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (data && data.client_url) {
+      try {
+        const u = new URL(data.client_url);
+        u.hostname = currentHost;
+        u.protocol = window.location.protocol;
+        targetUrl = u.toString();
+      } catch {
+        targetUrl = data.client_url;
       }
     }
   } catch (e) {
