@@ -1,0 +1,624 @@
+import { describe, expect, it } from 'vitest'
+import type { IntimacyScene } from './intimacyScene'
+import {
+  applyBreakupScar,
+  canActuallyAskForCommitment,
+  canAskForCommitment,
+  canInitiateFirstTime,
+  combinedSceneFlags,
+  commitmentLockReason,
+  commitmentTierThreshold,
+  crossedMilestone,
+  evaluateRelationshipRisk,
+  findActiveIntimacyScene,
+  formatCommitmentStatus,
+  getRelationshipTrack,
+  isLiveScene,
+  lowestWarmthDimension,
+  nextCommitmentTier,
+  patchRelationshipTrack,
+  relationshipAtRisk,
+  unlockedEndingIds,
+  warningExpired,
+} from '@/lib/dating/stage'
+import type { GalleryEntry } from '@/lib/characters/cardSpec'
+import type { Chat, RelationshipDimension, RelationshipTrack } from '@/lib/types'
+
+const zeroStats = (overrides: Partial<Record<RelationshipDimension, number>> = {}): Record<RelationshipDimension, number> => ({
+  trust: 50,
+  chemistry: 50,
+  comfort: 50,
+  respect: 50,
+  curiosity: 50,
+  tension: 0,
+  ...overrides,
+})
+
+describe('isLiveScene', () => {
+  it('is true for a started date', () => {
+    expect(isLiveScene({ kind: 'date', startedAt: Date.now() })).toBe(true)
+  })
+
+  it('is true for a started hangout', () => {
+    expect(isLiveScene({ kind: 'hangout', startedAt: Date.now() })).toBe(true)
+  })
+
+  it('is false for a date that has not been started yet', () => {
+    expect(isLiveScene({ kind: 'date' })).toBe(false)
+  })
+
+  it('is false for a started gift or milestone card — those never go live', () => {
+    expect(isLiveScene({ kind: 'gift', startedAt: Date.now() })).toBe(false)
+    expect(isLiveScene({ kind: 'milestone', startedAt: Date.now() })).toBe(false)
+  })
+
+  it('is false with no event at all', () => {
+    expect(isLiveScene(undefined)).toBe(false)
+  })
+})
+
+describe('combinedSceneFlags', () => {
+  it('returns just the 5 built-in defaults when no custom flags are given', () => {
+    const result = combinedSceneFlags()
+    expect(result.map((f) => f.id)).toEqual(['first_date', 'confession', 'jealousy', 'promise', 'first_kiss'])
+    expect(result.find((f) => f.id === 'first_date')?.label).toBe('first date')
+    expect(result.find((f) => f.id === 'first_kiss')?.label).toBe('first kiss')
+  })
+
+  it('appends a world\'s custom flags after the built-in defaults, using their own label', () => {
+    const result = combinedSceneFlags([{ id: 'moved-in', label: 'Moved in together', description: 'they now share a home' }])
+    expect(result.map((f) => f.id)).toEqual(['first_date', 'confession', 'jealousy', 'promise', 'first_kiss', 'moved-in'])
+    expect(result.find((f) => f.id === 'moved-in')?.label).toBe('Moved in together')
+  })
+
+  it('does not mutate the built-in default label formatting for custom flags (no underscore-to-space transform applied)', () => {
+    const result = combinedSceneFlags([{ id: 'has_underscore', label: 'has_underscore', description: '' }])
+    expect(result.find((f) => f.id === 'has_underscore')?.label).toBe('has_underscore')
+  })
+})
+
+describe('crossedMilestone', () => {
+  it('is true when moving to a higher stage', () => {
+    expect(crossedMilestone('near_strangers', 'acquaintances')).toBe(true)
+  })
+
+  it('is true when jumping multiple stages at once', () => {
+    expect(crossedMilestone('near_strangers', 'sweethearts')).toBe(true)
+  })
+
+  it('is false when staying at the same stage', () => {
+    expect(crossedMilestone('warming_up', 'warming_up')).toBe(false)
+  })
+
+  it('is false when moving to a lower stage', () => {
+    expect(crossedMilestone('close', 'getting_close')).toBe(false)
+  })
+
+  it('is false dropping all the way back to near_strangers', () => {
+    expect(crossedMilestone('sweethearts', 'near_strangers')).toBe(false)
+  })
+})
+
+const entry = (overrides: Partial<GalleryEntry>): GalleryEntry => ({
+  id: 'g1',
+  title: 'CG',
+  imageUrl: '',
+  unlockAffection: 0,
+  ...overrides,
+})
+
+describe('unlockedEndingIds', () => {
+  it('returns nothing below the top stage', () => {
+    const gallery = [entry({ id: 'ending1', isEnding: true })]
+    expect(unlockedEndingIds(gallery, 'close', new Set())).toEqual([])
+  })
+
+  it('returns isEnding entries not already unlocked once at sweethearts', () => {
+    const gallery = [
+      entry({ id: 'ending1', isEnding: true }),
+      entry({ id: 'ending2', isEnding: true }),
+      entry({ id: 'cg1' }),
+    ]
+    expect(unlockedEndingIds(gallery, 'sweethearts', new Set())).toEqual(['ending1', 'ending2'])
+  })
+
+  it('skips ids already in the unlocked set', () => {
+    const gallery = [entry({ id: 'ending1', isEnding: true }), entry({ id: 'ending2', isEnding: true })]
+    expect(unlockedEndingIds(gallery, 'sweethearts', new Set(['ending1']))).toEqual(['ending2'])
+  })
+
+  it('ignores non-ending entries entirely', () => {
+    const gallery = [entry({ id: 'cg1' }), entry({ id: 'cg2' })]
+    expect(unlockedEndingIds(gallery, 'sweethearts', new Set())).toEqual([])
+  })
+
+  it('handles an undefined gallery', () => {
+    expect(unlockedEndingIds(undefined, 'sweethearts', new Set())).toEqual([])
+  })
+})
+
+describe('nextCommitmentTier', () => {
+  it('steps through the ladder in order', () => {
+    expect(nextCommitmentTier('none')).toBe('dating')
+    expect(nextCommitmentTier('dating')).toBe('exclusive')
+    expect(nextCommitmentTier('exclusive')).toBe('living_together')
+    expect(nextCommitmentTier('living_together')).toBe('married')
+  })
+
+  it('is undefined at the top of the ladder', () => {
+    expect(nextCommitmentTier('married')).toBeUndefined()
+  })
+})
+
+describe('commitmentTierThreshold', () => {
+  it('matches the corresponding RelationshipStage warmth threshold', () => {
+    expect(commitmentTierThreshold('dating')).toBe(55) // getting_close
+    expect(commitmentTierThreshold('exclusive')).toBe(75) // close
+    expect(commitmentTierThreshold('living_together')).toBe(90) // sweethearts
+    expect(commitmentTierThreshold('married')).toBe(90) // sweethearts — same as living_together; ladder order is the real gate, see COMMITMENT_TIER_STAGE's doc comment
+  })
+
+  it('honors custom milestone overrides', () => {
+    const custom = [
+      { stage: 'near_strangers' as const, at: 0 },
+      { stage: 'getting_close' as const, at: 40 },
+    ]
+    expect(commitmentTierThreshold('dating', custom)).toBe(40)
+  })
+})
+
+describe('canAskForCommitment', () => {
+  it('is false below the threshold and true at/above it', () => {
+    expect(canAskForCommitment('dating', 54)).toBe(false)
+    expect(canAskForCommitment('dating', 55)).toBe(true)
+    expect(canAskForCommitment('dating', 100)).toBe(true)
+  })
+})
+
+// Gap the user's own playthrough surfaced: warmth alone let a couple reach "married" without ever
+// having kissed. `commitmentLockReason`/`canActuallyAskForCommitment` compose the existing warmth
+// gate with two physical-reality checks — these tests cover both directions the task called out:
+// warmth met but not the physical gate (still locked), the physical gate met but not warmth (still
+// locked), and both met together (unlocked).
+describe('commitmentLockReason', () => {
+  const kissed = { hasKissed: true, firstIntimateSceneAt: undefined }
+  const notKissed = { hasKissed: false, firstIntimateSceneAt: undefined }
+  const firstTimeHappened = { hasKissed: true, firstIntimateSceneAt: 12345 }
+  const firstTimeNotYet = { hasKissed: true, firstIntimateSceneAt: undefined }
+
+  it('is "warmth" below the threshold regardless of the physical state', () => {
+    expect(commitmentLockReason('dating', 54, kissed)).toBe('warmth')
+    expect(commitmentLockReason('dating', 54, notKissed)).toBe('warmth')
+  })
+
+  it('is "kiss" for dating once warmth is met but they have not kissed', () => {
+    expect(commitmentLockReason('dating', 55, notKissed)).toBe('kiss')
+    expect(commitmentLockReason('dating', 100, notKissed)).toBe('kiss')
+  })
+
+  it('is undefined for dating once warmth is met and they have kissed', () => {
+    expect(commitmentLockReason('dating', 55, kissed)).toBeUndefined()
+  })
+
+  it('does not add its own physical check for exclusive — warmth alone is enough', () => {
+    expect(commitmentLockReason('exclusive', 75, notKissed)).toBeUndefined()
+  })
+
+  it('is "first_time" for living_together and married once warmth is met but no first time together yet', () => {
+    expect(commitmentLockReason('living_together', 90, firstTimeNotYet)).toBe('first_time')
+    expect(commitmentLockReason('married', 90, firstTimeNotYet)).toBe('first_time')
+  })
+
+  it('is undefined for living_together and married once warmth and first time together are both met', () => {
+    expect(commitmentLockReason('living_together', 90, firstTimeHappened)).toBeUndefined()
+    expect(commitmentLockReason('married', 90, firstTimeHappened)).toBeUndefined()
+  })
+
+  it('is "warmth" for living_together even with first time together already set, if warmth is not met', () => {
+    expect(commitmentLockReason('living_together', 89, firstTimeHappened)).toBe('warmth')
+  })
+
+  it('honors custom milestone overrides for the warmth half of the check', () => {
+    const custom = [
+      { stage: 'near_strangers' as const, at: 0 },
+      { stage: 'getting_close' as const, at: 40 },
+    ]
+    expect(commitmentLockReason('dating', 39, notKissed, custom)).toBe('warmth')
+    expect(commitmentLockReason('dating', 40, notKissed, custom)).toBe('kiss')
+    expect(commitmentLockReason('dating', 40, kissed, custom)).toBeUndefined()
+  })
+})
+
+describe('lowestWarmthDimension', () => {
+  const stats = (over: Partial<Record<RelationshipDimension, number>>): Record<RelationshipDimension, number> => ({
+    trust: 80,
+    chemistry: 80,
+    comfort: 80,
+    respect: 80,
+    curiosity: 80,
+    tension: 80,
+    ...over,
+  })
+
+  it('picks whichever of the four warmth dimensions is actually lowest', () => {
+    expect(lowestWarmthDimension(stats({ comfort: 40 }))).toBe('comfort')
+    expect(lowestWarmthDimension(stats({ trust: 10 }))).toBe('trust')
+  })
+
+  it('ignores curiosity/tension entirely, even when they are the lowest of all six', () => {
+    expect(lowestWarmthDimension(stats({ curiosity: 0, tension: 0, comfort: 60 }))).toBe('comfort')
+  })
+
+  it('breaks a tie deterministically (first in WARMTH_DIMENSIONS order), not arbitrarily', () => {
+    expect(lowestWarmthDimension(stats({ trust: 40, comfort: 40 }))).toBe('trust')
+  })
+
+  it('handles every dimension at 100 (nothing actually lagging) without throwing', () => {
+    expect(lowestWarmthDimension(stats({}))).toBe('trust')
+  })
+})
+
+describe('canActuallyAskForCommitment', () => {
+  it('is false when warmth is met but they have not kissed (dating)', () => {
+    expect(canActuallyAskForCommitment('dating', 55, { hasKissed: false })).toBe(false)
+  })
+
+  it('is false when they have kissed but warmth is not met (dating)', () => {
+    expect(canActuallyAskForCommitment('dating', 54, { hasKissed: true })).toBe(false)
+  })
+
+  it('is true once both warmth and the kiss are met (dating)', () => {
+    expect(canActuallyAskForCommitment('dating', 55, { hasKissed: true })).toBe(true)
+  })
+
+  it('is false when warmth is met but there was no first time together (married)', () => {
+    expect(canActuallyAskForCommitment('married', 90, { hasKissed: true, firstIntimateSceneAt: undefined })).toBe(false)
+  })
+
+  it('is false when there was a first time together but warmth is not met (married)', () => {
+    expect(canActuallyAskForCommitment('married', 89, { hasKissed: true, firstIntimateSceneAt: 999 })).toBe(false)
+  })
+
+  it('is true once both warmth and a first time together are met (married)', () => {
+    expect(canActuallyAskForCommitment('married', 90, { hasKissed: true, firstIntimateSceneAt: 999 })).toBe(true)
+  })
+})
+
+describe('canInitiateFirstTime', () => {
+  it('is false below 75 warmth even with real commitment', () => {
+    expect(canInitiateFirstTime(74, 'dating')).toBe(false)
+  })
+
+  it('is false at high warmth with no commitment at all', () => {
+    expect(canInitiateFirstTime(100, 'none')).toBe(false)
+  })
+
+  it('is true once both warmth and any real commitment are met', () => {
+    expect(canInitiateFirstTime(75, 'dating')).toBe(true)
+    expect(canInitiateFirstTime(100, 'married')).toBe(true)
+  })
+})
+
+describe('formatCommitmentStatus', () => {
+  it('formats every status as readable lowercase text', () => {
+    expect(formatCommitmentStatus('none')).toBe('not official')
+    expect(formatCommitmentStatus('dating')).toBe('dating')
+    expect(formatCommitmentStatus('exclusive')).toBe('exclusive')
+    expect(formatCommitmentStatus('living_together')).toBe('living together')
+    expect(formatCommitmentStatus('married')).toBe('married')
+  })
+})
+
+describe('relationshipAtRisk', () => {
+  it('is never at risk when not committed, however bad the stats', () => {
+    expect(relationshipAtRisk('none', zeroStats({ tension: 100, comfort: 0 }))).toBe(false)
+  })
+
+  it('is at risk once tension is high enough while committed', () => {
+    expect(relationshipAtRisk('dating', zeroStats({ tension: 80 }))).toBe(true)
+    expect(relationshipAtRisk('dating', zeroStats({ tension: 79 }))).toBe(false)
+  })
+
+  it('is at risk once comfort is low enough while committed', () => {
+    expect(relationshipAtRisk('exclusive', zeroStats({ comfort: 15 }))).toBe(true)
+    expect(relationshipAtRisk('exclusive', zeroStats({ comfort: 16 }))).toBe(false)
+  })
+
+  it('is not at risk while committed with healthy stats', () => {
+    expect(relationshipAtRisk('living_together', zeroStats())).toBe(false)
+  })
+})
+
+describe('warningExpired', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000
+
+  it('is false before the grace period elapses', () => {
+    const warning = { startedAt: 1000, reason: 'test' }
+    expect(warningExpired(warning, 1000 + 2 * DAY_MS)).toBe(false)
+  })
+
+  it('is true once the grace period fully elapses', () => {
+    const warning = { startedAt: 1000, reason: 'test' }
+    expect(warningExpired(warning, 1000 + 3 * DAY_MS)).toBe(true)
+  })
+})
+
+describe('applyBreakupScar', () => {
+  it('reduces trust, comfort, and chemistry, leaving other dimensions untouched', () => {
+    const result = applyBreakupScar(zeroStats())
+    expect(result.trust).toBe(35)
+    expect(result.comfort).toBe(35)
+    expect(result.chemistry).toBe(35)
+    expect(result.respect).toBe(50)
+    expect(result.curiosity).toBe(50)
+    expect(result.tension).toBe(0)
+  })
+
+  it('floors at 0 rather than going negative', () => {
+    const result = applyBreakupScar(zeroStats({ trust: 5 }))
+    expect(result.trust).toBe(0)
+  })
+})
+
+describe('evaluateRelationshipRisk', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000
+
+  it('reports no warning and no change when not at risk and never warned', () => {
+    const result = evaluateRelationshipRisk({ commitmentStatus: 'dating', stats: zeroStats(), breakupCount: 0 })
+    expect(result).toEqual({
+      warning: undefined,
+      commitmentStatus: 'dating',
+      breakupCount: 0,
+      brokeUpJustNow: false,
+      warnedJustNow: false,
+      clearedJustNow: false,
+    })
+  })
+
+  it('raises a new warning the first time risk is detected', () => {
+    const result = evaluateRelationshipRisk({
+      commitmentStatus: 'exclusive',
+      stats: zeroStats({ tension: 90 }),
+      breakupCount: 0,
+      now: 5000,
+    })
+    expect(result.warnedJustNow).toBe(true)
+    expect(result.warning).toEqual({ startedAt: 5000, reason: 'tension has been boiling over' })
+    expect(result.commitmentStatus).toBe('exclusive')
+  })
+
+  it('clears an existing warning once the strain resolves', () => {
+    const result = evaluateRelationshipRisk({
+      commitmentStatus: 'dating',
+      stats: zeroStats(),
+      existingWarning: { startedAt: 1000, reason: 'test' },
+      breakupCount: 0,
+    })
+    expect(result.clearedJustNow).toBe(true)
+    expect(result.warning).toBeUndefined()
+  })
+
+  it('keeps a standing warning in place while still at risk and within the grace period', () => {
+    const warning = { startedAt: 1000, reason: 'test' }
+    const result = evaluateRelationshipRisk({
+      commitmentStatus: 'dating',
+      stats: zeroStats({ tension: 90 }),
+      existingWarning: warning,
+      breakupCount: 0,
+      now: 1000 + DAY_MS,
+    })
+    expect(result.warning).toEqual(warning)
+    expect(result.brokeUpJustNow).toBe(false)
+    expect(result.commitmentStatus).toBe('dating')
+  })
+
+  it('breaks the relationship once a warning runs out still at risk', () => {
+    const warning = { startedAt: 1000, reason: 'test' }
+    const result = evaluateRelationshipRisk({
+      commitmentStatus: 'living_together',
+      stats: zeroStats({ tension: 90 }),
+      existingWarning: warning,
+      breakupCount: 1,
+      now: 1000 + 3 * DAY_MS,
+    })
+    expect(result.brokeUpJustNow).toBe(true)
+    expect(result.commitmentStatus).toBe('none')
+    expect(result.breakupCount).toBe(2)
+    expect(result.warning).toBeUndefined()
+  })
+})
+
+describe('getRelationshipTrack / patchRelationshipTrack', () => {
+  const baseChat: Chat = {
+    id: 'chat-1',
+    characterId: 'primary',
+    personaId: 'persona-1',
+    title: 'Test',
+    createdAt: 0,
+    updatedAt: 0,
+    affection: 40,
+    relationshipStats: { trust: 60 },
+    relationshipStage: 'warming_up',
+    commitmentStatus: 'dating',
+    breakupCount: 1,
+    unlockedGalleryIds: ['cg-1'],
+    giftsGiven: { rose: 2 },
+  }
+
+  it("reads the primary's track straight off Chat's own top-level fields", () => {
+    expect(getRelationshipTrack(baseChat, 'primary')).toEqual({
+      affection: 40,
+      relationshipStats: { trust: 60 },
+      relationshipStage: 'warming_up',
+      commitmentStatus: 'dating',
+      relationshipWarning: undefined,
+      breakupCount: 1,
+      unlockedGalleryIds: ['cg-1'],
+      giftsGiven: { rose: 2 },
+    })
+  })
+
+  // A structural guard, not just a case. `getRelationshipTrack` builds the primary's track by
+  // hand-listing fields rather than spreading, so a field added to `RelationshipTrack` and mirrored
+  // onto `Chat` can be persisted correctly and still be invisible to every reader — which is
+  // exactly what happened to `afterglow`: it saved fine, and the prompt guidance and the
+  // Relationship panel both silently saw nothing, with the whole feature inert and every test
+  // still green.
+  //
+  // Typing the fixture as `Required<RelationshipTrack>` is what makes this a guard: adding a field
+  // to that type now breaks *compilation* here until the fixture covers it, and then breaks this
+  // assertion until `getRelationshipTrack` actually returns it.
+  it("surfaces every field of the primary's track, so a newly added one cannot go missing", () => {
+    const fullTrack: Required<RelationshipTrack> = {
+      affection: 40,
+      relationshipStats: { trust: 60 },
+      relationshipStage: 'warming_up',
+      commitmentStatus: 'dating',
+      commitmentStartedDay: 15,
+      relationshipWarning: { startedAt: 5, reason: 'tension' },
+      breakupCount: 1,
+      unlockedGalleryIds: ['cg-1'],
+      giftsGiven: { rose: 2 },
+      afterglow: { startedAtTurn: 3, sourceLabel: 'their first time together' },
+      mood: 'content',
+      currentNeed: 'stability',
+      characterIntent: 'wants to surprise him',
+      momentum: 1.4,
+      plans: [{ id: 'plan-1', goal: 'finish the mural', kind: 'personal', formedTurn: 8 }],
+      firstIntimateSceneAt: 12345,
+      initiativeBalance: 1.8,
+      recentRebuff: { startedAtTurn: 6, kind: 'commitment', severity: 'deflect' },
+      intimacyScene: { phase: 'building', activityLabel: 'spooning', category: 'position', updatedAtTurn: 4 },
+      giftLog: [{ giftId: 'rose', turn: 2 }],
+      intimacySceneShapeLog: [['kissing_spot', 'position']],
+      discoveredRegions: ['neck'],
+      beliefsAboutUser: [{ id: 'belief-1', text: 'He is unusually patient with me.', formedTurn: 6 }],
+      expectationsOfUser: [{ id: 'expect-1', text: 'expects a check-in most Sundays', formedTurn: 10 }],
+      currentFear: 'being seen as too much',
+      currentDesire: 'wants to feel truly seen, not just liked',
+      reciprocityCue: { startedAtTurn: 7, reason: 'gift_received' },
+    }
+    // `Chat` stores `relationshipWarning` as `T | undefined` while the track accepts `T | null`
+    // (null being the wire signal for "clear it"), so the spread needs the narrowing.
+    const chat: Chat = { ...baseChat, ...fullTrack, relationshipWarning: fullTrack.relationshipWarning ?? undefined }
+    expect(getRelationshipTrack(chat, 'primary')).toEqual(fullTrack)
+  })
+
+  it('reads a fresh (all-unset) track for a participant never tracked before', () => {
+    expect(getRelationshipTrack(baseChat, 'newcomer')).toEqual({})
+  })
+
+  it("reads a participant's own entry once one exists", () => {
+    const chat: Chat = {
+      ...baseChat,
+      participantRelationships: { rival: { affection: 12, giftsGiven: { chocolate: 1 } } },
+    }
+    expect(getRelationshipTrack(chat, 'rival')).toEqual({ affection: 12, giftsGiven: { chocolate: 1 } })
+    // Unaffected by another character's entry existing alongside it.
+    expect(getRelationshipTrack(chat, 'primary').affection).toBe(40)
+  })
+
+  it("patches the primary directly as top-level Chat fields", () => {
+    expect(patchRelationshipTrack(baseChat, 'primary', { affection: 55 })).toEqual({ affection: 55 })
+  })
+
+  it("patches a new participant into an empty participantRelationships map", () => {
+    expect(patchRelationshipTrack(baseChat, 'rival', { affection: 5 })).toEqual({
+      participantRelationships: { rival: { affection: 5 } },
+    })
+  })
+
+  it("merges into a participant's existing entry without touching anyone else's", () => {
+    const chat: Chat = {
+      ...baseChat,
+      participantRelationships: {
+        rival: { affection: 12, breakupCount: 0 },
+        other: { affection: 99 },
+      },
+    }
+    const result = patchRelationshipTrack(chat, 'rival', { affection: 18, relationshipStage: 'acquaintances' })
+    expect(result).toEqual({
+      participantRelationships: {
+        rival: { affection: 18, breakupCount: 0, relationshipStage: 'acquaintances' },
+        other: { affection: 99 },
+      },
+    })
+  })
+
+  it("reads and patches the primary's mood/currentNeed/characterIntent the same as every other top-level field", () => {
+    const chat: Chat = { ...baseChat, mood: 'content', currentNeed: 'stability', characterIntent: 'wants to surprise him' }
+    expect(getRelationshipTrack(chat, 'primary').mood).toBe('content')
+    expect(getRelationshipTrack(chat, 'primary').currentNeed).toBe('stability')
+    expect(getRelationshipTrack(chat, 'primary').characterIntent).toBe('wants to surprise him')
+    expect(patchRelationshipTrack(chat, 'primary', { mood: 'annoyed' })).toEqual({ mood: 'annoyed' })
+  })
+
+  it("reads and patches the primary's firstIntimateSceneAt the same as every other top-level field", () => {
+    const chat: Chat = { ...baseChat, firstIntimateSceneAt: 12345 }
+    expect(getRelationshipTrack(chat, 'primary').firstIntimateSceneAt).toBe(12345)
+    expect(getRelationshipTrack(chat, 'newcomer').firstIntimateSceneAt).toBeUndefined()
+    expect(patchRelationshipTrack(chat, 'primary', { firstIntimateSceneAt: 99999 })).toEqual({ firstIntimateSceneAt: 99999 })
+  })
+
+  it("reads and patches a participant's mood/currentNeed/characterIntent through their own entry", () => {
+    const chat: Chat = {
+      ...baseChat,
+      participantRelationships: { rival: { mood: 'jealous', currentNeed: 'recognition', characterIntent: 'wants to be noticed' } },
+    }
+    expect(getRelationshipTrack(chat, 'rival')).toEqual({ mood: 'jealous', currentNeed: 'recognition', characterIntent: 'wants to be noticed' })
+    expect(patchRelationshipTrack(chat, 'rival', { mood: 'proud' })).toEqual({
+      participantRelationships: { rival: { mood: 'proud', currentNeed: 'recognition', characterIntent: 'wants to be noticed' } },
+    })
+  })
+})
+
+describe('findActiveIntimacyScene', () => {
+  const scene = (label: string): IntimacyScene => ({
+    phase: 'building',
+    activityLabel: label,
+    category: 'kissing_spot',
+    updatedAtTurn: 3,
+  })
+  const live = () => true
+
+  it('finds a scene on the primary without touching the participant map', () => {
+    const found = findActiveIntimacyScene(
+      { characterId: 'sumire', intimacyScene: scene('hers') } as never,
+      live,
+    )
+    expect(found).toEqual({ ownerId: 'sumire', scene: scene('hers') })
+  })
+
+  it("finds a scene owned by another participant — what lets them share one state machine", () => {
+    const found = findActiveIntimacyScene(
+      { characterId: 'sumire', participantRelationships: { aoi: { intimacyScene: scene('theirs') } } } as never,
+      live,
+    )
+    expect(found?.ownerId).toBe('aoi')
+    expect(found?.scene.activityLabel).toBe('theirs')
+  })
+
+  it('is undefined when nothing is running anywhere', () => {
+    expect(findActiveIntimacyScene({ characterId: 'sumire' } as never, live)).toBeUndefined()
+  })
+
+  it('skips a scene the caller judges stale rather than reviving it', () => {
+    const found = findActiveIntimacyScene(
+      { characterId: 'sumire', intimacyScene: scene('stale') } as never,
+      () => false,
+    )
+    expect(found).toBeUndefined()
+  })
+
+  it('prefers the primary when both hold one, so a chat has a single answer', () => {
+    const found = findActiveIntimacyScene(
+      {
+        characterId: 'sumire',
+        intimacyScene: scene('primary'),
+        participantRelationships: { aoi: { intimacyScene: scene('other') } },
+      } as never,
+      live,
+    )
+    expect(found?.ownerId).toBe('sumire')
+  })
+})

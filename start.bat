@@ -129,10 +129,10 @@ echo.
 
 :: Launch Tavern Studio alongside Singularity if present
 set "TAV_DIR="
-if exist "%ROOT_DIR%TAV-TEST\package.json" (
-    set "TAV_DIR=%ROOT_DIR%TAV-TEST"
-) else if exist "%ROOT_DIR%TAVERN\package.json" (
+if exist "%ROOT_DIR%TAVERN\package.json" (
     set "TAV_DIR=%ROOT_DIR%TAVERN"
+) else if exist "%ROOT_DIR%TAV-TEST\package.json" (
+    set "TAV_DIR=%ROOT_DIR%TAV-TEST"
 )
 
 if defined TAV_DIR (

@@ -1065,19 +1065,31 @@ async def api_tavern_status(request: Request):
     req_host = request.headers.get("host", "localhost:9000").split(":")[0]
     scheme = request.url.scheme or "http"
     effective_host = req_host
+    if effective_host in ("0.0.0.0", "::", ""):
+        effective_host = "localhost"
 
-    for client_port, api_port in [(5173, 3001), (5180, 3002)]:
-        if is_port_open(client_port) or is_port_open(api_port):
-            return {
-                "running": True,
-                "client_url": f"{scheme}://{effective_host}:{client_port}",
-                "api_url": f"{scheme}://{effective_host}:{api_port}",
-                "lan_url": f"http://{lan_ip}:{client_port}",
-                "lan_ip": lan_ip,
-            }
+    # Check port 5173 (Vite dev) or 3001 (standalone Express)
+    active_client = None
+    if is_port_open(5173):
+        active_client = 5173
+    elif is_port_open(3001):
+        active_client = 3001
+    elif is_port_open(5180):
+        active_client = 5180
+
+    if active_client:
+        return {
+            "running": True,
+            "port": active_client,
+            "client_url": f"{scheme}://{effective_host}:{active_client}",
+            "api_url": f"{scheme}://{effective_host}:3001",
+            "lan_url": f"http://{lan_ip}:{active_client}",
+            "lan_ip": lan_ip,
+        }
 
     return {
         "running": False,
+        "port": 5173,
         "client_url": f"{scheme}://{effective_host}:5173",
         "api_url": f"{scheme}://{effective_host}:3001",
         "lan_url": f"http://{lan_ip}:5173",
@@ -1086,55 +1098,127 @@ async def api_tavern_status(request: Request):
 
 
 @app.post("/api/tavern/start")
-async def api_tavern_start():
-    """Start Tavern Studio in background if not already running."""
-    import socket, subprocess, os
+async def api_tavern_start(request: Request = None):
+    """Start Tavern Studio natively in the background if not already running."""
+    import socket, subprocess, os, shutil
 
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.2)
-            if s.connect_ex(("127.0.0.1", 5173)) == 0:
-                return {"status": "already_running"}
-    except Exception:
-        pass
+    def is_port_open(port: int) -> bool:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(0.2)
+                return s.connect_ex(("127.0.0.1", port)) == 0
+        except Exception:
+            return False
+
+    req_host = "localhost"
+    scheme = "http"
+    if request:
+        try:
+            req_host = request.headers.get("host", "localhost:9000").split(":")[0]
+            scheme = request.url.scheme or "http"
+        except Exception:
+            pass
+    effective_host = req_host
+    if effective_host in ("0.0.0.0", "::", ""):
+        effective_host = "localhost"
+
+    if is_port_open(5173):
+        return {"status": "already_running", "port": 5173, "client_url": f"{scheme}://{effective_host}:5173"}
+    if is_port_open(3001):
+        return {"status": "already_running", "port": 3001, "client_url": f"{scheme}://{effective_host}:3001"}
 
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     tav_dir = None
-    for candidate in ["TAV-TEST", "TAVERN"]:
+    for candidate in ["TAVERN", "TAV-TEST"]:
         d = os.path.join(root_dir, candidate)
         if os.path.isdir(d) and os.path.isfile(os.path.join(d, "package.json")):
             tav_dir = d
             break
 
     if not tav_dir:
-        return {"status": "not_found", "error": "Tavern directory not found"}
+        return {"status": "error", "error": "Tavern directory not found"}
 
     env = dict(os.environ)
     env["API_HOST"] = "0.0.0.0"
     env["RP_ALLOWED_ORIGINS"] = "*"
 
-    # Prepend modern Node from nvm if available
-    nvm_dir = os.path.expanduser("~/.nvm/versions/node")
-    if os.path.isdir(nvm_dir):
-        versions = sorted(os.listdir(nvm_dir), reverse=True)
-        for v in versions:
-            bin_path = os.path.join(nvm_dir, v, "bin")
-            if os.path.isdir(bin_path):
-                env["PATH"] = f"{bin_path}:{env.get('PATH', '')}"
-                break
+    # Detect modern Node.js or Bun across nvm, fnm, local paths
+    extra_paths = []
     bun_bin = os.path.expanduser("~/.bun/bin")
     if os.path.isdir(bun_bin):
-        env["PATH"] = f"{bun_bin}:{env.get('PATH', '')}"
+        extra_paths.append(bun_bin)
 
-    subprocess.Popen(
-        ["npm", "run", "dev"],
-        cwd=tav_dir,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-    return {"status": "started", "directory": os.path.basename(tav_dir)}
+    nvm_dir = os.path.expanduser("~/.nvm/versions/node")
+    if os.path.isdir(nvm_dir):
+        try:
+            versions = sorted(os.listdir(nvm_dir), reverse=True)
+            for v in versions:
+                p = os.path.join(nvm_dir, v, "bin")
+                if os.path.isdir(p):
+                    extra_paths.append(p)
+        except Exception:
+            pass
+
+    fnm_dir = os.path.expanduser("~/.local/share/fnm/current/bin")
+    if os.path.isdir(fnm_dir):
+        extra_paths.append(fnm_dir)
+
+    if sys.platform == "win32":
+        for p in [r"C:\Program Files\nodejs", r"C:\Program Files (x86)\nodejs"]:
+            if os.path.isdir(p):
+                extra_paths.append(p)
+
+    if extra_paths:
+        env["PATH"] = os.pathsep.join(extra_paths) + os.pathsep + env.get("PATH", "")
+
+    has_bun = shutil.which("bun", path=env.get("PATH")) is not None
+    has_npm = shutil.which("npm", path=env.get("PATH")) is not None
+
+    if not has_bun and not has_npm:
+        return {
+            "status": "error",
+            "error": "Node.js (v20+) or Bun is required to launch Tavern Studio. Please install from https://nodejs.org",
+        }
+
+    # Auto-install dependencies if node_modules is missing (first-time setup)
+    nm_path = os.path.join(tav_dir, "node_modules")
+    if not os.path.isdir(nm_path):
+        install_cmd = ["bun", "install"] if has_bun else ["npm", "install"]
+        try:
+            subprocess.run(
+                install_cmd,
+                cwd=tav_dir,
+                env=env,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=180,
+            )
+        except Exception:
+            pass
+
+    # Launch Tavern server natively in background
+    run_cmd = ["bun", "run", "dev"] if has_bun else ["npm", "run", "dev"]
+    try:
+        subprocess.Popen(
+            run_cmd,
+            cwd=tav_dir,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+    # Wait up to 3 seconds for port to open
+    for _ in range(10):
+        await asyncio.sleep(0.3)
+        if is_port_open(5173):
+            return {"status": "started", "port": 5173, "client_url": f"{scheme}://{effective_host}:5173"}
+        if is_port_open(3001):
+            return {"status": "started", "port": 3001, "client_url": f"{scheme}://{effective_host}:3001"}
+
+    return {"status": "started", "port": 5173, "client_url": f"{scheme}://{effective_host}:5173"}
 
 
 @app.post("/api/services/start_all")

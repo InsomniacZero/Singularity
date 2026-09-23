@@ -5625,71 +5625,144 @@ async function updateTavernAndMobileChips() {
     const res = await fetch('/api/tavern/status');
     if (!res.ok) return;
     const data = await res.json();
+    state.tavernStatus = data;
     const tavCode = document.getElementById('tavern-chip-url');
     if (tavCode) {
-      const host = window.location.hostname || '0.0.0.0';
-      tavCode.textContent = `http://${host}:5173`;
+      let host = window.location.hostname;
+      if (!host || host === '0.0.0.0' || host === '::') host = 'localhost';
+      const port = data.port || 5173;
+      tavCode.textContent = `:${port}`;
+      const chip = document.getElementById('chip-tavern-studio');
+      if (chip) {
+        if (data.running) {
+          chip.style.borderColor = 'rgba(168, 85, 247, 0.7)';
+          chip.style.boxShadow = '0 0 10px rgba(168, 85, 247, 0.25)';
+          chip.title = `Tavern Studio is LIVE on port ${port} — click to open`;
+        } else {
+          chip.style.borderColor = 'rgba(168, 85, 247, 0.3)';
+          chip.style.boxShadow = 'none';
+          chip.title = 'Tavern Studio is offline — click to start natively';
+        }
+      }
     }
   } catch (_) {}
 }
 
 async function openTavernStudio() {
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || window.innerWidth <= 800;
-  let currentHost = window.location.hostname || 'localhost';
+  let currentHost = window.location.hostname;
+  if (!currentHost || currentHost === '0.0.0.0' || currentHost === '::') {
+    currentHost = 'localhost';
+  }
   let targetUrl = `${window.location.protocol}//${currentHost}:5173`;
 
-  if (isMobile && typeof showToast === 'function') {
-    showToast('Opening Tavern Web Studio...', 'info', 2000);
+  // 1. Fast path: If already verified running, open immediately with zero delay
+  if (state.tavernStatus && state.tavernStatus.running && state.tavernStatus.client_url) {
+    try {
+      const u = new URL(state.tavernStatus.client_url);
+      u.hostname = currentHost;
+      u.protocol = window.location.protocol;
+      targetUrl = u.toString();
+    } catch {
+      targetUrl = state.tavernStatus.client_url;
+    }
+
+    if (isMobile) {
+      window.location.href = targetUrl;
+    } else {
+      const win = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      if (!win || win.closed || typeof win.closed === 'undefined') {
+        if (typeof showToast === 'function') {
+          showToast(`Tavern ready: <a href="${targetUrl}" target="_blank" style="color:var(--accent);text-decoration:underline;">Click here to open ${targetUrl}</a>`, 'success');
+        }
+      }
+    }
+    return;
+  }
+
+  // 2. Synchronously open placeholder tab on desktop to bypass browser popup blockers
+  let tabWin = null;
+  if (!isMobile) {
+    try {
+      tabWin = window.open('about:blank', '_blank');
+      if (tabWin && tabWin.document) {
+        tabWin.document.write(`
+          <!DOCTYPE html>
+          <html>
+            <head><title>Launching Tavern Web Studio...</title></head>
+            <body style="margin:0;background:#0d0d12;color:#d8b4fe;font-family:system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;">
+              <div style="text-align:center;padding:2.5rem;background:rgba(255,255,255,0.03);border:1px solid rgba(168,85,247,0.3);border-radius:18px;max-width:420px;box-shadow:0 12px 36px rgba(0,0,0,0.5);">
+                <div style="font-size:3rem;margin-bottom:12px;">🏰</div>
+                <h2 style="margin:0 0 8px 0;color:#f8fafc;font-size:1.3rem;">Starting Tavern Web Studio...</h2>
+                <p style="color:#94a3b8;font-size:0.9rem;margin:0 0 16px 0;line-height:1.4;">Connecting to Singularity gateway & spinning up dev server...</p>
+                <div style="display:inline-block;width:24px;height:24px;border:3px solid rgba(168,85,247,0.3);border-top-color:#d8b4fe;border-radius:50%;animation:spin 1s linear infinite;"></div>
+                <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
+              </div>
+            </body>
+          </html>
+        `);
+      }
+    } catch (_) {}
+  }
+
+  if (typeof showToast === 'function') {
+    showToast('Starting Tavern Studio natively in background...', 'info', 4000);
+  }
+
+  // 3. Trigger native backend boot
+  try {
+    const startRes = await fetch('/api/tavern/start', { method: 'POST' });
+    if (startRes.ok) {
+      const startData = await startRes.json();
+      if (startData.error) {
+        if (tabWin && !tabWin.closed) tabWin.close();
+        if (typeof showToast === 'function') showToast(startData.error, 'error', 6000);
+        return;
+      }
+      if (startData.client_url) targetUrl = startData.client_url;
+    }
+  } catch (err) {
+    console.warn('Tavern auto-start call failed:', err);
+  }
+
+  // 4. Poll up to 12 seconds for port readiness
+  let ready = false;
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 600));
+    try {
+      const res = await fetch('/api/tavern/status');
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.running) {
+          state.tavernStatus = data;
+          if (data.client_url) targetUrl = data.client_url;
+          ready = true;
+          break;
+        }
+      }
+    } catch (_) {}
   }
 
   try {
-    let res = await fetch('/api/tavern/status');
-    let data = res.ok ? await res.json() : null;
+    const u = new URL(targetUrl);
+    u.hostname = currentHost;
+    u.protocol = window.location.protocol;
+    targetUrl = u.toString();
+  } catch {}
 
-    if (!data || !data.running) {
-      if (typeof showToast === 'function') {
-        showToast('Starting Tavern Studio in background...', 'info');
-      }
-      try {
-        await fetch('/api/tavern/start', { method: 'POST' });
-      } catch (err) {}
-
-      // Poll up to 10 seconds for server to report ready
-      for (let i = 0; i < 15; i++) {
-        await new Promise(r => setTimeout(r, 600));
-        try {
-          res = await fetch('/api/tavern/status');
-          if (res.ok) {
-            data = await res.json();
-            if (data && data.running) break;
-          }
-        } catch (_) {}
-      }
-    }
-
-    if (data && data.client_url) {
-      try {
-        const u = new URL(data.client_url);
-        u.hostname = currentHost;
-        u.protocol = window.location.protocol;
-        targetUrl = u.toString();
-      } catch {
-        targetUrl = data.client_url;
-      }
-    } else {
-      targetUrl = `${window.location.protocol}//${currentHost}:5173`;
-    }
-  } catch (e) {
-    // fallback to standard url
+  if (typeof showToast === 'function') {
+    showToast(`Tavern Web Studio ready! Launching ${targetUrl}...`, 'success', 2500);
   }
 
   if (isMobile) {
     window.location.href = targetUrl;
+  } else if (tabWin && !tabWin.closed) {
+    tabWin.location.replace(targetUrl);
   } else {
     const win = window.open(targetUrl, '_blank', 'noopener,noreferrer');
     if (!win || win.closed || typeof win.closed === 'undefined') {
       if (typeof showToast === 'function') {
-        showToast(`Tavern ready: <a href="${targetUrl}" target="_blank" style="color:var(--accent);text-decoration:underline;">Click here to open</a>`, 'success');
+        showToast(`Tavern ready: <a href="${targetUrl}" target="_blank" style="color:var(--accent);text-decoration:underline;">Click here to open ${targetUrl}</a>`, 'success');
       }
     }
   }

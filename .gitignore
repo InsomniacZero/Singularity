@@ -36,7 +36,5 @@ singularity/static/fonts/*-fontiko/
 MISTAKES.md
 DESIGN-SYS.md
 AGENTS.md
-components.json
-tsconfig.json
-lib/
 *.zip
+

@@ -70,20 +70,19 @@ case "$1" in
         exec "$PYTHON_BIN" cli.py "$@"
         ;;
     server|"")
-        [ "$1" == "server" ] && shift
+        [ "$1" = "server" ] && shift
 
         # Auto-launch Tavern Studio if TAV-TEST or TAVERN directory exists
         TAVERN_DIR=""
-        if [ -d "$DIR/TAV-TEST" ] && [ -f "$DIR/TAV-TEST/package.json" ]; then
-            TAVERN_DIR="$DIR/TAV-TEST"
-        elif [ -d "$DIR/TAVERN" ] && [ -f "$DIR/TAVERN/package.json" ]; then
+        if [ -d "$DIR/TAVERN" ] && [ -f "$DIR/TAVERN/package.json" ]; then
             TAVERN_DIR="$DIR/TAVERN"
+        elif [ -d "$DIR/TAV-TEST" ] && [ -f "$DIR/TAV-TEST/package.json" ]; then
+            TAVERN_DIR="$DIR/TAV-TEST"
         fi
 
         TAVERN_PID=""
         if [ -n "$TAVERN_DIR" ]; then
-            if ! (echo > /dev/tcp/127.0.0.1/5173) 2>/dev/null && ! nc -z 127.0.0.1 5173 2>/dev/null; then
-                echo "  [🏰] Starting Tavern Studio alongside Singularity (ports 5173 / 3001)..."
+            if ! (echo > /dev/tcp/127.0.0.1/5173) 2>/dev/null && ! nc -z 127.0.0.1 5173 2>/dev/null && ! nc -z 127.0.0.1 3001 2>/dev/null; then
                 (
                     cd "$TAVERN_DIR"
                     export PATH="$HOME/.bun/bin:$PATH"
@@ -92,13 +91,37 @@ case "$1" in
                     for nvm_node in "$HOME/.nvm/versions/node"/v2[0-9]*/bin; do
                         [ -d "$nvm_node" ] && export PATH="$nvm_node:$PATH"
                     done
+                    [ -d "$HOME/.local/share/fnm/current/bin" ] && export PATH="$HOME/.local/share/fnm/current/bin:$PATH"
                     export API_HOST="0.0.0.0"
                     export RP_ALLOWED_ORIGINS="*"
-                    if [ ! -d "node_modules" ]; then
-                        echo "  [🏰] Installing Tavern dependencies (first-time boot)..."
-                        npm install --silent > /dev/null 2>&1
+
+                    # Check for node or bun
+                    RUNNER=""
+                    if command -v bun >/dev/null 2>&1; then
+                        RUNNER="bun"
+                    elif command -v npm >/dev/null 2>&1; then
+                        RUNNER="npm"
                     fi
-                    npm run dev > /dev/null 2>&1
+
+                    if [ -n "$RUNNER" ]; then
+                        echo "  [🏰] Starting Tavern Studio natively alongside Singularity..."
+                        if [ ! -d "node_modules" ]; then
+                            echo "  [🏰] Installing Tavern dependencies (first-time setup)..."
+                            if [ "$RUNNER" = "bun" ]; then
+                                bun install >/dev/null 2>&1 || true
+                            else
+                                npm install --silent >/dev/null 2>&1 || true
+                            fi
+                        fi
+                        if [ "$RUNNER" = "bun" ]; then
+                            bun run dev >/dev/null 2>&1
+                        else
+                            npm run dev >/dev/null 2>&1
+                        fi
+                    else
+                        echo "  [!] Note: Node.js (v20+) or Bun is required to launch Tavern Studio."
+                        echo "      Install Node.js from https://nodejs.org or Bun from https://bun.sh"
+                    fi
                 ) &
                 TAVERN_PID=$!
             else

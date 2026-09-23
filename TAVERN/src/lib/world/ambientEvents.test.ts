@@ -1,0 +1,352 @@
+import { describe, expect, it } from 'vitest'
+import { WEATHER_KINDS } from './calendar'
+import {
+  AMBIENT_EVENT_KINDS,
+  ambientEventGuidance,
+  describeAmbientEvent,
+  describeSocialReaction,
+  scheduleConflictGuidance,
+  selectAmbientEvent,
+  selectSocialReaction,
+  type AmbientEvent,
+} from './ambientEvents'
+
+describe('selectAmbientEvent', () => {
+  it('a holiday takes unconditional priority over every other qualifying hook', () => {
+    // Day 13 -> getCalendarInfo -> spring, dayOfSeason 14 -> 'First Bloom' (calendar.ts's HOLIDAYS).
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 13,
+      phaseIndex: 0,
+      worldId: 'w1',
+      goals: ['Something'],
+      likes: ['Something else'],
+      frequentedLocations: ['The Cafe'],
+      weatherPreferences: { loves: [...WEATHER_KINDS] }, // guarantees a weather match too, whatever day 13 actually rolls
+    })
+    expect(event).toEqual({ kind: 'holiday', detail: 'First Bloom' })
+  })
+
+  it('a birthday today takes unconditional priority over every other qualifying hook, same as a holiday', () => {
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 0, // spring, dayOfSeason 1 -- not a holiday
+      phaseIndex: 0,
+      worldId: 'w1',
+      birthday: 0,
+      weatherPreferences: { loves: [...WEATHER_KINDS] }, // guaranteed weather match too
+    })
+    expect(event).toEqual({ kind: 'birthday', detail: '' })
+  })
+
+  it('surfaces birthday_soon when the birthday is 1-7 days out and nothing else qualifies', () => {
+    const event = selectAmbientEvent({ characterId: 'c1', day: 0, phaseIndex: 0, birthday: 5 })
+    expect(event).toEqual({ kind: 'birthday_soon', detail: '', daysUntil: 5 })
+  })
+
+  it('does not surface birthday_soon outside the 1-7 day window', () => {
+    expect(selectAmbientEvent({ characterId: 'c1', day: 0, phaseIndex: 0, birthday: 8 })).toBeUndefined()
+    // 0 days out is today -- the unconditional 'birthday' branch's job, not birthday_soon's.
+    expect(selectAmbientEvent({ characterId: 'c1', day: 0, phaseIndex: 0, birthday: 0 })).toEqual({ kind: 'birthday', detail: '' })
+  })
+
+  it('surfaces weather_loved when today\'s weather is one the character loves', () => {
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 0, // non-holiday (spring, dayOfSeason 1)
+      phaseIndex: 0,
+      worldId: 'w1',
+      weatherPreferences: { loves: [...WEATHER_KINDS] }, // guaranteed match regardless of which weather day 0 rolls
+    })
+    expect(event?.kind).toBe('weather_loved')
+    expect(event?.detail.length).toBeGreaterThan(0)
+  })
+
+  it('surfaces weather_hated when today\'s weather is one the character dislikes', () => {
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 0,
+      phaseIndex: 0,
+      worldId: 'w1',
+      weatherPreferences: { hates: [...WEATHER_KINDS] },
+    })
+    expect(event?.kind).toBe('weather_hated')
+    expect(event?.detail.length).toBeGreaterThan(0)
+  })
+
+  it('never surfaces a weather-based hook with no worldId, even with a guaranteed-match preference', () => {
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 0,
+      phaseIndex: 0,
+      weatherPreferences: { loves: [...WEATHER_KINDS] },
+    })
+    expect(event).toBeUndefined()
+  })
+
+  it('surfaces routine_absence for a frequented location, with a plausible day-gap', () => {
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 0,
+      phaseIndex: 0,
+      frequentedLocations: ['The Bakery', 'The Library'],
+    })
+    expect(event?.kind).toBe('routine_absence')
+    expect(['The Bakery', 'The Library']).toContain(event?.detail)
+    expect(event?.daysSinceVisited).toBeGreaterThanOrEqual(5)
+    expect(event?.daysSinceVisited).toBeLessThan(18)
+  })
+
+  it('does not surface routine_absence for the one frequented location that IS the current scheduled spot', () => {
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 0, // monday, per getCalendarInfo
+      phaseIndex: 0, // morning
+      schedule: [{ id: 's1', phase: 'morning', status: 'available', activity: 'Baking', location: 'The Bakery' }],
+      frequentedLocations: ['The Bakery'],
+    })
+    expect(event).toBeUndefined()
+  })
+
+  it('surfaces goal_on_mind naming one of the authored goals', () => {
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 0,
+      phaseIndex: 0,
+      goals: ['Get into her dream firm', 'Finish the gallery submission'],
+    })
+    expect(event?.kind).toBe('goal_on_mind')
+    expect(['Get into her dream firm', 'Finish the gallery submission']).toContain(event?.detail)
+  })
+
+  it('surfaces free_time_interest naming a like when the character is currently free', () => {
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 0,
+      phaseIndex: 0, // no schedule at all -> getCurrentActivity defaults to 'available'
+      likes: ['pressed flowers', 'jazz records'],
+    })
+    expect(event?.kind).toBe('free_time_interest')
+    expect(['pressed flowers', 'jazz records']).toContain(event?.detail)
+  })
+
+  it('does not surface free_time_interest while the schedule marks the character busy', () => {
+    const event = selectAmbientEvent({
+      characterId: 'c1',
+      day: 0,
+      phaseIndex: 0,
+      schedule: [{ id: 's1', phase: 'morning', status: 'busy', activity: 'In lecture' }],
+      likes: ['pressed flowers'],
+    })
+    expect(event).toBeUndefined()
+  })
+
+  it('returns undefined with nothing authored and no holiday today', () => {
+    expect(selectAmbientEvent({ characterId: 'c1', day: 0, phaseIndex: 0 })).toBeUndefined()
+  })
+
+  it('is fully deterministic for identical inputs', () => {
+    const ctx = { characterId: 'c1', day: 5, phaseIndex: 1, goals: ['A goal'], likes: ['A like'], frequentedLocations: ['A place'] }
+    expect(selectAmbientEvent(ctx)).toEqual(selectAmbientEvent(ctx))
+  })
+
+  it('draws from more than one qualifying kind across different characters/days, not always the same one', () => {
+    const seen = new Set<string>()
+    for (let i = 0; i < 50; i++) {
+      const event = selectAmbientEvent({
+        characterId: `c${i}`,
+        day: i,
+        phaseIndex: 0,
+        goals: ['Goal A'],
+        likes: ['Like A'],
+        frequentedLocations: ['Place A'],
+      })
+      if (event) seen.add(event.kind)
+    }
+    expect(seen.size).toBeGreaterThan(1)
+  })
+})
+
+describe('describeAmbientEvent', () => {
+  it('names the holiday and the character', () => {
+    const line = describeAmbientEvent('Sumire', { kind: 'holiday', detail: 'First Bloom' })
+    expect(line).toContain('First Bloom')
+    expect(line).toContain('Sumire')
+    expect(line).not.toContain('{{')
+  })
+
+  it('names the weather and reaction for weather_loved/weather_hated', () => {
+    const loved = describeAmbientEvent('Sumire', { kind: 'weather_loved', detail: 'raining steadily' })
+    expect(loved).toContain('raining steadily')
+    expect(loved).toContain('loves')
+    const hated = describeAmbientEvent('Sumire', { kind: 'weather_hated', detail: 'stormy' })
+    expect(hated).toContain('stormy')
+    expect(hated).toContain('dislikes')
+  })
+
+  it('names the character for birthday', () => {
+    const line = describeAmbientEvent('Sumire', { kind: 'birthday', detail: '' })
+    expect(line).toContain('Sumire')
+    expect(line).toContain('birthday')
+  })
+
+  it('names the character and day count for birthday_soon', () => {
+    const line = describeAmbientEvent('Sumire', { kind: 'birthday_soon', detail: '', daysUntil: 3 })
+    expect(line).toContain('Sumire')
+    expect(line).toContain('3')
+  })
+
+  it('names the location and day count for routine_absence', () => {
+    const line = describeAmbientEvent('Sumire', { kind: 'routine_absence', detail: 'the corner bookstore', daysSinceVisited: 9 })
+    expect(line).toContain('the corner bookstore')
+    expect(line).toContain('9')
+  })
+
+  it('names the goal for goal_on_mind', () => {
+    const line = describeAmbientEvent('Sumire', { kind: 'goal_on_mind', detail: 'finishing her thesis' })
+    expect(line).toContain('finishing her thesis')
+  })
+
+  it('names the interest for free_time_interest', () => {
+    const line = describeAmbientEvent('Sumire', { kind: 'free_time_interest', detail: 'pressed flowers' })
+    expect(line).toContain('pressed flowers')
+  })
+
+  it('never emits a {{char}}/{{user}} macro for any kind — styleGuidance-shaped lines are not macro-substituted', () => {
+    for (const kind of AMBIENT_EVENT_KINDS) {
+      const line = describeAmbientEvent('Sumire', { kind, detail: 'something specific', daysSinceVisited: 7 })
+      expect(line).not.toContain('{{')
+    }
+  })
+})
+
+describe('ambientEventGuidance', () => {
+  const EVENT: AmbientEvent = { kind: 'goal_on_mind', detail: 'finishing her thesis' }
+
+  it('returns empty with no event selected', () => {
+    expect(ambientEventGuidance({ charName: 'Sumire', characterId: 'c1', chatId: 'chat1', charTurnCount: 10, event: undefined })).toBe('')
+  })
+
+  it('returns empty below the minimum turn floor even with an event ready', () => {
+    expect(ambientEventGuidance({ charName: 'Sumire', characterId: 'c1', chatId: 'chat1', charTurnCount: 1, event: EVENT })).toBe('')
+  })
+
+  it('is deterministic for identical inputs', () => {
+    const opts = { charName: 'Sumire', characterId: 'c1', chatId: 'chat1', charTurnCount: 20, event: EVENT }
+    expect(ambientEventGuidance(opts)).toBe(ambientEventGuidance(opts))
+  })
+
+  it('fires on some turns and not others across a sweep, proving the roll actually gates (not always on, not always off)', () => {
+    let sawFire = false
+    let sawMiss = false
+    for (let turn = 4; turn < 200; turn++) {
+      const line = ambientEventGuidance({ charName: 'Sumire', characterId: 'c1', chatId: 'chat1', charTurnCount: turn, event: EVENT })
+      if (line) sawFire = true
+      else sawMiss = true
+      if (sawFire && sawMiss) break
+    }
+    expect(sawFire).toBe(true)
+    expect(sawMiss).toBe(true)
+  })
+
+  it('the fired line matches describeAmbientEvent exactly, with no extra wrapping', () => {
+    let found: string | undefined
+    for (let turn = 4; turn < 200; turn++) {
+      const line = ambientEventGuidance({ charName: 'Sumire', characterId: 'c1', chatId: 'chat1', charTurnCount: turn, event: EVENT })
+      if (line) {
+        found = line
+        break
+      }
+    }
+    expect(found).toBe(describeAmbientEvent('Sumire', EVENT))
+  })
+})
+
+describe('selectSocialReaction', () => {
+  const CONNECTIONS = [
+    { name: 'Aiko', relation: 'childhood friend' },
+    { name: 'Ren', relation: 'older brother' },
+  ]
+
+  it('returns undefined with no authored connections at all', () => {
+    expect(selectSocialReaction({ characterId: 'c1', chatId: 'chat1', topic: 'the engagement', connections: undefined })).toBeUndefined()
+    expect(selectSocialReaction({ characterId: 'c1', chatId: 'chat1', topic: 'the engagement', connections: [] })).toBeUndefined()
+  })
+
+  it('picks a real, named authored connection and carries the topic through', () => {
+    const reaction = selectSocialReaction({ characterId: 'c1', chatId: 'chat1', topic: 'the engagement', connections: CONNECTIONS })
+    expect(reaction).toBeDefined()
+    expect(['Aiko', 'Ren']).toContain(reaction?.connectionName)
+    expect(reaction?.topic).toBe('the engagement')
+    const picked = CONNECTIONS.find((c) => c.name === reaction?.connectionName)
+    expect(reaction?.relation).toBe(picked?.relation)
+  })
+
+  it('is fully deterministic for identical inputs', () => {
+    const params = { characterId: 'c1', chatId: 'chat1', topic: 'the engagement', connections: CONNECTIONS }
+    expect(selectSocialReaction(params)).toEqual(selectSocialReaction(params))
+  })
+
+  it('draws from more than one connection across different topics/chats, not always the same one', () => {
+    const seen = new Set<string>()
+    for (let i = 0; i < 30; i++) {
+      const reaction = selectSocialReaction({ characterId: 'c1', chatId: `chat${i}`, topic: `topic ${i}`, connections: CONNECTIONS })
+      if (reaction) seen.add(reaction.connectionName)
+    }
+    expect(seen.size).toBeGreaterThan(1)
+  })
+
+  it('single-connection roster always resolves to that one connection', () => {
+    const reaction = selectSocialReaction({ characterId: 'c1', chatId: 'chat1', topic: 'x', connections: [CONNECTIONS[0]] })
+    expect(reaction?.connectionName).toBe('Aiko')
+  })
+})
+
+describe('scheduleConflictGuidance', () => {
+  it('returns empty while genuinely available — nothing to cost', () => {
+    expect(scheduleConflictGuidance('Sumire', { status: 'available' })).toBe('')
+  })
+
+  it('names the activity and location and frames it as a real, noticed cost when busy', () => {
+    const line = scheduleConflictGuidance('Sumire', { status: 'busy', activity: 'a work shift', location: 'the cafe' })
+    expect(line).toContain('Sumire')
+    expect(line).toContain('a work shift')
+    expect(line).toContain('the cafe')
+    expect(line.toLowerCase()).toContain('cost')
+  })
+
+  it('still returns a real line when busy with no activity/location authored', () => {
+    const line = scheduleConflictGuidance('Sumire', { status: 'busy' })
+    expect(line).toContain('Sumire')
+    expect(line.length).toBeGreaterThan(0)
+  })
+
+  it('frames sleeping as a genuine disruption, not a free wake-up', () => {
+    const line = scheduleConflictGuidance('Sumire', { status: 'sleeping' })
+    expect(line.toLowerCase()).toContain('asleep')
+    expect(line.toLowerCase()).toContain('disruption')
+  })
+
+  it('frames traveling as a physical constraint on the scene, naming the location when given', () => {
+    const line = scheduleConflictGuidance('Sumire', { status: 'traveling', location: 'the train' })
+    expect(line).toContain('the train')
+    expect(line.toLowerCase()).toContain('constraint')
+  })
+
+  it('never emits a {{char}}/{{user}} macro for any non-available status', () => {
+    for (const status of ['busy', 'sleeping', 'traveling'] as const) {
+      expect(scheduleConflictGuidance('Sumire', { status })).not.toContain('{{')
+    }
+  })
+})
+
+describe('describeSocialReaction', () => {
+  it('names the connection, their relation, the character, and the topic, framed as reported not present', () => {
+    const line = describeSocialReaction('Sumire', { connectionName: 'Aiko', relation: 'childhood friend', topic: 'the engagement' })
+    expect(line).toContain('Aiko')
+    expect(line).toContain('childhood friend')
+    expect(line).toContain('Sumire')
+    expect(line).toContain('the engagement')
+    expect(line).not.toContain('{{')
+  })
+})

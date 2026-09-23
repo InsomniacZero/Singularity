@@ -1,0 +1,752 @@
+import { describe, expect, it } from 'vitest'
+import { buildPrompt, type ChatMessage, type PromptBuildInput, type StyleGuidanceItem } from './builder'
+import { getInstructTemplate } from './instructTemplates'
+import type { CharacterCardData } from '@/lib/characters/cardSpec'
+
+const template = getInstructTemplate('plain-chat') // {name}-prefixed turns, so speaker names are visible in output
+
+function character(overrides: Partial<CharacterCardData> & { name: string }): CharacterCardData {
+  return {
+    description: '',
+    personality: '',
+    scenario: '',
+    first_mes: '',
+    mes_example: '',
+    ...overrides,
+  }
+}
+
+function baseInput(overrides: Partial<PromptBuildInput> = {}): PromptBuildInput {
+  return {
+    character: character({ name: 'Aria' }),
+    personaName: 'You',
+    personaDescription: '',
+    history: [],
+    lorebooks: [],
+    template,
+    contextBudget: 4000,
+    scanDepth: 8,
+    countTokens: async (text: string) => Math.ceil(text.length / 4),
+    ...overrides,
+  }
+}
+
+describe('buildPrompt — instruct template affixes', () => {
+  it('wraps the whole fixed block (system + description) in the template system markers', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        template: getInstructTemplate('gemma'),
+        character: character({ name: 'Aria', description: 'A calm archivist.' }),
+        history: [{ id: '1', role: 'user', name: 'You', text: 'Hi.' }],
+      }),
+    )
+    // The description must sit INSIDE an opening user turn, not float as loose text before it.
+    expect(result.prompt).toMatch(/<start_of_turn>user\n[\s\S]*A calm archivist\.[\s\S]*<end_of_turn>/)
+    // History turn and the generation cue use the model turn markers too (names forced, ST-style).
+    expect(result.prompt).toContain('<start_of_turn>user\nYou: Hi.<end_of_turn>')
+    expect(result.prompt.trimEnd().endsWith('<start_of_turn>model\nAria:')).toBe(true)
+  })
+
+  it('plain-chat leaves the fixed block unwrapped (empty affixes)', async () => {
+    const result = await buildPrompt(
+      baseInput({ character: character({ name: 'Aria', description: 'DESC_MARKER' }) }),
+    )
+    expect(result.prompt).not.toContain('<start_of_turn>')
+    expect(result.prompt).not.toContain('<|im_start|>')
+    expect(result.prompt).toContain('DESC_MARKER')
+  })
+
+  it('emits no stray system markers when every fixed section is empty', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        template: getInstructTemplate('chatml'),
+        character: character({ name: 'Aria' }),
+        globalSystemPrompt: '',
+        promptSections: { system: false, description: false, persona: false, examples: false, world: false, summary: false, participants: false },
+        history: [{ id: '1', role: 'user', name: 'You', text: 'Hi.' }],
+      }),
+    )
+    expect(result.prompt).not.toContain('<|im_start|>system')
+  })
+})
+
+describe('buildPrompt — group chat (multiple speaking characters)', () => {
+  it('renders each historical turn under its own speaker name, not always the active character', async () => {
+    const history: ChatMessage[] = [
+      { id: '1', role: 'user', name: 'You', text: 'Hello everyone.' },
+      { id: '2', role: 'char', name: 'Aria', text: 'Hey there!' },
+      { id: '3', role: 'user', name: 'You', text: 'Kestrel, say hi.' },
+      { id: '4', role: 'char', name: 'Kestrel', text: 'Hm.' },
+    ]
+    // Kestrel is the active speaker for this turn (their card is `character`), but Aria's earlier
+    // line must still be attributed to Aria in the rendered history, not silently relabeled.
+    const result = await buildPrompt(baseInput({ character: character({ name: 'Kestrel' }), history }))
+    expect(result.prompt).toContain('Aria: Hey there!')
+    expect(result.prompt).toContain('Kestrel: Hm.')
+  })
+
+  it('lists other scene participants as a compact roster, separate from the active character block', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Kestrel', description: 'A stoic ranger.', personality: 'Guarded.' }),
+        participants: [{ name: 'Aria', description: 'A cheerful bard.', personality: 'Playful.' }],
+      }),
+    )
+    expect(result.prompt).toContain('You are Kestrel in a roleplay with')
+    expect(result.prompt).toContain('A stoic ranger.')
+    expect(result.prompt).toContain('Also present in this scene:')
+    expect(result.prompt).toContain('- Aria: A cheerful bard. Personality: Playful.')
+  })
+
+  it('omits the roster block entirely for an ordinary single-character chat', async () => {
+    const result = await buildPrompt(baseInput())
+    expect(result.prompt).not.toContain('Also present in this scene')
+  })
+
+  it('uses nextSpeakerName for the generation cue instead of always the active character\'s own name', async () => {
+    const result = await buildPrompt(baseInput({ nextSpeakerName: 'Kestrel' }))
+    // The generation cue is the final line of the prompt — it should prompt for Kestrel's turn.
+    expect(result.prompt.trim().endsWith('Kestrel:')).toBe(true)
+  })
+
+  it('falls back to the active character\'s own name when nextSpeakerName is unset (ordinary chats)', async () => {
+    const result = await buildPrompt(baseInput())
+    expect(result.prompt.trim().endsWith('Aria:')).toBe(true)
+  })
+})
+
+describe('buildPrompt — characterProfile (10e life-context fields)', () => {
+  it('folds the pre-built profile note into the identity block when set', async () => {
+    const result = await buildPrompt(
+      baseInput({ characterProfile: 'Life beyond this scene: Works as a librarian at Sakura Hill University.' }),
+    )
+    expect(result.prompt).toContain('Life beyond this scene: Works as a librarian at Sakura Hill University.')
+  })
+
+  it('omits nothing extra when characterProfile is unset', async () => {
+    const result = await buildPrompt(baseInput())
+    expect(result.prompt).not.toContain('Life beyond this scene')
+  })
+})
+
+describe('buildPrompt — styleGuidance', () => {
+  it('folds global writing-style guidance into the late, right-before-generation block', async () => {
+    const result = await buildPrompt(baseInput({ styleGuidance: 'STYLE_GUIDANCE_MARKER phrasing rule.' }))
+    expect(result.prompt).toContain('STYLE_GUIDANCE_MARKER')
+  })
+
+  it('omits nothing extra when styleGuidance is unset', async () => {
+    const result = await buildPrompt(baseInput({ styleGuidance: 'STYLE_GUIDANCE_MARKER phrasing rule.' }))
+    const without = await buildPrompt(baseInput())
+    expect(result.prompt).toContain('STYLE_GUIDANCE_MARKER')
+    expect(without.prompt).not.toContain('STYLE_GUIDANCE_MARKER')
+  })
+})
+
+describe('buildPrompt — conversation fidelity', () => {
+  it('places a speaker-attribution guardrail after history and before the reply cue', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Sumire' }),
+        personaName: 'Kai',
+        history: [
+          { id: '1', role: 'char', name: 'Sumire', text: 'Toradora is practically mainstream.' },
+          { id: '2', role: 'user', name: 'Kai', text: 'What type of books do you like?' },
+        ],
+      }),
+    )
+    const guardrail = "never attribute Sumire's words or beliefs to Kai"
+    expect(result.prompt).toContain(guardrail)
+    expect(result.prompt.indexOf('Kai: What type of books do you like?')).toBeLessThan(result.prompt.indexOf(guardrail))
+    expect(result.prompt.indexOf(guardrail)).toBeLessThan(result.prompt.lastIndexOf('Sumire:'))
+  })
+})
+
+describe('buildPrompt — impersonateAsUser', () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'How was your day?' },
+    { id: '2', role: 'char', name: 'Aria', text: 'Long. The archive flooded.' },
+  ]
+
+  it('swaps in the impersonation system block and drops the "write only {{char}}" framing', async () => {
+    const result = await buildPrompt(baseInput({ impersonateAsUser: true, history }))
+    expect(result.prompt).toContain("writing You's next line")
+    expect(result.prompt).not.toContain('Write only Aria (their words')
+  })
+
+  it('ends the prompt on the user turn cue, not the character cue', async () => {
+    const result = await buildPrompt(baseInput({ impersonateAsUser: true, history }))
+    expect(result.prompt.trimEnd().endsWith('You:')).toBe(true)
+  })
+
+  it('adds the terse "write only {{user}}, stop before {{char}} replies" reinforcement', async () => {
+    const result = await buildPrompt(baseInput({ impersonateAsUser: true, history }))
+    expect(result.prompt).toContain("[Write only You's next message. Stop before Aria replies.]")
+  })
+
+  it("suppresses the character's post-history instructions and the scene instruction", async () => {
+    const withImp = await buildPrompt(
+      baseInput({
+        impersonateAsUser: true,
+        history,
+        character: character({ name: 'Aria', post_history_instructions: 'PHI_MARKER stay terse' }),
+        sceneOptions: { expressionIds: ['neutral'], backgroundIds: ['library'] },
+      }),
+    )
+    expect(withImp.prompt).not.toContain('PHI_MARKER')
+    // The scene-tag instruction (already gated pre-change) still stays out.
+    expect(withImp.prompt).not.toContain('<<scene:')
+
+    const normal = await buildPrompt(
+      baseInput({
+        history,
+        character: character({ name: 'Aria', post_history_instructions: 'PHI_MARKER stay terse' }),
+      }),
+    )
+    expect(normal.prompt).toContain('PHI_MARKER')
+  })
+
+  it('still carries the world, persona, and history context', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        impersonateAsUser: true,
+        history,
+        worldDescription: 'WORLD_MARKER a rain-soaked city',
+        personaDescription: 'PERSONA_MARKER a junior archivist',
+      }),
+    )
+    expect(result.prompt).toContain('WORLD_MARKER')
+    expect(result.prompt).toContain('PERSONA_MARKER')
+    expect(result.prompt).toContain('The archive flooded.')
+  })
+})
+
+describe("buildPrompt — Author's Note", () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'FIRST_LINE' },
+    { id: '2', role: 'char', name: 'Aria', text: 'SECOND_LINE' },
+  ]
+
+  it('places a before_char note ahead of the character identity block', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A cheerful bard.' }),
+        authorNote: { text: 'NOTE_MARKER', position: 'before_char', depth: 0 },
+      }),
+    )
+    expect(result.prompt).toContain('NOTE_MARKER')
+    expect(result.prompt.indexOf('NOTE_MARKER')).toBeLessThan(result.prompt.indexOf('A cheerful bard.'))
+  })
+
+  it('places an after_char note after the card but before the history', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A cheerful bard.' }),
+        history,
+        authorNote: { text: 'NOTE_MARKER', position: 'after_char', depth: 0 },
+      }),
+    )
+    const noteAt = result.prompt.indexOf('NOTE_MARKER')
+    expect(noteAt).toBeGreaterThan(result.prompt.indexOf('A cheerful bard.'))
+    expect(noteAt).toBeLessThan(result.prompt.indexOf('FIRST_LINE'))
+  })
+
+  it('injects an at_depth note (depth 0) after the latest message, before the generation cue', async () => {
+    const result = await buildPrompt(
+      baseInput({ history, authorNote: { text: 'NOTE_MARKER', position: 'at_depth', depth: 0 } }),
+    )
+    expect(result.prompt.indexOf('NOTE_MARKER')).toBeGreaterThan(result.prompt.indexOf('SECOND_LINE'))
+    expect(result.prompt.trim().endsWith('Aria:')).toBe(true)
+  })
+
+  it('injects an at_depth note (depth 1) one message up from the latest', async () => {
+    const result = await buildPrompt(
+      baseInput({ history, authorNote: { text: 'NOTE_MARKER', position: 'at_depth', depth: 1 } }),
+    )
+    const noteAt = result.prompt.indexOf('NOTE_MARKER')
+    expect(noteAt).toBeGreaterThan(result.prompt.indexOf('FIRST_LINE'))
+    expect(noteAt).toBeLessThan(result.prompt.indexOf('SECOND_LINE'))
+  })
+
+  it('ignores a blank or unset note', async () => {
+    const unset = await buildPrompt(baseInput({ history }))
+    expect(unset.prompt).not.toContain('NOTE_MARKER')
+    const blank = await buildPrompt(
+      baseInput({ history, authorNote: { text: '   ', position: 'at_depth', depth: 0 } }),
+    )
+    expect(blank.prompt).not.toContain('NOTE_MARKER')
+  })
+
+  it('counts the at_depth note against the token budget', async () => {
+    const withNote = await buildPrompt(
+      baseInput({ history, authorNote: { text: 'NOTE_MARKER text here', position: 'at_depth', depth: 0 } }),
+    )
+    const without = await buildPrompt(baseInput({ history }))
+    expect(withNote.tokensUsed).toBeGreaterThan(without.tokensUsed)
+  })
+})
+
+describe('buildPrompt — World Info "at_depth" position', () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'FIRST_LINE' },
+    { id: '2', role: 'char', name: 'Aria', text: 'SECOND_LINE' },
+  ]
+  const lorebookWithEntry = (depth: number) => ({
+    entries: [
+      {
+        keys: [],
+        content: 'LORE_MARKER',
+        constant: true,
+        selective: false,
+        insertion_order: 100,
+        enabled: true,
+        activationMode: 'always' as const,
+        position: 'at_depth' as const,
+        depth,
+      },
+    ],
+  })
+
+  it('injects an at_depth entry (depth 0) after the latest message, before the generation cue', async () => {
+    const result = await buildPrompt(baseInput({ history, lorebooks: [lorebookWithEntry(0)] }))
+    expect(result.prompt.indexOf('LORE_MARKER')).toBeGreaterThan(result.prompt.indexOf('SECOND_LINE'))
+    expect(result.prompt.trim().endsWith('Aria:')).toBe(true)
+  })
+
+  it('injects an at_depth entry (depth 1) one message up from the latest', async () => {
+    const result = await buildPrompt(baseInput({ history, lorebooks: [lorebookWithEntry(1)] }))
+    const markerAt = result.prompt.indexOf('LORE_MARKER')
+    expect(markerAt).toBeGreaterThan(result.prompt.indexOf('FIRST_LINE'))
+    expect(markerAt).toBeLessThan(result.prompt.indexOf('SECOND_LINE'))
+  })
+
+  it('layers multiple at_depth items (a lorebook entry and the Author\'s Note) at their own distinct depths', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        lorebooks: [lorebookWithEntry(1)],
+        authorNote: { text: 'NOTE_MARKER', position: 'at_depth', depth: 0 },
+      }),
+    )
+    // Depth 1 (further back) should land before depth 0 (right before the generation cue).
+    expect(result.prompt.indexOf('LORE_MARKER')).toBeLessThan(result.prompt.indexOf('NOTE_MARKER'))
+    expect(result.prompt.indexOf('FIRST_LINE')).toBeLessThan(result.prompt.indexOf('LORE_MARKER'))
+    expect(result.prompt.indexOf('NOTE_MARKER')).toBeGreaterThan(result.prompt.indexOf('SECOND_LINE'))
+  })
+
+  it('counts an at_depth entry against the token budget', async () => {
+    const withEntry = await buildPrompt(baseInput({ history, lorebooks: [lorebookWithEntry(0)] }))
+    const without = await buildPrompt(baseInput({ history }))
+    expect(withEntry.tokensUsed).toBeGreaterThan(without.tokensUsed)
+  })
+})
+
+describe('buildPrompt — regex scripts (prompt target)', () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'the WIDGET is here' },
+    { id: '2', role: 'char', name: 'Aria', text: 'yes the WIDGET' },
+  ]
+
+  it('rewrites history turn text before it reaches the prompt', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        regexScripts: [{ id: '1', name: 'x', find: 'WIDGET', replace: 'gadget', target: 'prompt', enabled: true }],
+      }),
+    )
+    expect(result.prompt).toContain('the gadget is here')
+    expect(result.prompt).not.toContain('WIDGET')
+  })
+
+  it('leaves history untouched for a display-only script', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        regexScripts: [{ id: '1', name: 'x', find: 'WIDGET', replace: 'gadget', target: 'display', enabled: true }],
+      }),
+    )
+    expect(result.prompt).toContain('the WIDGET is here')
+  })
+})
+
+describe('buildPrompt — sectionBreakdown (Prompt Inspector token breakdown)', () => {
+  it('is omitted by default — no extra countTokens work on the normal generation path', async () => {
+    const result = await buildPrompt(
+      baseInput({ character: character({ name: 'Aria', description: 'A calm archivist.' }) }),
+    )
+    expect(result.sectionBreakdown).toBeUndefined()
+  })
+
+  it('reports one entry per non-empty included section, each counted on its own', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A calm archivist.', mes_example: 'EXAMPLE_LINE' }),
+        personaDescription: 'A curious traveler.',
+        history: [{ id: '1', role: 'user', name: 'You', text: 'Hi.' }],
+        includeSectionBreakdown: true,
+      }),
+    )
+    const ids = result.sectionBreakdown!.map((s) => s.id)
+    expect(ids).toContain('description')
+    expect(ids).toContain('persona')
+    expect(ids).toContain('examples')
+    expect(ids).toContain('history')
+    expect(ids).toContain('generationCue')
+    // No section reports a zero/negative count, and every count matches the fixture's own
+    // length-based `countTokens` applied to that exact section's text.
+    for (const section of result.sectionBreakdown!) {
+      expect(section.tokens).toBeGreaterThan(0)
+    }
+  })
+
+  it('omits a disabled section from the breakdown entirely, not just as a zero entry', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A calm archivist.' }),
+        chatSummary: 'SUMMARY_LINE',
+        promptSections: { summary: false },
+        includeSectionBreakdown: true,
+      }),
+    )
+    expect(result.sectionBreakdown!.map((s) => s.id)).not.toContain('summary')
+  })
+})
+
+describe('buildPrompt — example dialogue framing', () => {
+  it('frames example dialogue as a style reference, not something that already happened', async () => {
+    const result = await buildPrompt(
+      baseInput({ character: character({ name: 'Kestrel', mes_example: '{{user}}: Are you scared?\n{{char}}: Scared\'s the wrong word.' }) }),
+    )
+    expect(result.prompt).toContain("Example lines showing Kestrel's voice")
+    expect(result.prompt).toContain('not something that already happened')
+    expect(result.prompt).toContain('Do not repeat or continue these lines')
+    expect(result.prompt).toContain("Scared's the wrong word.")
+  })
+})
+
+describe('buildPrompt — promptSections (section 13 instruct-template-manager part c)', () => {
+  it('includes every section by default when promptSections is unset, same as before this option existed', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A cheerful bard.', mes_example: 'EXAMPLE_LINE' }),
+        personaDescription: 'A curious traveler.',
+        chatSummary: 'SUMMARY_LINE',
+        worldDescription: 'WORLD_LINE',
+        participants: [{ name: 'Kestrel' }],
+      }),
+    )
+    expect(result.prompt).toContain('You are Aria in a roleplay with')
+    expect(result.prompt).toContain('A cheerful bard.')
+    expect(result.prompt).toContain('SUMMARY_LINE')
+    expect(result.prompt).toContain('WORLD_LINE')
+    expect(result.prompt).toContain('About You')
+    expect(result.prompt).toContain('Also present in this scene')
+    expect(result.prompt).toContain('EXAMPLE_LINE')
+  })
+
+  it('omits exactly the disabled sections and leaves the rest untouched', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A cheerful bard.', mes_example: 'EXAMPLE_LINE' }),
+        personaDescription: 'A curious traveler.',
+        chatSummary: 'SUMMARY_LINE',
+        worldDescription: 'WORLD_LINE',
+        promptSections: { summary: false, world: false, examples: false },
+      }),
+    )
+    expect(result.prompt).not.toContain('SUMMARY_LINE')
+    expect(result.prompt).not.toContain('WORLD_LINE')
+    expect(result.prompt).not.toContain('EXAMPLE_LINE')
+    // Untouched sections still present.
+    expect(result.prompt).toContain('A cheerful bard.')
+    expect(result.prompt).toContain('About You')
+  })
+
+  it('turning off the description section still lets the default system prompt and history through', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', description: 'A cheerful bard.' }),
+        promptSections: { description: false },
+      }),
+    )
+    expect(result.prompt).toContain('You are Aria in a roleplay with')
+    expect(result.prompt).not.toContain('A cheerful bard.')
+  })
+
+  it('turning off the system section drops the default system prompt entirely', async () => {
+    const result = await buildPrompt(baseInput({ promptSections: { system: false } }))
+    expect(result.prompt).not.toContain('You are Aria in a roleplay with')
+  })
+
+  it('uses the global system prompt when the character has none, and the character override when set', async () => {
+    const withGlobal = await buildPrompt(baseInput({ globalSystemPrompt: 'GLOBAL_SYS_LINE' }))
+    expect(withGlobal.prompt).toContain('GLOBAL_SYS_LINE')
+    expect(withGlobal.prompt).not.toContain('You are Aria in a roleplay with')
+
+    const withCharOverride = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', system_prompt: 'CHAR_SYS_LINE' }),
+        globalSystemPrompt: 'GLOBAL_SYS_LINE',
+      }),
+    )
+    expect(withCharOverride.prompt).toContain('CHAR_SYS_LINE')
+    expect(withCharOverride.prompt).not.toContain('GLOBAL_SYS_LINE')
+  })
+
+  it("uses the chat's own mode-bundled system prompt over the global one, but still loses to the character's", async () => {
+    const withChatOverride = await buildPrompt(
+      baseInput({ globalSystemPrompt: 'GLOBAL_SYS_LINE', chatSystemPrompt: 'CHAT_SYS_LINE' }),
+    )
+    expect(withChatOverride.prompt).toContain('CHAT_SYS_LINE')
+    expect(withChatOverride.prompt).not.toContain('GLOBAL_SYS_LINE')
+
+    const withCharWinning = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', system_prompt: 'CHAR_SYS_LINE' }),
+        globalSystemPrompt: 'GLOBAL_SYS_LINE',
+        chatSystemPrompt: 'CHAT_SYS_LINE',
+      }),
+    )
+    expect(withCharWinning.prompt).toContain('CHAR_SYS_LINE')
+    expect(withCharWinning.prompt).not.toContain('CHAT_SYS_LINE')
+  })
+
+  it('appends the global post-history steering after any character post_history_instructions', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        character: character({ name: 'Aria', post_history_instructions: 'CHAR_PHI' }),
+        globalPostHistory: 'GLOBAL_PHI',
+      }),
+    )
+    expect(result.prompt).toContain('CHAR_PHI')
+    expect(result.prompt).toContain('GLOBAL_PHI')
+    expect(result.prompt.indexOf('CHAR_PHI')).toBeLessThan(result.prompt.indexOf('GLOBAL_PHI'))
+  })
+
+  it('turning off persona drops the "About {{user}}" line', async () => {
+    const result = await buildPrompt(
+      baseInput({ personaDescription: 'A curious traveler.', promptSections: { persona: false } }),
+    )
+    expect(result.prompt).not.toContain('About You')
+    expect(result.prompt).not.toContain('A curious traveler.')
+  })
+
+  it('turning off participants drops the roster even when other characters are present', async () => {
+    const result = await buildPrompt(
+      baseInput({ participants: [{ name: 'Kestrel' }], promptSections: { participants: false } }),
+    )
+    expect(result.prompt).not.toContain('Also present in this scene')
+  })
+})
+
+describe('buildPrompt — history trimming stops once the budget is spent', () => {
+  /** 40 turns of ~25 tokens each against a budget only a couple of them can fit into. */
+  function longHistory(count: number): ChatMessage[] {
+    return Array.from({ length: count }, (_, i) => ({
+      id: String(i),
+      role: (i % 2 === 0 ? 'user' : 'char') as ChatMessage['role'],
+      name: i % 2 === 0 ? 'You' : 'Aria',
+      text: `Turn number ${i} with enough text to cost a real number of tokens.`,
+    }))
+  }
+
+  it('keeps a contiguous window — never drops a long turn but keeps shorter ones behind it', async () => {
+    // The failure this guards: turn 5 is far too big to fit, but turns 0-4 are tiny. Skipping 5
+    // and keeping 0-4 would hand the model a transcript with a beat missing from the middle.
+    const msgs: ChatMessage[] = [
+      { id: '0', role: 'user', name: 'You', text: 'a' },
+      { id: '1', role: 'char', name: 'Aria', text: 'b' },
+      { id: '2', role: 'user', name: 'You', text: 'c' },
+      { id: '3', role: 'char', name: 'Aria', text: 'd' },
+      { id: '4', role: 'user', name: 'You', text: 'HUGE '.repeat(400) },
+      { id: '5', role: 'char', name: 'Aria', text: 'the latest reply' },
+    ]
+    const result = await buildPrompt(baseInput({ history: msgs, contextBudget: 200 }))
+    expect(result.prompt).toContain('the latest reply')
+    // The oversized turn is out, and so is everything older than it — no hole in the middle.
+    expect(result.prompt).not.toContain('HUGE')
+    expect(result.prompt).not.toContain('You: a')
+    expect(result.includedMessageCount).toBe(1)
+    expect(result.excludedMessageCount).toBe(5)
+  })
+
+  it('does not count turns it already knows cannot fit', async () => {
+    const counted: string[] = []
+    const result = await buildPrompt(
+      baseInput({
+        history: longHistory(40),
+        contextBudget: 60,
+        countTokens: async (text: string) => {
+          counted.push(text)
+          return Math.ceil(text.length / 4)
+        },
+      }),
+    )
+    // Every turn is either kept or dropped — the accounting stays exact despite the early exit.
+    expect(result.includedMessageCount + result.excludedMessageCount).toBe(40)
+    expect(result.includedMessageCount).toBeGreaterThan(0)
+    // The whole point: the 30-odd turns past the budget never reached the tokenizer. Counting is
+    // one HTTP round-trip per call against a real backend, so this is the cost being avoided.
+    const historyCalls = counted.filter((t) => t.includes('Turn number'))
+    expect(historyCalls.length).toBeLessThan(10)
+  })
+
+  it('keeps the newest turns, not the oldest', async () => {
+    const result = await buildPrompt(baseInput({ history: longHistory(40), contextBudget: 60 }))
+    expect(result.prompt).toContain('Turn number 39')
+    expect(result.prompt).not.toContain('Turn number 0 ')
+  })
+
+  it('still keeps the latest turn when it alone blows the whole budget', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history: longHistory(5),
+        // Smaller than a single rendered turn, so the "always keep one" guard is what decides.
+        contextBudget: 1,
+      }),
+    )
+    expect(result.includedMessageCount).toBe(1)
+    expect(result.excludedMessageCount).toBe(4)
+    expect(result.prompt).toContain('Turn number 4')
+  })
+})
+
+describe('buildPrompt — worldMoment sits after the history, not in the cacheable prefix', () => {
+  const history: ChatMessage[] = [
+    { id: '1', role: 'user', name: 'You', text: 'HISTORY_MARKER' },
+  ]
+
+  it('places stable world text before the history and the moment after it', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        worldDescription: 'STABLE_WORLD',
+        worldMoment: 'VOLATILE_MOMENT',
+      }),
+    )
+    const stable = result.prompt.indexOf('STABLE_WORLD')
+    const hist = result.prompt.indexOf('HISTORY_MARKER')
+    const moment = result.prompt.indexOf('VOLATILE_MOMENT')
+    expect(stable).toBeGreaterThanOrEqual(0)
+    expect(moment).toBeGreaterThanOrEqual(0)
+    // The whole point of the split: changing the moment must not disturb any token before it.
+    expect(stable).toBeLessThan(hist)
+    expect(hist).toBeLessThan(moment)
+  })
+
+  it('leaves the cacheable prefix byte-identical when only the moment changes', async () => {
+    const morning = await buildPrompt(
+      baseInput({ history, worldDescription: 'STABLE_WORLD', worldMoment: 'It is a clear morning.' }),
+    )
+    const storm = await buildPrompt(
+      baseInput({ history, worldDescription: 'STABLE_WORLD', worldMoment: 'It is a stormy night.' }),
+    )
+    expect(morning.systemText).toBe(storm.systemText)
+    expect(morning.conversationText).not.toBe(storm.conversationText)
+  })
+
+  it('the world section toggle governs the moment too', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        history,
+        worldDescription: 'STABLE_WORLD',
+        worldMoment: 'VOLATILE_MOMENT',
+        promptSections: { world: false },
+      }),
+    )
+    expect(result.prompt).not.toContain('STABLE_WORLD')
+    expect(result.prompt).not.toContain('VOLATILE_MOMENT')
+  })
+
+  it('omitting worldMoment leaves the prompt exactly as it was before the split', async () => {
+    const result = await buildPrompt(baseInput({ history, worldDescription: 'STABLE_WORLD' }))
+    expect(result.prompt).toContain('STABLE_WORLD')
+    expect(result.prompt).not.toContain('undefined')
+  })
+})
+
+describe('styleGuidanceItems — graceful degradation under a tight budget', () => {
+  // Zeroes every fixed section so `fixedTokens` is 0 and the only thing competing for the budget
+  // besides history is the postHistory block itself — makes the token math in these tests exact
+  // rather than approximate.
+  const noFixedSections: Partial<PromptBuildInput> = {
+    promptSections: { system: false, summary: false, world: false, description: false, participants: false, persona: false, examples: false },
+  }
+
+  it('includes every item, in order, when the budget is roomy', async () => {
+    const items: StyleGuidanceItem[] = [
+      { text: 'ESSENTIAL_ONE', essential: true },
+      { text: 'FLAVOR_ONE', essential: false },
+      { text: 'FLAVOR_TWO', essential: false },
+      { text: 'ESSENTIAL_TWO', essential: true },
+    ]
+    const result = await buildPrompt(baseInput({ ...noFixedSections, styleGuidanceItems: items, contextBudget: 4000 }))
+    expect(result.styleGuidanceDroppedCount).toBe(0)
+    expect(result.prompt.indexOf('ESSENTIAL_ONE')).toBeLessThan(result.prompt.indexOf('FLAVOR_ONE'))
+    expect(result.prompt.indexOf('FLAVOR_ONE')).toBeLessThan(result.prompt.indexOf('FLAVOR_TWO'))
+    expect(result.prompt.indexOf('FLAVOR_TWO')).toBeLessThan(result.prompt.indexOf('ESSENTIAL_TWO'))
+  })
+
+  it('drops the item nearest the end of the non-essential run first, keeping an earlier one as long as it can', async () => {
+    const essential: StyleGuidanceItem = { text: 'ESSENTIAL_MARKER', essential: true }
+    const flavorKept: StyleGuidanceItem = { text: 'KEPT_MARKER', essential: false }
+    // ~104 tokens (estimator: ceil(len/4)) vs KEPT_MARKER's ~3 — a gap wide enough that the exact
+    // value of buildPrompt's internal history-reserve floor can't accidentally make this flaky.
+    const flavorDropped: StyleGuidanceItem = { text: `DROPPED_MARKER_${'x'.repeat(400)}`, essential: false }
+
+    // Calibrate against the real function rather than hand-computing token counts: build once with
+    // only the item that's expected to survive, and read off exactly how much room it and the
+    // generation cue actually cost.
+    const keptOnly = await buildPrompt(
+      baseInput({ ...noFixedSections, styleGuidanceItems: [essential, flavorKept], contextBudget: 4000, includeSectionBreakdown: true }),
+    )
+    const keptOnlyPostHistoryTokens = keptOnly.sectionBreakdown!.find((s) => s.id === 'postHistory')!.tokens
+    const genCueTokens = keptOnly.sectionBreakdown!.find((s) => s.id === 'generationCue')!.tokens
+    // Exactly enough for the kept-only block plus a 320-token cushion: comfortably above the 300
+    // reserve `buildPrompt` holds back for history once nothing more is worth dropping, but well
+    // short of the ~104 extra tokens the long item would add back in if it were still there.
+    const contextBudget = keptOnlyPostHistoryTokens + genCueTokens + 320
+
+    const result = await buildPrompt(
+      baseInput({ ...noFixedSections, styleGuidanceItems: [essential, flavorKept, flavorDropped], contextBudget, includeSectionBreakdown: true }),
+    )
+    expect(result.styleGuidanceDroppedCount).toBe(1)
+    expect(result.prompt).toContain('ESSENTIAL_MARKER')
+    expect(result.prompt).toContain('KEPT_MARKER')
+    expect(result.prompt).not.toContain('DROPPED_MARKER')
+  })
+
+  it('never drops an essential item, however tight the budget gets', async () => {
+    const items: StyleGuidanceItem[] = [
+      { text: 'ESSENTIAL_ALWAYS', essential: true },
+      { text: 'FLAVOR_A', essential: false },
+      { text: 'FLAVOR_B', essential: false },
+      { text: 'FLAVOR_C', essential: false },
+    ]
+    const result = await buildPrompt(baseInput({ ...noFixedSections, styleGuidanceItems: items, contextBudget: 50, history: [] }))
+    expect(result.prompt).toContain('ESSENTIAL_ALWAYS')
+    expect(result.prompt).not.toContain('FLAVOR_A')
+    expect(result.prompt).not.toContain('FLAVOR_B')
+    expect(result.prompt).not.toContain('FLAVOR_C')
+    expect(result.styleGuidanceDroppedCount).toBe(3)
+  })
+
+  it('a plain-string styleGuidance becomes one essential item — never dropped, count always 0', async () => {
+    const result = await buildPrompt(baseInput({ ...noFixedSections, styleGuidance: 'OLD_STYLE_STRING', contextBudget: 50, history: [] }))
+    expect(result.prompt).toContain('OLD_STYLE_STRING')
+    expect(result.styleGuidanceDroppedCount).toBe(0)
+  })
+
+  it('styleGuidanceItems wins when both forms are somehow given', async () => {
+    const result = await buildPrompt(
+      baseInput({
+        ...noFixedSections,
+        styleGuidance: 'SHOULD_NOT_APPEAR',
+        styleGuidanceItems: [{ text: 'SHOULD_APPEAR', essential: true }],
+        contextBudget: 4000,
+      }),
+    )
+    expect(result.prompt).toContain('SHOULD_APPEAR')
+    expect(result.prompt).not.toContain('SHOULD_NOT_APPEAR')
+  })
+})
