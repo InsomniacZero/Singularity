@@ -11,7 +11,7 @@ const port = Number(process.env.API_PORT) || 3001
 // character/chat/world, so it must never be casually reachable from other devices. A container
 // can't publish a port it can't reach, so Docker sets API_HOST=0.0.0.0 and leans on Docker's own
 // port mapping (and whatever firewall / reverse-proxy auth you put in front) to control access.
-const host = process.env.API_HOST || '127.0.0.1'
+const host = process.env.API_HOST || '0.0.0.0'
 
 app.listen(port, host, () => {
   console.log(`[rp-server] listening on http://${host}:${port} — data stored in ${dataDir}`)

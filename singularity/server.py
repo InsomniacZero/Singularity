@@ -1037,7 +1037,7 @@ async def api_get_services():
 
 
 @app.get("/api/tavern/status")
-async def api_tavern_status():
+async def api_tavern_status(request: Request):
     """Detect if Tavern Web Studio is running on default or alternate ports."""
     import socket
 
@@ -1049,15 +1049,18 @@ async def api_tavern_status():
         except Exception:
             return False
 
+    req_host = request.headers.get("host", "localhost:9000").split(":")[0]
+    scheme = request.url.scheme or "http"
+
     for client_port, api_port in [(5173, 3001), (5180, 3002)]:
         if is_port_open(client_port) or is_port_open(api_port):
             return {
                 "running": True,
-                "client_url": f"http://localhost:{client_port}",
-                "api_url": f"http://localhost:{api_port}",
+                "client_url": f"{scheme}://{req_host}:{client_port}",
+                "api_url": f"{scheme}://{req_host}:{api_port}",
             }
 
-    return {"running": False, "client_url": "http://localhost:5173", "api_url": "http://localhost:3001"}
+    return {"running": False, "client_url": f"{scheme}://{req_host}:5173", "api_url": f"{scheme}://{req_host}:3001"}
 
 
 @app.post("/api/services/start_all")

@@ -88,6 +88,8 @@ case "$1" in
                     cd "$TAVERN_DIR"
                     export NVM_DIR="$HOME/.nvm"
                     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh" && nvm use 24 >/dev/null 2>&1 || true
+                    export API_HOST="0.0.0.0"
+                    export RP_ALLOWED_ORIGINS="*"
                     if [ ! -d "node_modules" ]; then
                         echo "  [🏰] Installing Tavern dependencies (first-time boot)..."
                         npm install --silent > /dev/null 2>&1

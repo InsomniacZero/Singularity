@@ -135,7 +135,7 @@ if exist "%ROOT_DIR%TAV-TEST\package.json" (
 
 if defined TAV_DIR (
     echo [*] Starting Tavern Studio alongside Singularity (ports 5173 / 3001)...
-    start "Tavern Studio" /min cmd /c "cd /d "!TAV_DIR!" && if not exist node_modules npm install && npm run dev"
+    start "Tavern Studio" /min cmd /c "cd /d "!TAV_DIR!" && set API_HOST=0.0.0.0&& set RP_ALLOWED_ORIGINS=*&& if not exist node_modules npm install && npm run dev"
 )
 
 "%PYTHON_EXE%" %PYTHON_ARGS% server.py %*

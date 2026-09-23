@@ -8,6 +8,15 @@ import type { RequestHandler } from 'express'
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]'])
 
+function isLocalOrPrivateHost(hostname: string): boolean {
+  if (LOOPBACK_HOSTS.has(hostname)) return true
+  // Allow all standard private IPv4 ranges (192.168.x.x, 10.x.x.x, 172.16-31.x.x, 100.64-127.x.x)
+  if (/^(192\.168\.|10\.|172\.(1[6-9]|2[0-9]|3[0-1])\.|100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.)/.test(hostname)) return true
+  // Allow .local mDNS hostnames
+  if (hostname.endsWith('.local')) return true
+  return false
+}
+
 /**
  * Extra origins to accept beyond loopback, for a deployment reached over a network — Docker on a
  * home server, a reverse proxy, another device on the LAN. Set `RP_ALLOWED_ORIGINS` to a
@@ -32,7 +41,7 @@ export function originAllowed(origin: string | undefined): boolean {
   } catch {
     return false
   }
-  if (LOOPBACK_HOSTS.has(url.hostname)) return true
+  if (isLocalOrPrivateHost(url.hostname)) return true
   return extra.includes(url.origin)
 }
 

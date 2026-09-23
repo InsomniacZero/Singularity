@@ -5612,13 +5612,21 @@ document.addEventListener('DOMContentLoaded', () => {
 // Tavern Studio External Integration
 // ===================================================================
 async function openTavernStudio() {
-  let targetUrl = 'http://localhost:5173';
+  const currentHost = window.location.hostname || 'localhost';
+  let targetUrl = `${window.location.protocol}//${currentHost}:5173`;
   try {
     const res = await fetch('/api/tavern/status');
     if (res.ok) {
       const data = await res.json();
       if (data.client_url) {
-        targetUrl = data.client_url;
+        try {
+          const u = new URL(data.client_url);
+          u.hostname = currentHost;
+          u.protocol = window.location.protocol;
+          targetUrl = u.toString();
+        } catch {
+          targetUrl = data.client_url;
+        }
       }
     }
   } catch (e) {
