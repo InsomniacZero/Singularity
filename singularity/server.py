@@ -1219,38 +1219,14 @@ async def api_tavern_start(request: Request = None):
         startupinfo.wShowWindow = 0  # SW_HIDE
         creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
-    # Auto-install dependencies if node_modules is missing (first-time setup)
-    nm_path = os.path.join(tav_dir, "node_modules")
-    if not os.path.isdir(nm_path):
-        try:
-            if sys.platform == "win32":
-                subprocess.run(
-                    f'"{runner}" install',
-                    cwd=tav_dir,
-                    env=env,
-                    shell=True,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    startupinfo=startupinfo,
-                    creationflags=creationflags,
-                    timeout=180,
-                )
-            else:
-                subprocess.run(
-                    [runner, "install"],
-                    cwd=tav_dir,
-                    env=env,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=180,
-                )
-        except Exception:
-            pass
-
     # Launch Tavern server natively in background
     try:
         if sys.platform == "win32":
-            cmd_str = f'"{runner}" run dev'
+            tav_bat = os.path.join(tav_dir, "run_tavern.bat")
+            if os.path.isfile(tav_bat):
+                cmd_str = f'cmd.exe /c "call "{tav_bat}""'
+            else:
+                cmd_str = f'"{runner}" run dev'
             subprocess.Popen(
                 cmd_str,
                 cwd=tav_dir,
@@ -1263,6 +1239,20 @@ async def api_tavern_start(request: Request = None):
                 creationflags=creationflags,
             )
         else:
+            nm_path = os.path.join(tav_dir, "node_modules")
+            if not os.path.isdir(nm_path):
+                try:
+                    subprocess.run(
+                        [runner, "install"],
+                        cwd=tav_dir,
+                        env=env,
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        timeout=180,
+                    )
+                except Exception:
+                    pass
+
             subprocess.Popen(
                 [runner, "run", "dev"],
                 cwd=tav_dir,
@@ -1272,6 +1262,7 @@ async def api_tavern_start(request: Request = None):
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
             )
+
     except Exception as e:
         return {"status": "error", "error": str(e)}
 

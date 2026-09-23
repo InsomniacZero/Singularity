@@ -138,7 +138,11 @@ if defined TAV_DIR (
         netstat -ano | findstr ":3001" >nul 2>&1
         if errorlevel 1 (
             echo [*] Starting Tavern Studio alongside Singularity [ports 5173 / 3001]...
-            start "Tavern Studio" /min cmd /c "cd /d "!TAV_DIR!" && set API_HOST=0.0.0.0&& set RP_ALLOWED_ORIGINS=*&& if not exist node_modules npm install && npm run dev"
+            if exist "!TAV_DIR!\run_tavern.bat" (
+                start "Tavern Web Studio" cmd /c "call "!TAV_DIR!\run_tavern.bat""
+            ) else (
+                start "Tavern Web Studio" cmd /c "cd /d "!TAV_DIR!" && set API_HOST=0.0.0.0&& set RP_ALLOWED_ORIGINS=*&& call npm run dev"
+            )
         )
     )
 )

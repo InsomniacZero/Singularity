@@ -5694,7 +5694,7 @@ async function openTavernStudio() {
               <div style="text-align:center;padding:2.5rem;background:rgba(255,255,255,0.03);border:1px solid rgba(168,85,247,0.3);border-radius:18px;max-width:420px;box-shadow:0 12px 36px rgba(0,0,0,0.5);">
                 <div style="font-size:3rem;margin-bottom:12px;">🏰</div>
                 <h2 style="margin:0 0 8px 0;color:#f8fafc;font-size:1.3rem;">Starting Tavern Web Studio...</h2>
-                <p style="color:#94a3b8;font-size:0.9rem;margin:0 0 16px 0;line-height:1.4;">Connecting to Singularity gateway & spinning up dev server...</p>
+                <p id="tav-status-msg" style="color:#94a3b8;font-size:0.9rem;margin:0 0 16px 0;line-height:1.4;">Connecting to Singularity gateway & spinning up dev server...</p>
                 <div style="display:inline-block;width:24px;height:24px;border:3px solid rgba(168,85,247,0.3);border-top-color:#d8b4fe;border-radius:50%;animation:spin 1s linear infinite;"></div>
                 <style>@keyframes spin { to { transform: rotate(360deg); } }</style>
               </div>
@@ -5725,10 +5725,10 @@ async function openTavernStudio() {
     console.warn('Tavern auto-start call failed:', err);
   }
 
-  // 4. Poll up to 12 seconds for port readiness
+  // 4. Poll for port readiness (poll up to 45 seconds to allow first-time npm install to finish)
   let ready = false;
-  for (let i = 0; i < 20; i++) {
-    await new Promise(r => setTimeout(r, 600));
+  for (let i = 0; i < 45; i++) {
+    await new Promise(r => setTimeout(r, 1000));
     try {
       const res = await fetch('/api/tavern/status');
       if (res.ok) {
@@ -5741,6 +5741,14 @@ async function openTavernStudio() {
         }
       }
     } catch (_) {}
+
+    // Update placeholder window progress
+    if (tabWin && !tabWin.closed && tabWin.document) {
+      const msgEl = tabWin.document.getElementById('tav-status-msg');
+      if (msgEl) {
+        msgEl.textContent = `Compiling and waiting for port 5173... (${i + 1}s / 45s)`;
+      }
+    }
   }
 
   try {
@@ -5750,20 +5758,41 @@ async function openTavernStudio() {
     targetUrl = u.toString();
   } catch {}
 
-  if (typeof showToast === 'function') {
-    showToast(`Tavern Web Studio ready! Launching ${targetUrl}...`, 'success', 2500);
-  }
+  if (ready) {
+    if (typeof showToast === 'function') {
+      showToast(`Tavern Web Studio ready! Launching ${targetUrl}...`, 'success', 2500);
+    }
 
-  if (isMobile) {
-    window.location.href = targetUrl;
-  } else if (tabWin && !tabWin.closed) {
-    tabWin.location.replace(targetUrl);
-  } else {
-    const win = window.open(targetUrl, '_blank', 'noopener,noreferrer');
-    if (!win || win.closed || typeof win.closed === 'undefined') {
-      if (typeof showToast === 'function') {
-        showToast(`Tavern ready: <a href="${targetUrl}" target="_blank" style="color:var(--accent);text-decoration:underline;">Click here to open ${targetUrl}</a>`, 'success');
+    if (isMobile) {
+      window.location.href = targetUrl;
+    } else if (tabWin && !tabWin.closed) {
+      tabWin.location.replace(targetUrl);
+    } else {
+      const win = window.open(targetUrl, '_blank', 'noopener,noreferrer');
+      if (!win || win.closed || typeof win.closed === 'undefined') {
+        if (typeof showToast === 'function') {
+          showToast(`Tavern ready: <a href="${targetUrl}" target="_blank" style="color:var(--accent);text-decoration:underline;">Click here to open ${targetUrl}</a>`, 'success');
+        }
       }
+    }
+  } else {
+    // Port NOT ready yet — DO NOT redirect to dead port to avoid ERR_CONNECTION_REFUSED
+    if (typeof showToast === 'function') {
+      showToast('Tavern Studio is taking a moment to start (installing packages or compiling). Please wait or click Check Again in the new tab.', 'warning', 8000);
+    }
+    if (tabWin && !tabWin.closed && tabWin.document && tabWin.document.body) {
+      tabWin.document.body.innerHTML = `
+        <div style="text-align:center;padding:2.5rem;background:rgba(255,255,255,0.03);border:1px solid rgba(168,85,247,0.4);border-radius:18px;max-width:450px;box-shadow:0 12px 36px rgba(0,0,0,0.5);font-family:system-ui,sans-serif;color:#f8fafc;">
+          <div style="font-size:3rem;margin-bottom:12px;">⏳</div>
+          <h2 style="margin:0 0 8px 0;color:#d8b4fe;font-size:1.3rem;">Tavern Studio Still Starting</h2>
+          <p style="color:#94a3b8;font-size:0.9rem;margin:0 0 20px 0;line-height:1.5;">
+            The dev server is still downloading packages or compiling Vite. Keep this tab open — click below to check if port 5173 is live!
+          </p>
+          <button onclick="window.location.reload()" style="background:#a855f7;color:#fff;border:none;padding:10px 24px;border-radius:8px;font-weight:600;cursor:pointer;font-size:0.95rem;box-shadow:0 4px 14px rgba(168,85,247,0.4);">
+            Check Port 5173
+          </button>
+        </div>
+      `;
     }
   }
 }
