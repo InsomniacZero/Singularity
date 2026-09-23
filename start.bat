@@ -117,30 +117,27 @@ if "%ARG1%"=="help" goto :RUN_CLI
 :: Launch Gateway Server
 cls
 echo ======================================================================
-echo   SINGULARITY UNIFIED AI GATEWAY & TAVERN (Windows)
+echo   SINGULARITY UNIFIED AI GATEWAY ^& TAVERN (Windows)
 echo ======================================================================
 echo   Dashboard:       http://localhost:9000
 echo   Tavern Studio:   http://localhost:5173
 echo   API Base:        http://localhost:9000/v1
-echo   Phone / Remote:  http://^<YOUR_PC_IP^>:5173 (Check Wi-Fi IP)
+echo   Phone / Remote:  http://^<YOUR_PC_IP^>:5173 [Check Wi-Fi IP]
 echo   NOTE: Do NOT type 0.0.0.0 on phones - always use your PC's LAN IP!
 echo ======================================================================
 echo.
 
 :: Launch Tavern Studio alongside Singularity if present
 set "TAV_DIR="
-if exist "%ROOT_DIR%TAVERN\package.json" (
-    set "TAV_DIR=%ROOT_DIR%TAVERN"
-) else if exist "%ROOT_DIR%TAV-TEST\package.json" (
-    set "TAV_DIR=%ROOT_DIR%TAV-TEST"
-)
+if exist "%ROOT_DIR%TAVERN\package.json" set "TAV_DIR=%ROOT_DIR%TAVERN"
+if not defined TAV_DIR if exist "%ROOT_DIR%TAV-TEST\package.json" set "TAV_DIR=%ROOT_DIR%TAV-TEST"
 
 if defined TAV_DIR (
     netstat -ano | findstr ":5173" >nul 2>&1
     if errorlevel 1 (
         netstat -ano | findstr ":3001" >nul 2>&1
         if errorlevel 1 (
-            echo [*] Starting Tavern Studio alongside Singularity (ports 5173 / 3001)...
+            echo [*] Starting Tavern Studio alongside Singularity [ports 5173 / 3001]...
             start "Tavern Studio" /min cmd /c "cd /d "!TAV_DIR!" && set API_HOST=0.0.0.0&& set RP_ALLOWED_ORIGINS=*&& if not exist node_modules npm install && npm run dev"
         )
     )
