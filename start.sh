@@ -94,8 +94,8 @@ trap 'EXIT_CODE=$?; if [ $EXIT_CODE -ne 0 ]; then echo ""; echo "Singularity exi
 
 cd "$DIR/singularity" || exit 1
 
-# Check basic dependencies (fastapi, uvicorn, httpx, starlette)
-if ! "$PYTHON_BIN" -c "import fastapi, starlette, uvicorn, httpx" 2>/dev/null; then
+# Check basic dependencies (starlette, uvicorn, httpx)
+if ! "$PYTHON_BIN" -c "import starlette, uvicorn, httpx" 2>/dev/null; then
     echo "  [*] Installing required dependencies from requirements.txt..."
     "$PYTHON_BIN" -m pip install -r "$DIR/requirements.txt" || true
 fi
