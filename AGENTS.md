@@ -151,6 +151,10 @@ Keep these past failures in mind to avoid repeating them:
     - *Mistake*: Selecting image models like `gpt-image-2.5-flare` failed with *"image generation isn't available in this temporary chat"*. This was caused by hardcoding `history_and_training_disabled: True` in OpenAI payload (OpenAI strictly disables DALL-E in temporary chats) and direct browser loading of `backend-api/estuary` URLs which return 403 without session cookies.
     - *Lesson*: For image models, dynamically toggle `history_and_training_disabled: not is_image_model`, add `system_hints: ["picture_v2"]`, download the image binary in the authenticated session, persist to `singularity/static/generated/`, stream base64 data URIs, and auto-hide the conversation via `PATCH /backend-api/conversation/{conv_id}` with `{"is_visible": False}`.
 
+14. **Generated Image Viewport UI & Clean Floating Action Overlays**:
+    - *Mistake*: Encasing AI-generated images inside bloated cards with extra border outlines and footer caption bars ("Neural Synthesis", redundant prompt text).
+    - *Lesson*: Present generated images cleanly with rounded corners (`border-radius: 16px`), no caption footer, and a sleek floating top-right frosted glass overlay containing only **Copy** (with checkmark feedback) and **Download** SVG buttons with tooltips.
+
 
 
 

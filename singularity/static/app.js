@@ -2516,28 +2516,20 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
   extractedImages.forEach((img, idx) => {
     const card = document.createElement('div');
     card.className = 'gpt-rendered-image-card';
-    const filename = `singularity-${state.selectedModel}-${Date.now()}-${idx + 1}.png`;
+    const filename = `singularity-${state.selectedModel || 'image'}-${Date.now()}-${idx + 1}.png`;
 
     card.innerHTML = `
       <div class="gpt-image-viewport">
         <img src="${img.src}" alt="${escapeHtml(img.alt || promptText || 'Generated Image')}" class="gpt-image-element" loading="lazy" />
         <div class="gpt-image-glass-toolbar">
-          <button class="gpt-glass-action-btn btn-zoom" title="View Full Size (Lightbox)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="15 3 21 3 21 9"></polyline>
-              <polyline points="9 21 3 21 3 15"></polyline>
-              <line x1="21" y1="3" x2="14" y2="10"></line>
-              <line x1="3" y1="21" x2="10" y2="14"></line>
-            </svg>
-          </button>
-          <button class="gpt-glass-action-btn btn-copy" title="Copy Image">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button class="gpt-glass-action-btn btn-copy" data-tooltip="Copy" aria-label="Copy image">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
             </svg>
           </button>
-          <button class="gpt-glass-action-btn btn-download" title="Download Image">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <button class="gpt-glass-action-btn btn-download" data-tooltip="Download" aria-label="Download image">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
               <polyline points="7 10 12 15 17 10"></polyline>
               <line x1="12" y1="15" x2="12" y2="3"></line>
@@ -2545,29 +2537,41 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
           </button>
         </div>
       </div>
-      <div class="gpt-image-caption-bar">
-        <p class="gpt-image-caption-text">${escapeHtml(promptText || img.alt || 'Generated with Singularity Universal Engine')}</p>
-        <div class="gpt-image-caption-meta">
-          <span>${escapeHtml(state.selectedModel)}</span>
-          <span>Neural Synthesis</span>
-        </div>
-      </div>
     `;
 
-    card.querySelector('.gpt-image-viewport').addEventListener('click', () => {
-      openMediaLightbox(img.src, 'image', promptText || img.alt);
-    });
-    card.querySelector('.btn-zoom').addEventListener('click', (e) => {
-      e.stopPropagation();
+    const viewportEl = card.querySelector('.gpt-image-viewport');
+    viewportEl.addEventListener('click', (e) => {
+      if (e.target.closest('.gpt-glass-action-btn')) return;
       openMediaLightbox(img.src, 'image', promptText || img.alt);
     });
 
-    card.querySelector('.btn-copy').addEventListener('click', (e) => {
+    const copyBtn = card.querySelector('.btn-copy');
+    copyBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      copyMediaToClipboard(img.src);
+      await copyMediaToClipboard(img.src);
+      copyBtn.setAttribute('data-tooltip', 'Copied!');
+      copyBtn.innerHTML = `
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: #10b981;">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+      `;
+      const tip = document.getElementById('singularity-tooltip');
+      if (tip && tip.classList.contains('visible')) {
+        tip.textContent = 'Copied!';
+      }
+      setTimeout(() => {
+        copyBtn.setAttribute('data-tooltip', 'Copy');
+        copyBtn.innerHTML = `
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+        `;
+      }, 2000);
     });
 
-    card.querySelector('.btn-download').addEventListener('click', (e) => {
+    const downloadBtn = card.querySelector('.btn-download');
+    downloadBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       downloadMediaFile(img.src, filename);
     });

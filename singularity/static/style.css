@@ -3809,38 +3809,36 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
   margin-top: 10px;
   margin-bottom: 8px;
   max-width: 520px;
-  width: 100%;
-  border-radius: var(--radius-md);
-  background: var(--bg-surface);
-  border: 1px solid var(--border-subtle);
-  overflow: hidden;
-  box-shadow: var(--shadow-md);
-  transition: border-color var(--transition-fast);
+  width: fit-content;
+  border-radius: 16px;
+  background: transparent;
+  border: none;
+  overflow: visible;
   position: relative;
-}
-
-.gpt-rendered-image-card:hover {
-  border-color: var(--border-medium);
 }
 
 .gpt-image-viewport {
   position: relative;
-  background: #0d0d0d;
-  display: flex;
+  background: transparent;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 200px;
-  max-height: 560px;
+  border-radius: 16px;
   overflow: hidden;
   cursor: zoom-in;
+  max-width: 100%;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .gpt-image-element {
-  width: 100%;
+  width: auto;
+  max-width: 100%;
   height: auto;
   max-height: 560px;
   object-fit: contain;
   display: block;
+  border-radius: 15px;
   transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -3848,7 +3846,7 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
   transform: scale(1.012);
 }
 
-/* Floating Glass Action Bar (Top-Right) */
+/* Floating Glass Action Bar (Top-Right Overlay) */
 .gpt-image-glass-toolbar {
   position: absolute;
   top: 10px;
@@ -3856,20 +3854,20 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 6px;
-  background: rgba(20, 19, 18, 0.85);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--radius-sm);
+  padding: 4px;
+  background: rgba(18, 18, 18, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
   z-index: 10;
   opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 0.2s ease, transform 0.2s ease;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5);
+  transform: translateY(-3px);
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
 }
 
-.gpt-rendered-image-card:hover .gpt-image-glass-toolbar,
+.gpt-image-viewport:hover .gpt-image-glass-toolbar,
 .gpt-image-glass-toolbar:focus-within {
   opacity: 1;
   transform: translateY(0);
@@ -3885,45 +3883,26 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
 .gpt-glass-action-btn {
   background: transparent;
   border: none;
-  color: var(--text-secondary);
-  padding: 5px;
-  border-radius: var(--radius-xs);
+  color: rgba(255, 255, 255, 0.85);
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 7px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast), transform 0.12s ease;
 }
 
 .gpt-glass-action-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.16);
+  transform: scale(1.05);
 }
 
-.gpt-image-caption-bar {
-  padding: 10px 14px;
-  border-top: 1px solid var(--border-subtle);
-  background: var(--bg-surface);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.gpt-image-caption-text {
-  font-size: 12px;
-  color: var(--text-secondary);
-  line-height: 1.5;
-  margin: 0;
-  word-break: break-word;
-}
-
-.gpt-image-caption-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  font-size: 10px;
-  font-family: var(--font-mono);
-  color: var(--text-muted);
+.gpt-glass-action-btn:active {
+  transform: scale(0.95);
 }
 
 /* Legacy & Video Cards */

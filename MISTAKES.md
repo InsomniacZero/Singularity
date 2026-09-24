@@ -192,3 +192,9 @@ Whenever an issue is identified or a user corrects a behavior, log the entry bel
     1. Dynamically set `history_and_training_disabled: not is_image_model` and include `"system_hints": ["picture_v2"]`.
     2. Proxy and cache all generated image assets: intercept SSE `sediment://` and `file-service://` asset pointers, download the full PNG binary using the TLS-impersonated session, persist them to `singularity/static/generated/`, and stream standard base64 data URIs (`![Generated Image](data:image/png;base64,...)`) so the frontend renders the interactive viewport immediately.
     3. Clean up the user's ChatGPT sidebar automatically post-generation by issuing `PATCH /backend-api/conversation/{conv_id}` with `{"is_visible": False}`.
+- **2026-09-24 (Generated Image Viewport UI & Clean Floating Action Overlays)**:
+  - *Mistake*: Encasing AI-generated images inside bloated cards with extra border outlines and footer caption bars ("Neural Synthesis", redundant prompt text). In modern conversational UI (e.g. ChatGPT), the generated image must stand clean and borderless with its natural aspect ratio and rounded corners, avoiding visual clutter.
+  - *Rule*: Generated images must be presented cleanly:
+    1. Render the image directly with modern rounded corners (`border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.28);`).
+    2. Eliminate redundant caption / prompt footers.
+    3. Floating action overlay (top-right) provides dedicated, high-contrast frosted glass buttons for **Copy** and **Download** only (omitting distracting edit/share menus), with tooltips (`data-tooltip`) and immediate visual feedback (e.g. checkmark icon and "Copied!" state).
