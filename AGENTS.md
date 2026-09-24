@@ -155,6 +155,10 @@ Keep these past failures in mind to avoid repeating them:
     - *Mistake*: Encasing AI-generated images inside bloated cards with extra border outlines and footer caption bars ("Neural Synthesis", redundant prompt text).
     - *Lesson*: Present generated images cleanly with rounded corners (`border-radius: 16px`), no caption footer, and a sleek floating top-right frosted glass overlay containing only **Copy** (with checkmark feedback) and **Download** SVG buttons with tooltips.
 
+15. **Minimalist Image Generation Loader & Dynamic Aspect Ratio Box**:
+    - *Mistake*: Displaying bloated progress bars, "Creating image" headers, "RENDERING FRAME" reticle icons, and artificial percentage counters during image generation.
+    - *Lesson*: Remove all text, headers, and progress bars from the image generation loader. Display ONLY a rounded shape matching the prompt's aspect ratio (`1:1` square by default, or `16:9`, `9:16`, `4:3`, `3:4`, `2:1`, `1:2`), filled with a theme-adaptive swirling terracotta mesh gradient (`#d97757` with dark stone in dark mode, or whitish in light mode) with a frosted glass sheen, until the final image smoothly fades in and fits the exact shape.
+
 
 
 

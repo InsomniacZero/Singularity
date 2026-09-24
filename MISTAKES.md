@@ -198,3 +198,9 @@ Whenever an issue is identified or a user corrects a behavior, log the entry bel
     1. Render the image directly with modern rounded corners (`border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.28);`).
     2. Eliminate redundant caption / prompt footers.
     3. Floating action overlay (top-right) provides dedicated, high-contrast frosted glass buttons for **Copy** and **Download** only (omitting distracting edit/share menus), with tooltips (`data-tooltip`) and immediate visual feedback (e.g. checkmark icon and "Copied!" state).
+- **2026-09-24 (Minimalist Image Generation Loader & Dynamic Aspect Ratio Box)**:
+  - *Mistake*: Displaying bloated progress bars, "Creating image" headers, "RENDERING FRAME" reticle icons, and artificial percentage counters during image generation. This cluttered the chat thread with noisy UI artifacts.
+  - *Rule*: Image generation loading state must be completely stripped of text, progress tracks, headers, and reticles:
+    1. The container must be the exact shape of the future image, defaulting to a `1:1` square, or dynamically adapting to prompt-specified aspect ratios (`16:9`, `9:16`, `4:3`, `3:4`, `2:1`, `1:2`).
+    2. Inside the shape, display ONLY a theme-adaptive swirling liquid mesh gradient: terracotta (`#d97757`) and dark stone obsidian in dark mode, or terracotta and warm cream/whitish in light mode, with a smooth glass sheen overlay (`backdrop-filter: blur(16px)`).
+    3. When the image is generated, it smoothly pops up and fades in (`opacity: 0 -> 1` over 0.45s) fitting the exact shape seamlessly.

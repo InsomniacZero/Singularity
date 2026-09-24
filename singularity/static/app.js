@@ -368,16 +368,15 @@ function renderServices() {
         </div>
 
         <div class="provider-card-actions">
-          ${
-            isOnline
-              ? `
+          ${isOnline
+        ? `
                 <button class="btn btn-secondary btn-sm" onclick="restartService('${srv.id}')">Restart</button>
                 <button class="btn btn-danger btn-sm" onclick="stopService('${srv.id}')">Stop</button>
               `
-              : `
+        : `
                 <button class="btn btn-primary btn-sm" onclick="startService('${srv.id}')">Start</button>
               `
-          }
+      }
         </div>
       </div>
     `;
@@ -1643,7 +1642,7 @@ async function removeStackedAccount(provider, index, identifier) {
           state.limits = await limRes.json();
           renderLimits();
         }
-      } catch (_) {}
+      } catch (_) { }
 
       // Restart daemon to apply removal if currently running
       const srv = state.services?.find(s => s.id === provider);
@@ -1690,7 +1689,7 @@ async function saveCookies() {
           state.limits = await limRes.json();
           renderLimits();
         }
-      } catch (_) {}
+      } catch (_) { }
 
       // Restart daemon to apply new credentials only if it is already running
       const srv = state.services?.find(s => s.id === p);
@@ -1825,13 +1824,13 @@ function renderCustomSelectOptions(query = '') {
     // Modality filter
     if (modality === 'image') {
       const isImg = (m.capabilities && (m.capabilities.includes('image') || m.capabilities.includes('image_generation'))) ||
-                    /(image|imagine|cogview|dall-e|flux|imagen|sdxl|wanx)/i.test(m.id) ||
-                    /(image|imagine|cogview|dall-e)/i.test(m.name);
+        /(image|imagine|cogview|dall-e|flux|imagen|sdxl|wanx)/i.test(m.id) ||
+        /(image|imagine|cogview|dall-e)/i.test(m.name);
       if (!isImg) return false;
     } else if (modality === 'video') {
       const isVid = (m.capabilities && m.capabilities.includes('video')) ||
-                    /(video|cogvideox|kling|sora|runway)/i.test(m.id) ||
-                    /(video|animation)/i.test(m.name);
+        /(video|cogvideox|kling|sora|runway)/i.test(m.id) ||
+        /(video|animation)/i.test(m.name);
       if (!isVid) return false;
     }
 
@@ -1950,79 +1949,71 @@ function detectQueryModality(modelId, promptText) {
   return 'text';
 }
 
+function detectImageAspectRatio(promptText) {
+  const p = (promptText || '').toLowerCase();
+
+  // 1. Explicit numeric aspect ratios take highest precedence
+  if (/(?:^|\D)16\s*[:/x]\s*9(?:\D|$)/i.test(p)) {
+    return { ratio: '16 / 9', maxWidth: '512px', isDefault: false };
+  }
+  if (/(?:^|\D)9\s*[:/x]\s*16(?:\D|$)/i.test(p)) {
+    return { ratio: '9 / 16', maxWidth: '300px', isDefault: false };
+  }
+  if (/(?:^|\D)4\s*[:/x]\s*3(?:\D|$)/i.test(p)) {
+    return { ratio: '4 / 3', maxWidth: '480px', isDefault: false };
+  }
+  if (/(?:^|\D)3\s*[:/x]\s*4(?:\D|$)/i.test(p)) {
+    return { ratio: '3 / 4', maxWidth: '360px', isDefault: false };
+  }
+  if (/(?:^|\D)2\s*[:/x]\s*1(?:\D|$)/i.test(p)) {
+    return { ratio: '2 / 1', maxWidth: '520px', isDefault: false };
+  }
+  if (/(?:^|\D)1\s*[:/x]\s*2(?:\D|$)/i.test(p)) {
+    return { ratio: '1 / 2', maxWidth: '260px', isDefault: false };
+  }
+  if (/(?:^|\D)1\s*[:/x]\s*1(?:\D|$)/i.test(p)) {
+    return { ratio: '1 / 1', maxWidth: '440px', isDefault: false };
+  }
+
+  // 2. Generic semantic format descriptors
+  if (/\b(?:widescreen|landscape|wide|horizontal)\b/i.test(p)) {
+    return { ratio: '16 / 9', maxWidth: '512px', isDefault: false };
+  }
+  if (/\b(?:portrait|vertical|story|reel|tiktok)\b/i.test(p)) {
+    return { ratio: '9 / 16', maxWidth: '300px', isDefault: false };
+  }
+  if (/\b(?:panoramic|banner|header|ultrawide)\b/i.test(p)) {
+    return { ratio: '2 / 1', maxWidth: '520px', isDefault: false };
+  }
+  if (/\b(?:square)\b/i.test(p)) {
+    return { ratio: '1 / 1', maxWidth: '440px', isDefault: false };
+  }
+
+  // 3. Default is strictly 1:1 square
+  return { ratio: '1 / 1', maxWidth: '440px', isDefault: true };
+}
+
 function createThinkingLoader(modality, promptText) {
   const container = document.createElement('div');
-  let updateProgress = null;
-  let finish = null;
-  let timerId = null;
+  let updateProgress = () => {};
+  let finish = () => {};
 
   if (modality === 'image') {
-    // 1. IMAGE LOADER: Authentic ChatGPT Warm Stone Shimmer Card
+    // 1. IMAGE LOADER: Minimalist Swirling Terracotta Gradient Shape (Default 1:1 or prompt aspect-ratio)
+    const aspect = detectImageAspectRatio(promptText);
     container.className = 'image-gen-loader';
+    container.style.aspectRatio = aspect.ratio;
+    container.style.width = aspect.maxWidth;
 
     container.innerHTML = `
-      <div class="media-gen-header">
-        <div class="media-gen-title-wrap">
-          <span class="media-gen-icon-sparkle">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="12" cy="12" r="10"></circle>
-              <line x1="12" y1="8" x2="12" y2="16"></line>
-              <line x1="8" y1="12" x2="16" y2="12"></line>
-            </svg>
-          </span>
-          <span class="media-gen-title">Creating image</span>
-        </div>
-        <span class="media-gen-subtitle">Synthesizing visual elements...</span>
-      </div>
-      <div class="gpt-image-shimmer-canvas">
-        <div class="gpt-canvas-reticle">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-            <circle cx="8.5" cy="8.5" r="1.5"></circle>
-            <polyline points="21 15 16 10 5 21"></polyline>
-          </svg>
-          <span style="font-size: 10px; font-family: var(--font-mono); letter-spacing: 0.05em; opacity: 0.8;">RENDERING FRAME</span>
-        </div>
-      </div>
-      <div class="gpt-gen-progress-track">
-        <div class="gpt-gen-progress-fill" style="width: 0%;"></div>
-      </div>
-      <div class="gpt-gen-footer-row">
-        <span style="text-overflow: ellipsis; overflow: hidden; white-space: nowrap; max-width: 260px;">${escapeHtml(promptText || 'Visual synthesis')}</span>
-        <span class="gen-progress-num">0%</span>
-      </div>
+      <div class="gpt-swirl-gradient"></div>
+      <div class="gpt-swirl-sheen"></div>
     `;
 
-    const fillBar = container.querySelector('.gpt-gen-progress-fill');
-    const pillNum = container.querySelector('.gen-progress-num');
-    let progress = 0;
-    const startTime = Date.now();
-
-    timerId = setInterval(() => {
-      const elapsed = (Date.now() - startTime) / 1000;
-      if (elapsed < 2) {
-        progress = Math.min(28, Math.round((elapsed / 2) * 26));
-      } else if (elapsed < 6) {
-        progress = Math.min(75, 26 + Math.round(((elapsed - 2) / 4) * 45));
-      } else if (elapsed < 12) {
-        progress = Math.min(94, 71 + Math.round(((elapsed - 6) / 6) * 23));
-      } else {
-        progress = Math.min(98, 94 + Math.round(((elapsed - 12) / 10) * 4));
-      }
-      if (fillBar) fillBar.style.width = `${progress}%`;
-      if (pillNum) pillNum.textContent = `${progress}%`;
-    }, 120);
-
-    updateProgress = (p) => {
-      progress = Math.max(progress, p);
-      if (fillBar) fillBar.style.width = `${progress}%`;
-      if (pillNum) pillNum.textContent = `${progress}%`;
-    };
-
-    finish = () => {
-      clearInterval(timerId);
-      if (fillBar) fillBar.style.width = '100%';
-      if (pillNum) pillNum.textContent = '100%';
+    return {
+      el: container,
+      updateProgress,
+      finish,
     };
 
   } else if (modality === 'video') {
@@ -2150,7 +2141,7 @@ function convertGenUiToArtifact(text) {
       try {
         data = JSON.parse(rawJson.trim() + suffix);
         break;
-      } catch (e) {}
+      } catch (e) { }
     }
 
     let title = 'Interactive Application';
@@ -2443,9 +2434,9 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
   content = content.replace(/```(?:base64|img|image)?\s*([A-Za-z0-9+/=\s]{160,})\s*```/gi, (match, b64) => {
     const cleanB64 = b64.replace(/\s+/g, '');
     const prefix = cleanB64.startsWith('/9j/') ? 'data:image/jpeg;base64,' :
-                   cleanB64.startsWith('UklGR') ? 'data:image/webp;base64,' :
-                   cleanB64.startsWith('PHN2Zy') ? 'data:image/svg+xml;base64,' :
-                   'data:image/png;base64,';
+      cleanB64.startsWith('UklGR') ? 'data:image/webp;base64,' :
+        cleanB64.startsWith('PHN2Zy') ? 'data:image/svg+xml;base64,' :
+          'data:image/png;base64,';
     extractedImages.push({ src: prefix + cleanB64, alt: 'Generated Image' });
     return '';
   });
@@ -2454,9 +2445,9 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
   content = content.replace(/(?:^|\s)([A-Za-z0-9+/=]{120,})(?:\s|$)/g, (match, b64) => {
     const cleanB64 = b64.trim();
     const prefix = cleanB64.startsWith('/9j/') ? 'data:image/jpeg;base64,' :
-                   cleanB64.startsWith('UklGR') ? 'data:image/webp;base64,' :
-                   cleanB64.startsWith('PHN2Zy') ? 'data:image/svg+xml;base64,' :
-                   cleanB64.startsWith('iVBORw0KGgo') ? 'data:image/png;base64,' : '';
+      cleanB64.startsWith('UklGR') ? 'data:image/webp;base64,' :
+        cleanB64.startsWith('PHN2Zy') ? 'data:image/svg+xml;base64,' :
+          cleanB64.startsWith('iVBORw0KGgo') ? 'data:image/png;base64,' : '';
     if (prefix) {
       extractedImages.push({ src: prefix + cleanB64, alt: 'Generated Image' });
     }
@@ -2514,13 +2505,16 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
 
   // Render Interactive ChatGPT-Style Image Cards
   extractedImages.forEach((img, idx) => {
+    const aspect = detectImageAspectRatio(promptText);
     const card = document.createElement('div');
     card.className = 'gpt-rendered-image-card';
+    card.style.aspectRatio = aspect.ratio;
+    card.style.width = aspect.maxWidth;
     const filename = `singularity-${state.selectedModel || 'image'}-${Date.now()}-${idx + 1}.png`;
 
     card.innerHTML = `
-      <div class="gpt-image-viewport">
-        <img src="${img.src}" alt="${escapeHtml(img.alt || promptText || 'Generated Image')}" class="gpt-image-element" loading="lazy" />
+      <div class="gpt-image-viewport" style="aspect-ratio: ${aspect.ratio}; width: 100%; height: 100%;">
+        <img src="${img.src}" alt="${escapeHtml(img.alt || promptText || 'Generated Image')}" class="gpt-image-element gpt-image-fadein" loading="eager" />
         <div class="gpt-image-glass-toolbar">
           <button class="gpt-glass-action-btn btn-copy" data-tooltip="Copy" aria-label="Copy image">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2539,7 +2533,18 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
       </div>
     `;
 
+    const imgEl = card.querySelector('.gpt-image-element');
     const viewportEl = card.querySelector('.gpt-image-viewport');
+
+    imgEl.addEventListener('load', () => {
+      imgEl.classList.add('gpt-image-loaded');
+      if (aspect.isDefault && imgEl.naturalWidth && imgEl.naturalHeight) {
+        const natRatio = `${imgEl.naturalWidth} / ${imgEl.naturalHeight}`;
+        viewportEl.style.aspectRatio = natRatio;
+        card.style.aspectRatio = natRatio;
+      }
+    });
+
     viewportEl.addEventListener('click', (e) => {
       if (e.target.closest('.gpt-glass-action-btn')) return;
       openMediaLightbox(img.src, 'image', promptText || img.alt);
@@ -2613,7 +2618,7 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
       if (!videoEl.src.includes('demo_video.mp4')) {
         videoEl.src = '/static/demo_video.mp4';
         videoEl.load();
-        videoEl.play().catch(() => {});
+        videoEl.play().catch(() => { });
       }
     });
 
@@ -2936,11 +2941,11 @@ function openArtifact(identifier, versionNum = null) {
 
   // Set default view: React/HTML/CSS/SVG/Mermaid default to 'preview', Code defaults to 'code'
   const isVisualType = art.type === 'application/vnd.ant.react' ||
-                       art.type === 'text/html' ||
-                       art.type === 'text/css' ||
-                       (art.type === 'application/vnd.ant.code' && art.language === 'css') ||
-                       art.type === 'image/svg+xml' ||
-                       art.type === 'application/vnd.ant.mermaid';
+    art.type === 'text/html' ||
+    art.type === 'text/css' ||
+    (art.type === 'application/vnd.ant.code' && art.language === 'css') ||
+    art.type === 'image/svg+xml' ||
+    art.type === 'application/vnd.ant.mermaid';
   if (!isVisualType && art.type === 'application/vnd.ant.code') {
     switchArtifactView('code');
   } else {
@@ -3128,8 +3133,8 @@ function renderArtifactContent(art, versionNum) {
   if (mmdBox) { mmdBox.style.display = 'none'; mmdBox.classList.add('hidden'); }
   if (mdBox) { mdBox.style.display = 'none'; mdBox.classList.add('hidden'); }
 
-  const isCss = art.type === 'text/css' || 
-                (art.type === 'application/vnd.ant.code' && (art.language === 'css' || (content && (content.includes('@keyframes') || content.includes('backdrop-filter') || content.includes('.glass') || content.includes('background:')) && !content.includes('import ') && !content.includes('function ') && !content.includes('<html'))));
+  const isCss = art.type === 'text/css' ||
+    (art.type === 'application/vnd.ant.code' && (art.language === 'css' || (content && (content.includes('@keyframes') || content.includes('backdrop-filter') || content.includes('.glass') || content.includes('background:')) && !content.includes('import ') && !content.includes('function ') && !content.includes('<html'))));
 
   if (art.type === 'application/vnd.ant.react') {
     if (iframe) {
@@ -5710,7 +5715,7 @@ async function updateTavernAndMobileChips() {
         }
       }
     }
-  } catch (_) {}
+  } catch (_) { }
 }
 
 async function openTavernStudio() {
@@ -5767,7 +5772,7 @@ async function openTavernStudio() {
           </html>
         `);
       }
-    } catch (_) {}
+    } catch (_) { }
   }
 
   if (typeof showToast === 'function') {
@@ -5805,7 +5810,7 @@ async function openTavernStudio() {
           break;
         }
       }
-    } catch (_) {}
+    } catch (_) { }
 
     // Update placeholder window progress
     if (tabWin && !tabWin.closed && tabWin.document) {
@@ -5821,7 +5826,7 @@ async function openTavernStudio() {
     u.hostname = currentHost;
     u.protocol = window.location.protocol;
     targetUrl = u.toString();
-  } catch {}
+  } catch { }
 
   if (ready) {
     if (typeof showToast === 'function') {
