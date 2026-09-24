@@ -2006,8 +2006,25 @@ function createThinkingLoader(modality, promptText) {
     container.style.width = aspect.maxWidth;
 
     container.innerHTML = `
-      <div class="gpt-swirl-gradient"></div>
-      <div class="gpt-swirl-sheen"></div>
+      <svg class="gpt-ink-filter-svg" style="position: absolute; width: 0; height: 0; pointer-events: none;" aria-hidden="true">
+        <defs>
+          <filter id="gpt-ink-goo">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur" />
+            <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 28 -9" result="goo" />
+            <feBlend in="SourceGraphic" in2="goo" />
+          </filter>
+        </defs>
+      </svg>
+      <div class="gpt-ink-water-tank">
+        <div class="gpt-ink-bloom"></div>
+        <div class="gpt-ink-fluid-canvas">
+          <div class="gpt-ink-blob gpt-ink-blob-main"></div>
+          <div class="gpt-ink-blob gpt-ink-blob-drop"></div>
+          <div class="gpt-ink-blob gpt-ink-blob-droplet"></div>
+          <div class="gpt-ink-blob gpt-ink-blob-drift"></div>
+        </div>
+      </div>
+      <div class="gpt-ink-glass-sheen"></div>
     `;
 
     return {

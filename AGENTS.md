@@ -155,9 +155,13 @@ Keep these past failures in mind to avoid repeating them:
     - *Mistake*: Encasing AI-generated images inside bloated cards with extra border outlines and footer caption bars ("Neural Synthesis", redundant prompt text).
     - *Lesson*: Present generated images cleanly with rounded corners (`border-radius: 16px`), no caption footer, and a sleek floating top-right frosted glass overlay containing only **Copy** (with checkmark feedback) and **Download** SVG buttons with tooltips.
 
-15. **Minimalist Image Generation Loader & Dynamic Aspect Ratio Box**:
-    - *Mistake*: Displaying bloated progress bars, "Creating image" headers, "RENDERING FRAME" reticle icons, and artificial percentage counters during image generation.
-    - *Lesson*: Remove all text, headers, and progress bars from the image generation loader. Display ONLY a rounded shape matching the prompt's aspect ratio (`1:1` square by default, or `16:9`, `9:16`, `4:3`, `3:4`, `2:1`, `1:2`), filled with a theme-adaptive swirling terracotta mesh gradient (`#d97757` with dark stone in dark mode, or whitish in light mode) with a frosted glass sheen, until the final image smoothly fades in and fits the exact shape.
+15. **Fluid Ink-in-Water Image Generation Loader vs Rigid Spirals**:
+    - *Mistake*: Generating a rotating conic spiral or geometric gradient swirl for image generation loading. The user specifically wanted an organic fluid simulation resembling a drop of `#d97757` terracotta ink dispersing in water, with splitting and rejoining fluids.
+    - *Lesson*: Remove all text, headers, and progress bars. Simulate an organic fluid ink drop in water using an SVG gooey surface tension filter (`feGaussianBlur` + `feColorMatrix`), ambient water bloom, and morphing `#d97757` ink fluid drops that stretch, split into two or more fluids traveling across the volume, and fuse back together naturally until the final image pop-fades in.
+
+16. **Dark Mode User Bubbles & Whitened UI Action Controls**:
+    - *Mistake*: Dark mode user messages blending into generic dark gray backgrounds, with action buttons and top header settings icons being too dim (`var(--text-muted)` = `#78716c`), causing poor contrast and muddy appearance.
+    - *Lesson*: In dark mode, style user message bubbles with brand terracotta `#d97757` and crisp white text. Whiten response action buttons (`.response-actions`), user message hover controls (`.user-msg-actions`), and top header settings buttons (`.claude-icon-btn`, `.claude-avatar-btn`) to `rgba(255, 255, 255, 0.85-0.92)` / `#ffffff` on hover, while keeping date timestamps subtly muted (`var(--text-muted)`).
 
 
 

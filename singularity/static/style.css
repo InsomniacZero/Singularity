@@ -1793,7 +1793,7 @@ body[data-active-tab="playground"] .panel-viewport {
   border-radius: 8px;
   border: none;
   background: transparent;
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.88);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1803,8 +1803,8 @@ body[data-active-tab="playground"] .panel-viewport {
 }
 
 .claude-icon-btn:hover {
-  background: var(--bg-surface-hover);
-  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
   transform: translateY(-1px);
 }
 
@@ -1813,10 +1813,28 @@ body[data-active-tab="playground"] .panel-viewport {
 }
 
 .claude-avatar-btn {
-  color: var(--text-secondary);
+  color: rgba(255, 255, 255, 0.92);
 }
 
 .claude-avatar-btn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="light"] .claude-icon-btn {
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] .claude-icon-btn:hover {
+  background: var(--bg-surface-hover);
+  color: var(--text-primary);
+}
+
+[data-theme="light"] .claude-avatar-btn {
+  color: var(--text-secondary);
+}
+
+[data-theme="light"] .claude-avatar-btn:hover {
   color: var(--brand-primary);
 }
 
@@ -2717,9 +2735,9 @@ body[data-active-tab="playground"] .panel-viewport {
 }
 
 .chat-msg.user .msg-bubble {
-  background-color: var(--bg-surface-hover);
-  border: 1px solid var(--border-medium);
-  color: var(--text-primary);
+  background-color: #d97757;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #ffffff;
   border-radius: 16px;
   border-bottom-right-radius: 4px;
   padding: 12px 18px;
@@ -2727,6 +2745,22 @@ body[data-active-tab="playground"] .panel-viewport {
   font-family: 'Anthropic Sans', 'Anthropic Sans Text', var(--font-sans);
   font-size: 14px;
   line-height: 1.6;
+  box-shadow: 0 4px 18px rgba(217, 119, 87, 0.28);
+}
+
+.chat-msg.user .msg-bubble * {
+  color: #ffffff;
+}
+
+[data-theme="light"] .chat-msg.user .msg-bubble {
+  background-color: var(--bg-surface-hover);
+  border: 1px solid var(--border-medium);
+  color: var(--text-primary);
+  box-shadow: none;
+}
+
+[data-theme="light"] .chat-msg.user .msg-bubble * {
+  color: inherit;
 }
 
 .chat-msg.assistant {
@@ -2781,7 +2815,7 @@ body[data-active-tab="playground"] .panel-viewport {
   background: transparent;
   border: none;
   border-radius: var(--radius-sm);
-  color: var(--text-muted);
+  color: rgba(255, 255, 255, 0.85);
   cursor: pointer;
   outline: none;
   transition: color var(--duration-fast) ease,
@@ -2795,6 +2829,15 @@ body[data-active-tab="playground"] .panel-viewport {
 }
 
 .response-action-btn:hover {
+  color: #ffffff;
+  background-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme="light"] .response-action-btn {
+  color: var(--text-muted);
+}
+
+[data-theme="light"] .response-action-btn:hover {
   color: var(--text-primary);
   background-color: var(--bg-surface-hover);
 }
@@ -2949,6 +2992,10 @@ body[data-active-tab="playground"] .panel-viewport {
   border-bottom-right-radius: 4px;
   box-sizing: border-box;
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.chat-msg.user.is-editing .msg-bubble * {
+  color: var(--text-primary);
 }
 
 .user-msg-edit-box {
@@ -3590,7 +3637,7 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
   border: none !important;
 }
 
-/* 1. MINIMALIST IMAGE GENERATION LOADER (Theme-Adaptive Terracotta Swirling Gradient) */
+/* 1. INK-IN-WATER FLUID IMAGE GENERATION LOADER (#d97757 Fluid Drop in Water) */
 .image-gen-loader {
   position: relative;
   width: 440px;
@@ -3600,9 +3647,9 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
   overflow: hidden;
   margin-top: 8px;
   margin-bottom: 8px;
-  background: var(--bg-surface, #181716);
-  border: 1px solid rgba(217, 119, 87, 0.25);
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.32);
+  background: #0d0c0b;
+  border: 1px solid rgba(217, 119, 87, 0.28);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -3611,72 +3658,214 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
 
 [data-theme="light"] .image-gen-loader {
   background: #fbf9f6;
-  border: 1px solid rgba(217, 119, 87, 0.28);
-  box-shadow: 0 8px 32px rgba(217, 119, 87, 0.12);
+  border: 1px solid rgba(217, 119, 87, 0.22);
+  box-shadow: 0 8px 32px rgba(217, 119, 87, 0.1);
 }
 
-.gpt-swirl-gradient {
-  position: absolute;
-  inset: -60%;
-  width: 220%;
-  height: 220%;
-  background: conic-gradient(
-    from 0deg at 50% 50%,
-    #d97757 0deg,
-    #181615 65deg,
-    #b85d3f 130deg,
-    #121110 190deg,
-    #d97757 250deg,
-    #23201e 310deg,
-    #d97757 360deg
-  );
-  animation: gptLiquidSwirl 4.5s linear infinite;
-  filter: blur(40px);
-  transform-origin: center center;
-  opacity: 0.92;
-}
-
-[data-theme="light"] .gpt-swirl-gradient {
-  background: conic-gradient(
-    from 0deg at 50% 50%,
-    #d97757 0deg,
-    #ffffff 55deg,
-    #e89578 120deg,
-    #fcfbfa 185deg,
-    #d97757 245deg,
-    #f3e8df 305deg,
-    #d97757 360deg
-  );
-  filter: blur(34px);
-  opacity: 0.95;
-}
-
-@keyframes gptLiquidSwirl {
-  0% {
-    transform: rotate(0deg) scale(1);
-  }
-  50% {
-    transform: rotate(180deg) scale(1.06);
-  }
-  100% {
-    transform: rotate(360deg) scale(1);
-  }
-}
-
-.gpt-swirl-sheen {
+.gpt-ink-water-tank {
   position: absolute;
   inset: 0;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  box-shadow: inset 0 0 45px rgba(217, 119, 87, 0.16);
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Ambient diffusing ink cloud / pigment dispersion */
+.gpt-ink-bloom {
+  position: absolute;
+  width: 90%;
+  height: 90%;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(217, 119, 87, 0.38) 0%, rgba(217, 119, 87, 0.14) 40%, transparent 72%);
+  filter: blur(28px);
+  animation: inkWaterBloom 7s ease-in-out infinite alternate;
   pointer-events: none;
 }
 
-[data-theme="light"] .gpt-swirl-sheen {
-  border: 1px solid rgba(217, 119, 87, 0.22);
-  box-shadow: inset 0 0 45px rgba(255, 255, 255, 0.7);
+[data-theme="light"] .gpt-ink-bloom {
+  background: radial-gradient(circle, rgba(217, 119, 87, 0.3) 0%, rgba(217, 119, 87, 0.09) 42%, transparent 72%);
+  filter: blur(24px);
+}
+
+@keyframes inkWaterBloom {
+  0% {
+    transform: scale(0.8) translate(-12px, -8px);
+    opacity: 0.55;
+  }
+  50% {
+    transform: scale(1.18) translate(14px, 10px);
+    opacity: 0.85;
+  }
+  100% {
+    transform: scale(0.92) translate(-8px, 14px);
+    opacity: 0.6;
+  }
+}
+
+/* Fluid Canvas with viscous surface tension filter */
+.gpt-ink-fluid-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  filter: url(#gpt-ink-goo);
+  -webkit-filter: url(#gpt-ink-goo);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.gpt-ink-blob {
+  position: absolute;
+  background: radial-gradient(circle at 35% 35%, #eb9277 0%, #d97757 45%, #b55638 85%, #8f3820 100%);
+  border-radius: 50%;
+  opacity: 0.96;
+  will-change: transform, border-radius;
+}
+
+[data-theme="light"] .gpt-ink-blob {
+  background: radial-gradient(circle at 35% 35%, #f0a088 0%, #d97757 50%, #c45f40 85%, #9e4024 100%);
+}
+
+/* Primary Ink Body in the center - pulsing & deforming */
+.gpt-ink-blob-main {
+  width: 150px;
+  height: 150px;
+  animation: inkBlobMain 8.5s ease-in-out infinite;
+}
+
+@keyframes inkBlobMain {
+  0%, 100% {
+    border-radius: 46% 54% 63% 37% / 40% 50% 50% 60%;
+    transform: translate(0, 0) scale(1) rotate(0deg);
+  }
+  25% {
+    border-radius: 60% 40% 42% 58% / 55% 42% 58% 45%;
+    transform: translate(-15px, 10px) scale(1.08) rotate(35deg);
+  }
+  50% {
+    border-radius: 38% 62% 52% 48% / 48% 60% 40% 52%;
+    transform: translate(10px, -15px) scale(0.95) rotate(75deg);
+  }
+  75% {
+    border-radius: 55% 45% 35% 65% / 62% 45% 55% 38%;
+    transform: translate(16px, 12px) scale(1.05) rotate(130deg);
+  }
+}
+
+/* Secondary Ink Fluid - splits off, wanders to the upper-right, and reconnects */
+.gpt-ink-blob-drop {
+  width: 110px;
+  height: 110px;
+  animation: inkBlobSplitDrop 8s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+}
+
+@keyframes inkBlobSplitDrop {
+  0%, 100% {
+    border-radius: 50%;
+    transform: translate(0, 0) scale(0.85);
+  }
+  16% {
+    /* Stretching liquid bridge connecting the two fluids */
+    border-radius: 65% 35% 45% 55% / 40% 60% 40% 60%;
+    transform: translate(50px, -40px) scale(0.96);
+  }
+  32% {
+    /* Detached independent fluid traveling through water */
+    border-radius: 42% 58% 68% 32% / 55% 40% 60% 45%;
+    transform: translate(105px, -78px) scale(0.9);
+  }
+  52% {
+    /* Flowing across upper volume */
+    border-radius: 60% 40% 35% 65% / 45% 55% 45% 55%;
+    transform: translate(75px, -105px) scale(0.95);
+  }
+  72% {
+    /* Flowing back inward */
+    border-radius: 35% 65% 55% 45% / 60% 40% 60% 40%;
+    transform: translate(-30px, -65px) scale(0.92);
+  }
+  86% {
+    /* Merging with main drop, fluid neck reforming */
+    border-radius: 50% 50% 40% 60% / 45% 55% 45% 55%;
+    transform: translate(-12px, -22px) scale(0.88);
+  }
+}
+
+/* Tertiary Fluid Droplet - splits off to bottom-left */
+.gpt-ink-blob-droplet {
+  width: 85px;
+  height: 85px;
+  animation: inkBlobSplitDroplet 7.2s cubic-bezier(0.42, 0, 0.58, 1) infinite;
+  animation-delay: -3.6s;
+}
+
+@keyframes inkBlobSplitDroplet {
+  0%, 100% {
+    border-radius: 50%;
+    transform: translate(0, 0) scale(0.75);
+  }
+  18% {
+    border-radius: 40% 60% 65% 35% / 50% 45% 55% 50%;
+    transform: translate(-48px, 38px) scale(0.86);
+  }
+  38% {
+    /* Split off into bottom-left */
+    border-radius: 65% 35% 40% 60% / 35% 65% 35% 65%;
+    transform: translate(-95px, 72px) scale(0.82);
+  }
+  62% {
+    border-radius: 45% 55% 35% 65% / 60% 40% 60% 40%;
+    transform: translate(-72px, 95px) scale(0.86);
+  }
+  84% {
+    border-radius: 55% 45% 60% 40% / 45% 55% 45% 55%;
+    transform: translate(-28px, 32px) scale(0.8);
+  }
+}
+
+/* Small fluid tendril / plume */
+.gpt-ink-blob-drift {
+  width: 70px;
+  height: 70px;
+  animation: inkBlobDrift 9s ease-in-out infinite alternate;
+}
+
+@keyframes inkBlobDrift {
+  0% {
+    border-radius: 55% 45% 50% 50% / 50% 55% 45% 50%;
+    transform: translate(35px, 45px) scale(0.72);
+    opacity: 0.7;
+  }
+  50% {
+    border-radius: 40% 60% 35% 65% / 65% 35% 65% 35%;
+    transform: translate(-45px, -25px) scale(0.92);
+    opacity: 0.92;
+  }
+  100% {
+    border-radius: 65% 35% 60% 40% / 40% 60% 40% 60%;
+    transform: translate(75px, 25px) scale(0.78);
+    opacity: 0.78;
+  }
+}
+
+/* Water glass container sheen */
+.gpt-ink-glass-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 35px rgba(217, 119, 87, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.12);
+  pointer-events: none;
+}
+
+[data-theme="light"] .gpt-ink-glass-sheen {
+  border: 1px solid rgba(217, 119, 87, 0.2);
+  box-shadow: inset 0 0 30px rgba(255, 255, 255, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.8);
 }
 
 /* 2. VIDEO GENERATION LOADER (Cinematic 16:9 Frame Scanline) */

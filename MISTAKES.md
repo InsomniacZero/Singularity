@@ -198,9 +198,17 @@ Whenever an issue is identified or a user corrects a behavior, log the entry bel
     1. Render the image directly with modern rounded corners (`border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.28);`).
     2. Eliminate redundant caption / prompt footers.
     3. Floating action overlay (top-right) provides dedicated, high-contrast frosted glass buttons for **Copy** and **Download** only (omitting distracting edit/share menus), with tooltips (`data-tooltip`) and immediate visual feedback (e.g. checkmark icon and "Copied!" state).
-- **2026-09-24 (Minimalist Image Generation Loader & Dynamic Aspect Ratio Box)**:
-  - *Mistake*: Displaying bloated progress bars, "Creating image" headers, "RENDERING FRAME" reticle icons, and artificial percentage counters during image generation. This cluttered the chat thread with noisy UI artifacts.
-  - *Rule*: Image generation loading state must be completely stripped of text, progress tracks, headers, and reticles:
-    1. The container must be the exact shape of the future image, defaulting to a `1:1` square, or dynamically adapting to prompt-specified aspect ratios (`16:9`, `9:16`, `4:3`, `3:4`, `2:1`, `1:2`).
-    2. Inside the shape, display ONLY a theme-adaptive swirling liquid mesh gradient: terracotta (`#d97757`) and dark stone obsidian in dark mode, or terracotta and warm cream/whitish in light mode, with a smooth glass sheen overlay (`backdrop-filter: blur(16px)`).
-    3. When the image is generated, it smoothly pops up and fades in (`opacity: 0 -> 1` over 0.45s) fitting the exact shape seamlessly.
+- **2026-09-25 (Fluid Ink-in-Water Image Generation Loader vs Rigid Spirals)**:
+  - *Mistake*: Generating a rotating conic spiral or geometric gradient swirl for image generation loading. The user specifically wanted an organic fluid simulation resembling a drop of `#d97757` terracotta ink dispersing in water, with splitting and rejoining fluids.
+  - *Rule*: Image generation loading state must simulate organic fluid ink diffusion in water:
+    1. The container matches the exact future image shape (`1:1` square default or prompt aspect-ratio).
+    2. Zero text, headers, reticles, or artificial progress numbers.
+    3. The fluid is rendered via SVG gooey surface tension filter (`feColorMatrix` + `feGaussianBlur`) with an ambient water bloom and multiple morphing `#d97757` ink fluid drops that stretch, split into two or more independent moving fluid drops across the volume, and fuse back together naturally.
+    4. When inference completes, the final image pops up and smoothly fades in to fill the exact container shape.
+- **2026-09-25 (Dark Mode Theme Accents & High-Contrast Icon Elements)**:
+  - *Mistake*: Setting user message bubbles to generic dark gray (`#242424`) and dimming response buttons and top header settings icons to muddy low-contrast gray (`#78716c`), causing poor visual hierarchy and readability on dark backdrops.
+  - *Rule*: In dark mode:
+    1. User message bubble background is brand terracotta (`#d97757`) with crisp white text (`#ffffff`), 16px corners, and subtle warm drop shadow.
+    2. Response action buttons (copy, retry, edit, tts, feedback) in `.response-actions` and user message hover bar `.user-msg-actions` are crisp whitish (`rgba(255, 255, 255, 0.85)` / `#ffffff` on hover).
+    3. Top header settings buttons (`.claude-icon-btn`, `.claude-avatar-btn`) are crisp whitish (`rgba(255, 255, 255, 0.88)` / `#ffffff` on hover).
+    4. Date timestamps (`.response-date`, `.user-msg-date`) remain subtly muted (`var(--text-muted)`) so they do not compete with interactive controls.
