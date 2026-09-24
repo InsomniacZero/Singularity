@@ -2028,108 +2028,57 @@ function startCanvasFluidSimulation(canvas, progressPill) {
     uniform float u_time;
     uniform float u_is_dark;
 
-    vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
-    vec2 mod289(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
-    vec3 permute(vec3 x) { return mod289(((x*34.0)+1.0)*x); }
-
-    float snoise(vec2 v) {
-      const vec4 C = vec4(0.211324865405187,
-                          0.366025403784439,
-                         -0.577350269189626,
-                          0.024390243902439);
-      vec2 i  = floor(v + dot(v, C.yy));
-      vec2 x0 = v -   i + dot(i, C.xx);
-      vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
-      vec4 x12 = x0.xyxy + C.xxzz;
-      x12.xy -= i1;
-      i = mod289(i);
-      vec3 p = permute(permute(i.y + vec3(0.0, i1.y, 1.0))
-            + i.x + vec3(0.0, i1.x, 1.0));
-      vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy), dot(x12.zw,x12.zw)), 0.0);
-      m = m*m;
-      m = m*m;
-      vec3 x = 2.0 * fract(p * C.www) - 1.0;
-      vec3 h = abs(x) - 0.5;
-      vec3 ox = floor(x + 0.5);
-      vec3 a0 = x - ox;
-      m *= 1.79284291400159 - 0.85373472095314 * (a0*a0 + h*h);
-      vec3 g;
-      g.x  = a0.x  * x0.x  + h.x  * x0.y;
-      g.yz = a0.yz * x12.xz + h.yz * x12.yw;
-      return 130.0 * dot(m, g);
-    }
-
-    // Divergence-free Curl Noise velocity field (incompressible Navier-Stokes curl)
-    vec2 curlNoise(vec2 p, float t) {
-      float eps = 0.012;
-      float n1 = snoise(p + vec2(0.0, eps) + vec2(t * 0.12, 0.0));
-      float n2 = snoise(p - vec2(0.0, eps) + vec2(t * 0.12, 0.0));
-      float n3 = snoise(p + vec2(eps, 0.0) + vec2(0.0, t * 0.12));
-      float n4 = snoise(p - vec2(eps, 0.0) + vec2(0.0, t * 0.12));
-      float dx = (n1 - n2) / (2.0 * eps);
-      float dy = (n3 - n4) / (2.0 * eps);
-      return vec2(dy, -dx);
-    }
-
-    float fbm(vec2 p) {
-      float f = 0.0;
-      float w = 0.5;
-      for (int i = 0; i < 5; i++) {
-        f += w * snoise(p);
-        p *= 2.04;
-        w *= 0.5;
-      }
-      return f;
-    }
-
     void main() {
-      vec2 uv = gl_FragCoord.xy / u_resolution.xy;
-      vec2 p = uv * 3.2;
-      float t = u_time * 0.42;
+      vec2 res = max(u_resolution, vec2(1.0, 1.0));
+      vec2 p = (gl_FragCoord.xy * 2.0 - res) / min(res.x, res.y);
+      float t = u_time * 0.55;
 
-      // Multi-octave fluid advection & domain warping
-      vec2 v1 = curlNoise(p * 0.85, t * 0.65);
-      vec2 q = p + v1 * 0.78;
+      // Harmonic rotating vortex currents: advect, stretch, and fold the fluid coordinates
+      for (int i = 1; i <= 4; i++) {
+        float fi = float(i);
+        vec2 center = vec2(
+          sin(t * 0.35 * fi + fi * 1.5) * 0.45,
+          cos(t * 0.30 * fi + fi * 0.8) * 0.45
+        );
+        vec2 delta = p - center;
+        float dist = length(delta);
+        float angle = atan(delta.y, delta.x);
 
-      vec2 v2 = curlNoise(q * 1.55 + vec2(t * 0.22, -t * 0.16), t * 1.05);
-      vec2 r = q + v2 * 0.58;
+        // Smooth tangential vortex flow + gentle radial current (100% continuous, zero noise hash)
+        float strength = 0.28 / (1.0 + dist * 2.2);
+        p.x += sin(angle * 2.0 + dist * 3.2 - t * 0.7 * fi) * strength;
+        p.y += cos(angle * 2.0 - dist * 3.2 + t * 0.6 * fi) * strength;
+      }
 
-      vec2 v3 = curlNoise(r * 2.25 - vec2(t * 0.32, t * 0.22), t * 1.3);
-      vec2 s = r + v3 * 0.38;
+      // Smooth liquid interference currents (creamy continuous waves, zero TV grain)
+      float w1 = sin(p.x * 2.6 + sin(p.y * 2.0 + t * 0.5)) * cos(p.y * 2.4 - sin(p.x * 1.6 - t * 0.4));
+      float w2 = sin(length(p) * 3.8 - t * 0.9) * 0.5;
+      float density = clamp((w1 + w2) * 0.55 + 0.5, 0.0, 1.0);
 
-      float density = fbm(s);
-      density = 0.5 + 0.5 * density;
-
-      // Organic fluid edges
-      float fluid = smoothstep(0.16, 0.84, density);
-      float detail = smoothstep(0.32, 0.68, fbm(s * 2.4 + vec2(t * 0.38)));
+      // Buttery-smooth fluid boundaries
+      float fluid = smoothstep(0.22, 0.78, density);
+      float detail = smoothstep(0.32, 0.68, sin(p.x * 4.2 - p.y * 3.5 + t * 0.8) * 0.5 + 0.5);
 
       vec3 color;
       if (u_is_dark > 0.5) {
-        // DARK THEME:
-        // Background: #0d0c0b (0.051, 0.047, 0.043)
-        // Terracotta: #d97757 (0.851, 0.467, 0.341)
-        // Highlight core: #fca082
+        // DARK THEME: Dark obsidian #0d0c0b with glowing #d97757 terracotta streams
         vec3 bgDark = vec3(0.051, 0.047, 0.043);
-        vec3 terraDark = vec3(0.851, 0.467, 0.341);
-        vec3 peakDark = vec3(0.988, 0.627, 0.510);
-        vec3 fluidColor = mix(terraDark, peakDark, detail * 0.6);
-        color = mix(bgDark, fluidColor, fluid);
+        vec3 terra = vec3(0.851, 0.467, 0.341); // #d97757
+        vec3 peach = vec3(0.988, 0.68, 0.56);
+        vec3 stream = mix(terra, peach, detail * 0.5);
+        color = mix(bgDark, stream, fluid);
       } else {
-        // LIGHT THEME:
-        // Background: PURE WHITE #ffffff
-        // Terracotta: #d97757 flowing and merging with white fluid
+        // LIGHT THEME: Pure white #ffffff background with #d97757 terracotta & white fluid merging
         vec3 pureWhite = vec3(1.0, 1.0, 1.0);
-        vec3 terracotta = vec3(0.851, 0.467, 0.341);
+        vec3 terracotta = vec3(0.851, 0.467, 0.341); // #d97757
         vec3 deepTerra = vec3(0.72, 0.32, 0.20);
-        vec3 softWhiteFluid = vec3(0.985, 0.97, 0.955);
+        vec3 whiteFluid = vec3(1.0, 1.0, 1.0);
 
-        vec3 terraStream = mix(terracotta, deepTerra, detail * 0.45);
-        vec3 whiteStream = mix(pureWhite, softWhiteFluid, detail * 0.4);
+        vec3 terraStream = mix(terracotta, deepTerra, detail * 0.38);
 
-        // Fluid streams merging: white fluid folding and swirling into terracotta
-        float whiteMerge = smoothstep(0.42, 0.78, snoise(s * 1.75 + vec2(-t * 0.55, t * 0.38)));
-        vec3 mergedFluid = mix(terraStream, whiteStream, whiteMerge * 0.85);
+        // Terracotta and white fluids folding, swirling, and merging together
+        float whiteMerge = smoothstep(0.36, 0.74, cos(p.y * 3.2 + p.x * 2.4 - t * 0.75) * 0.5 + 0.5);
+        vec3 mergedFluid = mix(terraStream, whiteFluid, whiteMerge * 0.85);
 
         // Fluid stream over pure white background
         color = mix(pureWhite, mergedFluid, fluid);
