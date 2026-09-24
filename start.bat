@@ -110,6 +110,7 @@ if "%ARG1%"=="host" goto :RUN_CLI
 if "%ARG1%"=="chat" goto :RUN_CLI
 if "%ARG1%"=="thinking" goto :RUN_CLI
 if "%ARG1%"=="service" goto :RUN_CLI
+if "%ARG1%"=="tunnel" goto :RUN_CLI
 if "%ARG1%"=="-h" goto :RUN_CLI
 if "%ARG1%"=="--help" goto :RUN_CLI
 if "%ARG1%"=="help" goto :RUN_CLI

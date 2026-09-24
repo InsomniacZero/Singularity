@@ -1501,8 +1501,18 @@ async def api_stop_tunnel():
 @app.post("/api/tunnel/authtoken")
 async def api_save_authtoken(request: Request):
     body = await request.json()
-    token = body.get("token", "")
+    token = body.get("token") or body.get("authtoken") or ""
     return tunnel.save_authtoken(token)
+
+
+@app.post("/api/tunnel/install")
+async def api_install_tunnel(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    force = bool(body.get("force", False))
+    return tunnel.install_ngrok(force=force)
 
 
 # -------------------------------------------------------------------

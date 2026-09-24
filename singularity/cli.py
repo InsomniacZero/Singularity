@@ -624,6 +624,68 @@ def cmd_service(args):
                 print(f"    • {p.upper()}: [{r.get('status')}] {r.get('message')}")
 
 
+def cmd_tunnel(args):
+    """Manage ngrok public cloud tunnel and native installation."""
+    import tunnel
+    action = getattr(args, "action", "status") or "status"
+
+    if action == "status":
+        stat = tunnel.get_tunnel_status()
+        if getattr(args, "json", False):
+            print(json.dumps(stat, indent=2))
+            return
+
+        print_header("🌐 SINGULARITY CLOUD TUNNEL (NGROK)")
+        status_label = "● ONLINE" if stat.get("status") == "online" else "○ OFFLINE"
+        print(f"  Status        : {status_label}")
+        print(f"  Installed     : {'Yes (' + str(stat.get('bin_path')) + ')' if stat.get('installed') else 'No'}")
+        print(f"  Device / Arch : {stat.get('arch', 'Standard')}{' (Termux Phone)' if stat.get('is_termux') else ''}")
+        print(f"  Authtoken     : {'Configured' if stat.get('has_authtoken') else 'Missing'}")
+        if stat.get("public_url"):
+            print(f"  Public URL    : {stat.get('public_url')}")
+            print(f"  API Endpoint  : {stat.get('api_url')}")
+            print(f"  Chat Complete : {stat.get('chat_completions_url')}")
+        else:
+            print(f"  Note          : {stat.get('message')}")
+        print("=" * 70 + "\n")
+
+    elif action == "start":
+        print("[*] Starting ngrok tunnel for port 9000...")
+        res = tunnel.start_tunnel(port=9000)
+        if res.get("status") == "online":
+            print("[✓] Tunnel is LIVE!")
+            print(f"    Public URL   : {res.get('public_url')}")
+            print(f"    API Endpoint : {res.get('api_url')}")
+        else:
+            print(f"[!] Failed to start tunnel: {res.get('message')}")
+
+    elif action == "stop":
+        print("[*] Stopping ngrok tunnel...")
+        res = tunnel.stop_tunnel()
+        print("[✓] ngrok tunnel stopped.")
+
+    elif action == "install":
+        print("[*] Downloading & installing native ngrok binary for this device...")
+        res = tunnel.install_ngrok(force=True)
+        if res.get("status") == "ok":
+            print(f"[✓] Success: {res.get('message')}")
+            print(f"    Path: {res.get('path')}")
+            print(f"    Version: {res.get('version')}")
+        else:
+            print(f"[!] Installation failed: {res.get('message')}")
+
+    elif action == "token":
+        token = getattr(args, "token_val", None)
+        if not token:
+            print("[!] Please provide a token: ./singular tunnel token <YOUR_NGROK_AUTHTOKEN>")
+            return
+        res = tunnel.save_authtoken(token)
+        if res.get("status") == "ok":
+            print(f"[✓] {res.get('message')}")
+        else:
+            print(f"[!] Failed to configure token: {res.get('message')}")
+
+
 # ==============================================================================
 # Main Dispatcher
 # ==============================================================================
@@ -684,6 +746,12 @@ def main():
     p_svc.add_argument("action", choices=["start", "stop", "restart", "status"])
     p_svc.add_argument("provider", nargs="?", default=None, help="Provider ID (chatgpt, claude, etc.)")
 
+    # tunnel
+    p_tun = subparsers.add_parser("tunnel", help="Manage ngrok cloud tunnel and native installation")
+    p_tun.add_argument("action", nargs="?", choices=["status", "start", "stop", "install", "token"], default="status")
+    p_tun.add_argument("token_val", nargs="?", default=None, help="Authtoken value when using 'token'")
+    p_tun.add_argument("--json", action="store_true", help="Output compact JSON")
+
     args = parser.parse_args()
 
     if not args.subcommand or args.subcommand == "status":
@@ -706,6 +774,8 @@ def main():
         cmd_thinking(args)
     elif args.subcommand == "service":
         cmd_service(args)
+    elif args.subcommand == "tunnel":
+        cmd_tunnel(args)
 
 
 if __name__ == "__main__":

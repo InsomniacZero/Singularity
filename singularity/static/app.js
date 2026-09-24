@@ -5067,6 +5067,7 @@ async function fetchTunnelStatus() {
 function updateTunnelUI() {
   const t = state.tunnel || { status: 'offline' };
   const isOnline = t.status === 'online' && !!t.public_url;
+  const isInstalled = t.installed !== false;
 
   // Sidebar badge
   const navBadge = document.getElementById('nav-tunnel-badge');
@@ -5084,7 +5085,21 @@ function updateTunnelUI() {
       toggleBtnText.textContent = 'Stop Tunnel';
     } else {
       toggleBtn.className = 'btn btn-primary btn-sm';
-      toggleBtnText.textContent = 'Start ngrok Tunnel';
+      toggleBtnText.textContent = isInstalled ? 'Start ngrok Tunnel' : 'Install & Start Tunnel';
+    }
+  }
+
+  // Install native ngrok button
+  const installBtn = document.getElementById('btn-install-tunnel');
+  const installBtnText = document.getElementById('btn-install-tunnel-text');
+  if (installBtn) {
+    if (!isInstalled) {
+      installBtn.style.display = 'inline-flex';
+      if (installBtnText) {
+        installBtnText.textContent = t.is_termux ? 'Install ngrok (Termux Phone)' : 'Install ngrok (Native)';
+      }
+    } else {
+      installBtn.style.display = 'none';
     }
   }
 
@@ -5100,7 +5115,13 @@ function updateTunnelUI() {
         urlText.textContent = base;
       }
     } else {
-      urlText.textContent = 'Offline — Click "Start ngrok Tunnel" to expose';
+      if (!isInstalled) {
+        urlText.textContent = t.is_termux
+          ? '📱 Phone Mode: ngrok not yet installed in Termux — Click "Install ngrok" to install natively!'
+          : 'Offline — Click "Install & Start Tunnel" to set up natively for this device';
+      } else {
+        urlText.textContent = 'Offline — Click "Start ngrok Tunnel" to expose';
+      }
       if (stChip) stChip.classList.remove('active');
     }
   }
@@ -5112,17 +5133,52 @@ function updateTunnelUI() {
   }
 }
 
+async function installNativeNgrok() {
+  const btn = document.getElementById('btn-install-tunnel');
+  const btnText = document.getElementById('btn-install-tunnel-text');
+  const origText = btnText ? btnText.textContent : 'Install ngrok';
+  if (btnText) btnText.textContent = 'Installing...';
+  if (btn) btn.disabled = true;
+
+  try {
+    showToast('Downloading and installing native ngrok binary for this device...', 'info');
+    const res = await fetch('/api/tunnel/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ force: false }),
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      showToast(data.message || 'ngrok installed natively!', 'success');
+    } else {
+      showToast(data.message || 'Installation failed', 'error');
+    }
+    await fetchTunnelStatus();
+  } catch (err) {
+    showToast(`Install error: ${err.message}`, 'error');
+    await fetchTunnelStatus();
+  } finally {
+    if (btnText) btnText.textContent = origText;
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function toggleTunnel() {
   const isOnline = state.tunnel && state.tunnel.status === 'online';
+  const isInstalled = state.tunnel && state.tunnel.installed !== false;
   const endpoint = isOnline ? '/api/tunnel/stop' : '/api/tunnel/start';
   const toggleBtnText = document.getElementById('btn-toggle-tunnel-text');
 
   if (toggleBtnText) {
-    toggleBtnText.textContent = isOnline ? 'Stopping...' : 'Starting...';
+    toggleBtnText.textContent = isOnline ? 'Stopping...' : (!isInstalled ? 'Installing & Starting...' : 'Starting...');
   }
 
   try {
-    showToast(isOnline ? 'Stopping ngrok tunnel...' : 'Starting ngrok tunnel on port 9000...', 'info');
+    if (!isOnline && !isInstalled) {
+      showToast('Installing native ngrok binary for this device and starting tunnel...', 'info');
+    } else {
+      showToast(isOnline ? 'Stopping ngrok tunnel...' : 'Starting ngrok tunnel on port 9000...', 'info');
+    }
     const res = await fetch(endpoint, { method: 'POST' });
     const data = await res.json();
 
@@ -5181,6 +5237,11 @@ function initTunnelControls() {
       showToast('Refreshing tunnel status...', 'info');
       fetchTunnelStatus();
     });
+  }
+
+  const btnInstall = document.getElementById('btn-install-tunnel');
+  if (btnInstall) {
+    btnInstall.addEventListener('click', installNativeNgrok);
   }
 
   const btnCopy = document.getElementById('btn-copy-tunnel-url');

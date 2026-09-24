@@ -29,6 +29,42 @@ if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ ! -e "$PREFIX/bin/singular" ]; 
     ln -sf "$DIR/start.sh" "$PREFIX/bin/singular" 2>/dev/null || true
 fi
 
+# Phone / Termux Native ngrok setup (Android ARM64/ARM)
+if [ -n "$PREFIX" ] && [ ! -x "$PREFIX/bin/ngrok" ] && [ ! -x "$DIR/singularity/bin/ngrok" ]; then
+    echo "  [📱] Phone/Termux detected: installing native ngrok for remote cloud tunneling..."
+    (
+        ARCH="$(uname -m)"
+        NGROK_URL=""
+        if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+            NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm64.tgz"
+        elif [[ "$ARCH" == arm* ]]; then
+            NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm.tgz"
+        elif [ "$ARCH" = "x86_64" ]; then
+            NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
+        fi
+
+        if [ -n "$NGROK_URL" ]; then
+            TMP_TGZ="/tmp/ngrok-termux-$$.tgz"
+            if command -v curl >/dev/null 2>&1; then
+                curl -sSL "$NGROK_URL" -o "$TMP_TGZ" 2>/dev/null
+            elif command -v wget >/dev/null 2>&1; then
+                wget -q "$NGROK_URL" -O "$TMP_TGZ" 2>/dev/null
+            fi
+
+            if [ -f "$TMP_TGZ" ]; then
+                mkdir -p "$DIR/singularity/bin"
+                tar -xzf "$TMP_TGZ" -C "$DIR/singularity/bin" ngrok 2>/dev/null || tar -xzf "$TMP_TGZ" -C "$DIR/singularity/bin" 2>/dev/null
+                rm -f "$TMP_TGZ"
+                if [ -f "$DIR/singularity/bin/ngrok" ]; then
+                    chmod +x "$DIR/singularity/bin/ngrok"
+                    [ -d "$PREFIX/bin" ] && cp -f "$DIR/singularity/bin/ngrok" "$PREFIX/bin/ngrok" 2>/dev/null && chmod +x "$PREFIX/bin/ngrok" 2>/dev/null
+                    echo "  [✓] Native ngrok successfully installed for Android ($ARCH)!"
+                fi
+            fi
+        fi
+    ) || true
+fi
+
 # Detect Python across Linux, macOS, Termux, and Windows (Git Bash/MSYS2/WSL)
 PYTHON_BIN=""
 if [ -x "$DIR/singularity/.venv/bin/python3" ]; then
@@ -66,7 +102,7 @@ fi
 
 # Route CLI commands vs server launch
 case "$1" in
-    status|limits|accounts|import|export|simulate|host|chat|thinking|service|-h|--help)
+    status|limits|accounts|import|export|simulate|host|chat|thinking|service|tunnel|-h|--help)
         exec "$PYTHON_BIN" cli.py "$@"
         ;;
     server|"")

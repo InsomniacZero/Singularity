@@ -37,4 +37,6 @@ MISTAKES.md
 DESIGN-SYS.md
 AGENTS.md
 *.zip
+singularity/bin/*
+!singularity/bin/.gitkeep
 
