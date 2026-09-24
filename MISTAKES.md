@@ -198,14 +198,14 @@ Whenever an issue is identified or a user corrects a behavior, log the entry bel
     1. Render the image directly with modern rounded corners (`border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.28);`).
     2. Eliminate redundant caption / prompt footers.
     3. Floating action overlay (top-right) provides dedicated, high-contrast frosted glass buttons for **Copy** and **Download** only (omitting distracting edit/share menus), with tooltips (`data-tooltip`) and immediate visual feedback (e.g. checkmark icon and "Copied!" state).
-- **2026-09-25 (High-Definition WebGL Fluid Simulation & TV Grain Prevention)**:
-  - *Mistake*: Permutation-based simplex noise and triple-nested finite-difference epsilon division (`dx = (n1-n2)/(2.0*eps)`) in WebGL shaders suffer from catastrophic floating-point cancellation across mobile and desktop GPUs, exploding into high-frequency TV static noise and grain.
+- **2026-09-25 (High-Definition WebGL Fluid Simulation & Theme Adaptive Palette)**:
+  - *Mistake*: Checking `document.body.getAttribute('data-theme')` instead of `document.documentElement.getAttribute('data-theme')`, causing light mode to falsely register as dark mode and rendering black patches instead of clean white; and hardcoding pitch black instead of the UI's theme primary dark `#141414`.
   - *Rule*: For image generation loading:
-    1. Render with GPU-accelerated WebGL using **analytical harmonic vortex potential flow** ($\sin, \cos, \text{atan}, \text{length}$). These are $C^\infty$ mathematically continuous, guaranteed 100% artifact-free, and impossible to produce noise or TV grain.
-    2. Render at native Retina display resolution (`canvas.width = clientWidth * dpr`) to ensure silky-smooth, razor-sharp fluid curves.
-    3. Fluid motion must be strictly **autonomous** (no pointer/touch event listeners) like a self-flowing hypnotic motion graphic.
-    4. In Light Mode: Background must be pure white (`#ffffff`). Terracotta `#d97757` fluid billows and organically folds and merges with white fluid streams.
-    5. In Dark Mode: Background is dark obsidian (`#0d0c0b`) with luminous terracotta streams and peach vortex highlights.
+    1. Check theme on `document.documentElement` (`document.documentElement.getAttribute('data-theme') || document.body.getAttribute('data-theme')`).
+    2. In Light Mode: Replace all dark/black elements with pure white (`#ffffff`) and soft whitish (`#fcfbfa`). Terracotta `#d97757` streams fold and merge with whitish fluid. Zero black or dark patches!
+    3. In Dark Mode: Background is the UI's dark background `#141414` (from tokens `--bg-primary`) with luminous `#d97757` terracotta streams and warm peach highlights.
+    4. Render with GPU-accelerated WebGL using **analytical harmonic vortex potential flow** ($\sin, \cos, \text{atan}, \text{length}$). These are $C^\infty$ mathematically continuous, guaranteed 100% artifact-free, and impossible to produce noise or TV grain.
+    5. Render at native Retina display resolution (`canvas.width = clientWidth * dpr`). Fluid motion must be strictly **autonomous** (no pointer listeners).
     6. Clean ChatGPT UI framing: "Creating image" header in top-left, aspect ratio container, and frosted glass percentage progress pill ("19%") in bottom-right corner.
     7. When inference completes, `finish()` cleanly deallocates WebGL shaders and the final image pop-fades in.
 - **2026-09-25 (Dark Mode Theme Accents & High-Contrast Icon Elements)**:

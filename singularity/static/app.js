@@ -2061,24 +2061,24 @@ function startCanvasFluidSimulation(canvas, progressPill) {
 
       vec3 color;
       if (u_is_dark > 0.5) {
-        // DARK THEME: Dark obsidian #0d0c0b with glowing #d97757 terracotta streams
-        vec3 bgDark = vec3(0.051, 0.047, 0.043);
+        // DARK THEME: UI background color #141414 with glowing #d97757 terracotta streams
+        vec3 bgDark = vec3(0.0784, 0.0784, 0.0784);
         vec3 terra = vec3(0.851, 0.467, 0.341); // #d97757
         vec3 peach = vec3(0.988, 0.68, 0.56);
         vec3 stream = mix(terra, peach, detail * 0.5);
         color = mix(bgDark, stream, fluid);
       } else {
-        // LIGHT THEME: Pure white #ffffff background with #d97757 terracotta & white fluid merging
+        // LIGHT THEME: Pure white #ffffff and whitish fluid (zero dark/black!)
         vec3 pureWhite = vec3(1.0, 1.0, 1.0);
+        vec3 softWhite = vec3(0.985, 0.980, 0.975);
         vec3 terracotta = vec3(0.851, 0.467, 0.341); // #d97757
-        vec3 deepTerra = vec3(0.72, 0.32, 0.20);
-        vec3 whiteFluid = vec3(1.0, 1.0, 1.0);
+        vec3 deepTerra = vec3(0.78, 0.38, 0.26);
 
         vec3 terraStream = mix(terracotta, deepTerra, detail * 0.38);
 
         // Terracotta and white fluids folding, swirling, and merging together
-        float whiteMerge = smoothstep(0.36, 0.74, cos(p.y * 3.2 + p.x * 2.4 - t * 0.75) * 0.5 + 0.5);
-        vec3 mergedFluid = mix(terraStream, whiteFluid, whiteMerge * 0.85);
+        float whiteMerge = smoothstep(0.35, 0.74, cos(p.y * 3.2 + p.x * 2.4 - t * 0.75) * 0.5 + 0.5);
+        vec3 mergedFluid = mix(terraStream, softWhite, whiteMerge * 0.85);
 
         // Fluid stream over pure white background
         color = mix(pureWhite, mergedFluid, fluid);
@@ -2087,6 +2087,13 @@ function startCanvasFluidSimulation(canvas, progressPill) {
       gl_FragColor = vec4(color, 1.0);
     }
   `;
+
+  // Helper to reliably check theme from documentElement
+  function isThemeDark() {
+    const theme = document.documentElement.getAttribute('data-theme') ||
+                  document.body.getAttribute('data-theme');
+    return theme !== 'light';
+  }
 
   // Try WebGL first for full native hardware resolution (zero pixelation!)
   let gl = null;
@@ -2153,7 +2160,7 @@ function startCanvasFluidSimulation(canvas, progressPill) {
         }
 
         const elapsed = (performance.now() - startTime) * 0.001;
-        const isDark = document.body.getAttribute('data-theme') !== 'light' ? 1.0 : 0.0;
+        const isDark = isThemeDark() ? 1.0 : 0.0;
 
         gl.uniform2f(uRes, canvas.width, canvas.height);
         gl.uniform1f(uTime, elapsed);
@@ -2204,10 +2211,10 @@ function startCanvasFluidSimulation(canvas, progressPill) {
     }
 
     const t = (performance.now() - startTime2D) * 0.001;
-    const isDark = document.body.getAttribute('data-theme') !== 'light';
+    const isDark = isThemeDark();
 
-    // Pure white in light mode, dark obsidian in dark mode
-    ctx.fillStyle = isDark ? '#0d0c0b' : '#ffffff';
+    // Pure white in light mode, UI dark in dark mode
+    ctx.fillStyle = isDark ? '#141414' : '#ffffff';
     ctx.fillRect(0, 0, w, h);
 
     // Render smooth layered fluid plumes in #d97757
