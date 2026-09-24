@@ -24,9 +24,20 @@ if [ ! -d "$DIR/singularity" ]; then
     fi
 fi
 
-# Auto-link 'singular' binary into PATH if in Termux
-if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ ! -e "$PREFIX/bin/singular" ]; then
+# Auto-link 'singular', 'singularity', and 'c2a' binaries into PATH if in Termux
+if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
     ln -sf "$DIR/start.sh" "$PREFIX/bin/singular" 2>/dev/null || true
+    ln -sf "$DIR/start.sh" "$PREFIX/bin/singularity" 2>/dev/null || true
+    ln -sf "$DIR/start.sh" "$PREFIX/bin/c2a" 2>/dev/null || true
+    chmod +x "$PREFIX/bin/singular" "$PREFIX/bin/singularity" "$PREFIX/bin/c2a" 2>/dev/null || true
+fi
+
+# Auto-link into ~/.local/bin for standard Linux/macOS users
+if [ -z "$PREFIX" ] && [ -d "$HOME/.local/bin" ]; then
+    ln -sf "$DIR/start.sh" "$HOME/.local/bin/singular" 2>/dev/null || true
+    ln -sf "$DIR/start.sh" "$HOME/.local/bin/singularity" 2>/dev/null || true
+    ln -sf "$DIR/start.sh" "$HOME/.local/bin/c2a" 2>/dev/null || true
+    chmod +x "$HOME/.local/bin/singular" "$HOME/.local/bin/singularity" "$HOME/.local/bin/c2a" 2>/dev/null || true
 fi
 
 # Phone / Termux Native ngrok setup (Android ARM64/ARM)
