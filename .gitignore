@@ -33,9 +33,7 @@ singularity/credentials_export*.json
 legacy/
 .vscode/
 singularity/static/fonts/*-fontiko/
-MISTAKES.md
-DESIGN-SYS.md
-AGENTS.md
+singularity/static/generated/*
 *.zip
 singularity/bin/*
 !singularity/bin/.gitkeep

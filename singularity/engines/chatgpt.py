@@ -23,7 +23,11 @@ import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from html.parser import HTMLParser
+from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Sequence, Tuple, Union
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+STATIC_GEN_DIR = SCRIPT_DIR.parent / "static" / "generated"
 
 try:
     from curl_cffi.requests import AsyncSession as CurlAsyncSession
@@ -77,6 +81,14 @@ TEXT_MODEL_ALIASES = {
     "gpt-6-astra": "gpt-5-6",
     "gpt-6": "gpt-5-6",
     "astra": "gpt-5-6",
+    "gpt-image-2.5-flare": "auto",
+    "gpt-image-2.5-sunburst": "auto",
+    "gpt-image-2": "auto",
+    "image-2.5-flare": "auto",
+    "image-2.5-sunburst": "auto",
+    "image-2": "auto",
+    "flare": "auto",
+    "sunburst": "auto",
     "default": "auto",
     "chatgpt-default": "auto",
 }
@@ -997,10 +1009,13 @@ async def stream_chatgpt_chat(
 
     # Map target model slug & check persona mapping (e.g. GPT-6 Astra)
     model_lower = model.lower().strip()
+    is_image_model = any(k in model_lower for k in ("image", "flare", "sunburst", "dalle", "t2i"))
     persona_cfg = personas.get_persona_config(model) if personas else None
     if persona_cfg:
         messages = personas.inject_persona_messages(messages, persona_cfg)
         target_model_slug = persona_cfg.backend_model
+    elif is_image_model:
+        target_model_slug = "auto"
     else:
         target_model_slug = TEXT_MODEL_ALIASES.get(model_lower, model)
     if target_model_slug in ("default", "chatgpt-default", "auto"):
@@ -1094,9 +1109,11 @@ async def stream_chatgpt_chat(
                         "model": target_model_slug,
                         "parent_message_id": str(uuid.uuid4()),
                         "timezone_offset_min": -330,
-                        "history_and_training_disabled": True,
+                        "history_and_training_disabled": not is_image_model,
                         "conversation_mode": {"kind": "primary_assistant"},
                     }
+                    if is_image_model:
+                        conv_payload["system_hints"] = ["picture_v2"]
 
                     conv_headers = {
                         "Accept": "text/event-stream",
@@ -1153,6 +1170,8 @@ async def stream_chatgpt_chat(
                     prev_thought = ""
                     emitted_thought = False
                     emitted_any = False
+                    seen_file_ids = set()
+                    last_conversation_id = None
 
                     async for line in resp.aiter_lines():
                         if not line:
@@ -1165,6 +1184,41 @@ async def stream_chatgpt_chat(
                                 break
                             try:
                                 evt = json.loads(data_str)
+                                if evt.get("conversation_id"):
+                                    last_conversation_id = evt.get("conversation_id")
+
+                                # Check for image asset pointers emitted by DALL-E / picture_v2
+                                asset_matches = re.findall(r"(?:file-service|sediment)://([A-Za-z0-9_-]+)", data_str)
+                                for file_id in asset_matches:
+                                    if file_id not in seen_file_ids:
+                                        seen_file_ids.add(file_id)
+                                        try:
+                                            d_resp = await sess.get(f"https://chatgpt.com/backend-api/files/{file_id}/download", timeout=25.0)
+                                            if d_resp.status_code == 200:
+                                                d_info = d_resp.json()
+                                                d_url = d_info.get("download_url") or d_info.get("url")
+                                                if d_url:
+                                                    img_resp = await sess.get(d_url, timeout=40.0)
+                                                    if img_resp.status_code == 200 and len(img_resp.content) > 500:
+                                                        img_bytes = img_resp.content
+                                                        STATIC_GEN_DIR.mkdir(parents=True, exist_ok=True)
+                                                        dest_file = STATIC_GEN_DIR / f"{file_id}.png"
+                                                        dest_file.write_bytes(img_bytes)
+
+                                                        b64_str = base64.b64encode(img_bytes).decode("utf-8")
+                                                        data_uri = f"data:image/png;base64,{b64_str}"
+                                                        img_md = f"\n\n![Generated Image]({data_uri})\n\n"
+                                                        emitted_any = True
+                                                        yield {
+                                                            "id": chat_id,
+                                                            "object": "chat.completion.chunk",
+                                                            "created": created_ts,
+                                                            "model": model,
+                                                            "choices": [{"index": 0, "delta": {"content": img_md}, "finish_reason": None}],
+                                                        }
+                                        except Exception:
+                                            pass
+
                                 msg = evt.get("message")
                                 if msg and is_thought_message(msg):
                                     raw_thought = thought_message_text(msg)
@@ -1215,6 +1269,25 @@ async def stream_chatgpt_chat(
                                                 }
                             except Exception:
                                 continue
+
+                    # Auto-hide image generation conversations from the user's ChatGPT sidebar
+                    if is_image_model and last_conversation_id:
+                        try:
+                            del_headers = {
+                                "Authorization": f"Bearer {token}",
+                                "Content-Type": "application/json",
+                                "User-Agent": user_agent,
+                                "Referer": f"https://chatgpt.com/c/{last_conversation_id}",
+                                "X-OpenAI-Target-Route": f"/backend-api/conversation/{last_conversation_id}",
+                            }
+                            await sess.patch(
+                                f"https://chatgpt.com/backend-api/conversation/{last_conversation_id}",
+                                headers=del_headers,
+                                json={"is_visible": False},
+                                timeout=10.0,
+                            )
+                        except Exception:
+                            pass
 
                     # Final completion chunk
                     yield {

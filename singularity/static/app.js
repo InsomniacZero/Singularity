@@ -2422,13 +2422,13 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
   const extractedVideos = [];
 
   // 1. Extract markdown images ![alt](url)
-  content = content.replace(/!\[(.*?)\]\((data:image\/[^\)]+|https?:\/\/[^\)]+)\)/gi, (match, alt, url) => {
+  content = content.replace(/!\[(.*?)\]\((data:image\/[^\)]+|https?:\/\/[^\)]+|\/[^\)]+)\)/gi, (match, alt, url) => {
     extractedImages.push({ src: url.trim(), alt: alt || 'Generated Image' });
     return '';
   });
 
   // 2. Extract HTML images <img src="...">
-  content = content.replace(/<img[^>]+src=["'](data:image\/[^"']+|https?:\/\/[^"']+)["'][^>]*>/gi, (match, url) => {
+  content = content.replace(/<img[^>]+src=["'](data:image\/[^"']+|https?:\/\/[^"']+|\/[^"']+)["'][^>]*>/gi, (match, url) => {
     extractedImages.push({ src: url.trim(), alt: 'Generated Image' });
     return '';
   });
