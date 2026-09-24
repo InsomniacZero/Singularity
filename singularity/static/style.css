@@ -3637,235 +3637,85 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
   border: none !important;
 }
 
-/* 1. INK-IN-WATER FLUID IMAGE GENERATION LOADER (#d97757 Fluid Drop in Water) */
+/* 1. INK-IN-WATER CANVAS FLUID SIMULATION LOADER (Navier-Stokes Eulerian Solver) */
 .image-gen-loader {
   position: relative;
   width: 440px;
   max-width: 100%;
+  margin-top: 8px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  transition: width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.image-gen-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  margin-bottom: 8px;
+}
+
+.image-gen-title {
+  font-size: 15px;
+  font-weight: 500;
+  font-family: 'Anthropic Sans', 'Anthropic Sans Text', var(--font-sans);
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.image-gen-viewport {
+  position: relative;
+  width: 100%;
   aspect-ratio: 1 / 1;
   border-radius: 16px;
   overflow: hidden;
-  margin-top: 8px;
-  margin-bottom: 8px;
   background: #0d0c0b;
   border: 1px solid rgba(217, 119, 87, 0.28);
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: aspect-ratio 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  cursor: crosshair;
+  transition: aspect-ratio 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-[data-theme="light"] .image-gen-loader {
+[data-theme="light"] .image-gen-viewport {
   background: #fbf9f6;
   border: 1px solid rgba(217, 119, 87, 0.22);
   box-shadow: 0 8px 32px rgba(217, 119, 87, 0.1);
 }
 
-.gpt-ink-water-tank {
-  position: absolute;
-  inset: 0;
+.image-gen-canvas {
   width: 100%;
   height: 100%;
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
+  border-radius: 15px;
+  object-fit: cover;
 }
 
-/* Ambient diffusing ink cloud / pigment dispersion */
-.gpt-ink-bloom {
+.image-gen-progress-pill {
   position: absolute;
-  width: 90%;
-  height: 90%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(217, 119, 87, 0.38) 0%, rgba(217, 119, 87, 0.14) 40%, transparent 72%);
-  filter: blur(28px);
-  animation: inkWaterBloom 7s ease-in-out infinite alternate;
+  bottom: 12px;
+  right: 12px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  background: rgba(18, 17, 16, 0.75);
+  border: 1px solid rgba(217, 119, 87, 0.35);
+  color: #d97757;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  z-index: 5;
   pointer-events: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  user-select: none;
 }
 
-[data-theme="light"] .gpt-ink-bloom {
-  background: radial-gradient(circle, rgba(217, 119, 87, 0.3) 0%, rgba(217, 119, 87, 0.09) 42%, transparent 72%);
-  filter: blur(24px);
-}
-
-@keyframes inkWaterBloom {
-  0% {
-    transform: scale(0.8) translate(-12px, -8px);
-    opacity: 0.55;
-  }
-  50% {
-    transform: scale(1.18) translate(14px, 10px);
-    opacity: 0.85;
-  }
-  100% {
-    transform: scale(0.92) translate(-8px, 14px);
-    opacity: 0.6;
-  }
-}
-
-/* Fluid Canvas with viscous surface tension filter */
-.gpt-ink-fluid-canvas {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  filter: url(#gpt-ink-goo);
-  -webkit-filter: url(#gpt-ink-goo);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow: hidden;
-}
-
-.gpt-ink-blob {
-  position: absolute;
-  background: radial-gradient(circle at 35% 35%, #eb9277 0%, #d97757 45%, #b55638 85%, #8f3820 100%);
-  border-radius: 50%;
-  opacity: 0.96;
-  will-change: transform, border-radius;
-}
-
-[data-theme="light"] .gpt-ink-blob {
-  background: radial-gradient(circle at 35% 35%, #f0a088 0%, #d97757 50%, #c45f40 85%, #9e4024 100%);
-}
-
-/* Primary Ink Body in the center - pulsing & deforming */
-.gpt-ink-blob-main {
-  width: 150px;
-  height: 150px;
-  animation: inkBlobMain 8.5s ease-in-out infinite;
-}
-
-@keyframes inkBlobMain {
-  0%, 100% {
-    border-radius: 46% 54% 63% 37% / 40% 50% 50% 60%;
-    transform: translate(0, 0) scale(1) rotate(0deg);
-  }
-  25% {
-    border-radius: 60% 40% 42% 58% / 55% 42% 58% 45%;
-    transform: translate(-15px, 10px) scale(1.08) rotate(35deg);
-  }
-  50% {
-    border-radius: 38% 62% 52% 48% / 48% 60% 40% 52%;
-    transform: translate(10px, -15px) scale(0.95) rotate(75deg);
-  }
-  75% {
-    border-radius: 55% 45% 35% 65% / 62% 45% 55% 38%;
-    transform: translate(16px, 12px) scale(1.05) rotate(130deg);
-  }
-}
-
-/* Secondary Ink Fluid - splits off, wanders to the upper-right, and reconnects */
-.gpt-ink-blob-drop {
-  width: 110px;
-  height: 110px;
-  animation: inkBlobSplitDrop 8s cubic-bezier(0.42, 0, 0.58, 1) infinite;
-}
-
-@keyframes inkBlobSplitDrop {
-  0%, 100% {
-    border-radius: 50%;
-    transform: translate(0, 0) scale(0.85);
-  }
-  16% {
-    /* Stretching liquid bridge connecting the two fluids */
-    border-radius: 65% 35% 45% 55% / 40% 60% 40% 60%;
-    transform: translate(50px, -40px) scale(0.96);
-  }
-  32% {
-    /* Detached independent fluid traveling through water */
-    border-radius: 42% 58% 68% 32% / 55% 40% 60% 45%;
-    transform: translate(105px, -78px) scale(0.9);
-  }
-  52% {
-    /* Flowing across upper volume */
-    border-radius: 60% 40% 35% 65% / 45% 55% 45% 55%;
-    transform: translate(75px, -105px) scale(0.95);
-  }
-  72% {
-    /* Flowing back inward */
-    border-radius: 35% 65% 55% 45% / 60% 40% 60% 40%;
-    transform: translate(-30px, -65px) scale(0.92);
-  }
-  86% {
-    /* Merging with main drop, fluid neck reforming */
-    border-radius: 50% 50% 40% 60% / 45% 55% 45% 55%;
-    transform: translate(-12px, -22px) scale(0.88);
-  }
-}
-
-/* Tertiary Fluid Droplet - splits off to bottom-left */
-.gpt-ink-blob-droplet {
-  width: 85px;
-  height: 85px;
-  animation: inkBlobSplitDroplet 7.2s cubic-bezier(0.42, 0, 0.58, 1) infinite;
-  animation-delay: -3.6s;
-}
-
-@keyframes inkBlobSplitDroplet {
-  0%, 100% {
-    border-radius: 50%;
-    transform: translate(0, 0) scale(0.75);
-  }
-  18% {
-    border-radius: 40% 60% 65% 35% / 50% 45% 55% 50%;
-    transform: translate(-48px, 38px) scale(0.86);
-  }
-  38% {
-    /* Split off into bottom-left */
-    border-radius: 65% 35% 40% 60% / 35% 65% 35% 65%;
-    transform: translate(-95px, 72px) scale(0.82);
-  }
-  62% {
-    border-radius: 45% 55% 35% 65% / 60% 40% 60% 40%;
-    transform: translate(-72px, 95px) scale(0.86);
-  }
-  84% {
-    border-radius: 55% 45% 60% 40% / 45% 55% 45% 55%;
-    transform: translate(-28px, 32px) scale(0.8);
-  }
-}
-
-/* Small fluid tendril / plume */
-.gpt-ink-blob-drift {
-  width: 70px;
-  height: 70px;
-  animation: inkBlobDrift 9s ease-in-out infinite alternate;
-}
-
-@keyframes inkBlobDrift {
-  0% {
-    border-radius: 55% 45% 50% 50% / 50% 55% 45% 50%;
-    transform: translate(35px, 45px) scale(0.72);
-    opacity: 0.7;
-  }
-  50% {
-    border-radius: 40% 60% 35% 65% / 65% 35% 65% 35%;
-    transform: translate(-45px, -25px) scale(0.92);
-    opacity: 0.92;
-  }
-  100% {
-    border-radius: 65% 35% 60% 40% / 40% 60% 40% 60%;
-    transform: translate(75px, 25px) scale(0.78);
-    opacity: 0.78;
-  }
-}
-
-/* Water glass container sheen */
-.gpt-ink-glass-sheen {
-  position: absolute;
-  inset: 0;
-  border-radius: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: inset 0 0 35px rgba(217, 119, 87, 0.14), inset 0 1px 1px rgba(255, 255, 255, 0.12);
-  pointer-events: none;
-}
-
-[data-theme="light"] .gpt-ink-glass-sheen {
-  border: 1px solid rgba(217, 119, 87, 0.2);
-  box-shadow: inset 0 0 30px rgba(255, 255, 255, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.8);
+[data-theme="light"] .image-gen-progress-pill {
+  background: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(217, 119, 87, 0.3);
+  color: #d97757;
+  box-shadow: 0 2px 8px rgba(217, 119, 87, 0.12);
 }
 
 /* 2. VIDEO GENERATION LOADER (Cinematic 16:9 Frame Scanline) */

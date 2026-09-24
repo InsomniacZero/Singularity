@@ -1993,44 +1993,363 @@ function detectImageAspectRatio(promptText) {
   return { ratio: '1 / 1', maxWidth: '440px', isDefault: true };
 }
 
+/**
+ * Real-Time Navier-Stokes HTML5 Canvas Fluid Simulation
+ * Based on Jos Stam's Stable Fluids & Jonas Wagner's 29a.ch Eulerian fluid dynamics.
+ * Simulates organic #d97757 terracotta ink dispersing, splitting into vortices,
+ * and billowing through water in dark and light themes.
+ */
+function startCanvasFluidSimulation(canvas, progressPill) {
+  const N = 42;
+  const size = (N + 2) * (N + 2);
+  const u = new Float32Array(size);
+  const v = new Float32Array(size);
+  const u_prev = new Float32Array(size);
+  const v_prev = new Float32Array(size);
+  const dens = new Float32Array(size);
+  const dens_prev = new Float32Array(size);
+
+  function IX(i, j) {
+    return i + (N + 2) * j;
+  }
+
+  // Precompute 256-entry 32-bit pixel color LUTs for instant zero-overhead rendering
+  const LUT_DARK = new Uint32Array(256);
+  const LUT_LIGHT = new Uint32Array(256);
+
+  for (let c = 0; c < 256; c++) {
+    const d = c / 255;
+    // Dark mode: Dark stone water [13, 12, 11] -> terracotta [217, 119, 87] -> luminous peach [255, 205, 185]
+    let rD, gD, bD;
+    if (d <= 0.005) {
+      rD = 13; gD = 12; bD = 11;
+    } else if (d < 0.4) {
+      const t = d / 0.4;
+      rD = Math.round(13 + (170 - 13) * t);
+      gD = Math.round(12 + (75 - 12) * t);
+      bD = Math.round(11 + (45 - 11) * t);
+    } else if (d < 0.8) {
+      const t = (d - 0.4) / 0.4;
+      rD = Math.round(170 + (217 - 170) * t);
+      gD = Math.round(75 + (119 - 75) * t);
+      bD = Math.round(45 + (87 - 45) * t);
+    } else {
+      const t = (d - 0.8) / 0.2;
+      rD = Math.round(217 + (255 - 217) * t);
+      gD = Math.round(119 + (210 - 119) * t);
+      bD = Math.round(87 + (185 - 87) * t);
+    }
+    LUT_DARK[c] = (255 << 24) | (bD << 16) | (gD << 8) | rD;
+
+    // Light mode: Clean water [251, 249, 246] -> terracotta watercolor [217, 119, 87] -> deep brick [155, 55, 32]
+    let rL, gL, bL;
+    if (d <= 0.005) {
+      rL = 251; gL = 249; bL = 246;
+    } else if (d < 0.4) {
+      const t = d / 0.4;
+      rL = Math.round(251 + (235 - 251) * t);
+      gL = Math.round(249 + (160 - 249) * t);
+      bL = Math.round(246 + (135 - 246) * t);
+    } else if (d < 0.8) {
+      const t = (d - 0.4) / 0.4;
+      rL = Math.round(235 + (217 - 235) * t);
+      gL = Math.round(160 + (119 - 160) * t);
+      bL = Math.round(135 + (87 - 135) * t);
+    } else {
+      const t = (d - 0.8) / 0.2;
+      rL = Math.round(217 + (155 - 217) * t);
+      gL = Math.round(119 + (55 - 119) * t);
+      bL = Math.round(87 + (32 - 87) * t);
+    }
+    LUT_LIGHT[c] = (255 << 24) | (bL << 16) | (gL << 8) | rL;
+  }
+
+  function addSource(x, s, dt) {
+    for (let i = 0; i < size; i++) x[i] += dt * s[i];
+  }
+
+  function setBnd(b, x) {
+    for (let i = 1; i <= N; i++) {
+      x[IX(0, i)] = b === 1 ? -x[IX(1, i)] : x[IX(1, i)];
+      x[IX(N + 1, i)] = b === 1 ? -x[IX(N, i)] : x[IX(N, i)];
+      x[IX(i, 0)] = b === 2 ? -x[IX(i, 1)] : x[IX(i, 1)];
+      x[IX(i, N + 1)] = b === 2 ? -x[IX(i, N)] : x[IX(i, N)];
+    }
+    x[IX(0, 0)] = 0.5 * (x[IX(1, 0)] + x[IX(0, 1)]);
+    x[IX(0, N + 1)] = 0.5 * (x[IX(1, N + 1)] + x[IX(0, N)]);
+    x[IX(N + 1, 0)] = 0.5 * (x[IX(N, 0)] + x[IX(N + 1, 1)]);
+    x[IX(N + 1, N + 1)] = 0.5 * (x[IX(N, N + 1)] + x[IX(N + 1, N)]);
+  }
+
+  function linSolve(b, x, x0, a, c) {
+    for (let k = 0; k < 4; k++) {
+      for (let i = 1; i <= N; i++) {
+        for (let j = 1; j <= N; j++) {
+          x[IX(i, j)] = (x0[IX(i, j)] + a * (x[IX(i - 1, j)] + x[IX(i + 1, j)] + x[IX(i, j - 1)] + x[IX(i, j + 1)])) / c;
+        }
+      }
+      setBnd(b, x);
+    }
+  }
+
+  function diffuse(b, x, x0, diff, dt) {
+    const a = dt * diff * N * N;
+    linSolve(b, x, x0, a, 1 + 4 * a);
+  }
+
+  function advect(b, d, d0, uVel, vVel, dt) {
+    const dt0 = dt * N;
+    for (let i = 1; i <= N; i++) {
+      for (let j = 1; j <= N; j++) {
+        let x = i - dt0 * uVel[IX(i, j)];
+        let y = j - dt0 * vVel[IX(i, j)];
+        if (x < 0.5) x = 0.5;
+        if (x > N + 0.5) x = N + 0.5;
+        const i0 = Math.floor(x);
+        const i1 = i0 + 1;
+        if (y < 0.5) y = 0.5;
+        if (y > N + 0.5) y = N + 0.5;
+        const j0 = Math.floor(y);
+        const j1 = j0 + 1;
+        const s1 = x - i0;
+        const s0 = 1 - s1;
+        const t1 = y - j0;
+        const t0 = 1 - t1;
+        d[IX(i, j)] = s0 * (t0 * d0[IX(i0, j0)] + t1 * d0[IX(i0, j1)]) +
+                      s1 * (t0 * d0[IX(i1, j0)] + t1 * d0[IX(i1, j1)]);
+      }
+    }
+    setBnd(b, d);
+  }
+
+  function project(uVel, vVel, p, div) {
+    for (let i = 1; i <= N; i++) {
+      for (let j = 1; j <= N; j++) {
+        div[IX(i, j)] = -0.5 * (uVel[IX(i + 1, j)] - uVel[IX(i - 1, j)] + vVel[IX(i, j + 1)] - vVel[IX(i, j - 1)]) / N;
+        p[IX(i, j)] = 0;
+      }
+    }
+    setBnd(0, div);
+    setBnd(0, p);
+    linSolve(0, p, div, 1, 4);
+
+    for (let i = 1; i <= N; i++) {
+      for (let j = 1; j <= N; j++) {
+        uVel[IX(i, j)] -= 0.5 * N * (p[IX(i + 1, j)] - p[IX(i - 1, j)]);
+        vVel[IX(i, j)] -= 0.5 * N * (p[IX(i, j + 1)] - p[IX(i, j - 1)]);
+      }
+    }
+    setBnd(1, uVel);
+    setBnd(2, vVel);
+  }
+
+  function dropInk(cx, cy, radius, amount, vx, vy) {
+    const r2 = radius * radius;
+    for (let i = Math.max(1, Math.floor(cx - radius * 2)); i <= Math.min(N, Math.ceil(cx + radius * 2)); i++) {
+      for (let j = Math.max(1, Math.floor(cy - radius * 2)); j <= Math.min(N, Math.ceil(cy + radius * 2)); j++) {
+        const dist2 = (i - cx) * (i - cx) + (j - cy) * (j - cy);
+        if (dist2 < r2 * 2.5) {
+          const falloff = Math.exp(-dist2 / (2 * r2));
+          dens_prev[IX(i, j)] += amount * falloff;
+          u_prev[IX(i, j)] += vx * falloff;
+          v_prev[IX(i, j)] += vy * falloff;
+        }
+      }
+    }
+  }
+
+  // Offscreen rendering setup
+  const offscreen = document.createElement('canvas');
+  offscreen.width = N;
+  offscreen.height = N;
+  const offCtx = offscreen.getContext('2d');
+  const imgData = offCtx.createImageData(N, N);
+  const buf32 = new Uint32Array(imgData.data.buffer);
+
+  const mainCtx = canvas.getContext('2d');
+
+  // Trigger initial terracotta ink drop hitting the water:
+  // Downward plunge with lateral shear creates a dipole vortex ring splitting into two fluids!
+  dropInk(N / 2, N / 2 - 5, 4.5, 160, 0, 24);
+  u_prev[IX(Math.floor(N / 2) - 3, Math.floor(N / 2) - 5)] = -14;
+  u_prev[IX(Math.floor(N / 2) + 3, Math.floor(N / 2) - 5)] = 14;
+
+  let frameCount = 0;
+  let isRunning = true;
+  let animId = null;
+
+  // Interactive mouse/touch stirring
+  let lastPointerX = -1;
+  let lastPointerY = -1;
+
+  function onPointerMove(e) {
+    const rect = canvas.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    const px = ((e.clientX - rect.left) / rect.width) * N;
+    const py = ((e.clientY - rect.top) / rect.height) * N;
+    if (lastPointerX > 0 && lastPointerY > 0) {
+      const dx = px - lastPointerX;
+      const dy = py - lastPointerY;
+      const speed = Math.sqrt(dx * dx + dy * dy);
+      if (speed > 0.1) {
+        dropInk(px, py, 2.5, 50, dx * 4, dy * 4);
+      }
+    }
+    lastPointerX = px;
+    lastPointerY = py;
+  }
+
+  function onPointerLeave() {
+    lastPointerX = -1;
+    lastPointerY = -1;
+  }
+
+  canvas.addEventListener('pointermove', onPointerMove, { passive: true });
+  canvas.addEventListener('pointerdown', onPointerMove, { passive: true });
+  canvas.addEventListener('pointerleave', onPointerLeave, { passive: true });
+
+  // Progress counter simulation (as shown in Image 1: "19%", etc.)
+  let progressPct = 12;
+  const progressTimer = setInterval(() => {
+    if (!isRunning) return;
+    if (progressPct < 92) {
+      progressPct += Math.floor(Math.random() * 6) + 3;
+      if (progressPct > 92) progressPct = 92;
+      if (progressPill) progressPill.textContent = `${progressPct}%`;
+    }
+  }, 450);
+
+  function step() {
+    if (!isRunning) return;
+
+    frameCount++;
+
+    // Sequential ink drops that split and mingle with current vortices
+    if (frameCount === 65) {
+      // Secondary drop to the left-bottom
+      dropInk(N / 2 - 8, N / 2 + 7, 3.5, 95, 8, -14);
+    } else if (frameCount === 140) {
+      // Tertiary drop to the right-bottom
+      dropInk(N / 2 + 8, N / 2 + 5, 3.5, 95, -8, -12);
+    } else if (frameCount > 200 && frameCount % 120 === 0) {
+      // Soft gentle convection current so the liquid keeps breathing
+      const angle = (frameCount / 120) * 1.5;
+      const cx = N / 2 + Math.cos(angle) * 8;
+      const cy = N / 2 + Math.sin(angle) * 8;
+      dropInk(cx, cy, 3.0, 75, -Math.sin(angle) * 10, Math.cos(angle) * 10);
+    }
+
+    const dt = 0.1;
+
+    // Velocity update
+    addSource(u, u_prev, dt);
+    addSource(v, v_prev, dt);
+    diffuse(1, u_prev, u, 0.0001, dt);
+    diffuse(2, v_prev, v, 0.0001, dt);
+    project(u_prev, v_prev, u, v);
+    advect(1, u, u_prev, u_prev, v_prev, dt);
+    advect(2, v, v_prev, u_prev, v_prev, dt);
+    project(u, v, u_prev, v_prev);
+
+    // Density update
+    addSource(dens, dens_prev, dt);
+    diffuse(0, dens_prev, dens, 0.0001, dt);
+    advect(0, dens, dens_prev, u, v, dt);
+
+    // Gentle natural decay
+    for (let i = 0; i < size; i++) {
+      dens[i] *= 0.996;
+      u[i] *= 0.992;
+      v[i] *= 0.992;
+      dens_prev[i] = 0;
+      u_prev[i] = 0;
+      v_prev[i] = 0;
+    }
+
+    // Determine current theme
+    const isDark = document.body.getAttribute('data-theme') !== 'light';
+    const lut = isDark ? LUT_DARK : LUT_LIGHT;
+
+    // Fast 32-bit pixel writing to offscreen canvas
+    for (let j = 1; j <= N; j++) {
+      const rowOffset = (j - 1) * N;
+      for (let i = 1; i <= N; i++) {
+        const d = dens[IX(i, j)];
+        const idx = Math.min(255, (d * 180) | 0);
+        buf32[rowOffset + (i - 1)] = lut[idx];
+      }
+    }
+    offCtx.putImageData(imgData, 0, 0);
+
+    // Ensure main canvas resolution matches its display size
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const targetW = (canvas.clientWidth || 440) * dpr;
+    const targetH = (canvas.clientHeight || 440) * dpr;
+    if (canvas.width !== targetW || canvas.height !== targetH) {
+      canvas.width = targetW;
+      canvas.height = targetH;
+    }
+
+    // Render scaled fluid simulation
+    mainCtx.imageSmoothingEnabled = true;
+    mainCtx.imageSmoothingQuality = 'high';
+    mainCtx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+
+    animId = requestAnimationFrame(step);
+  }
+
+  animId = requestAnimationFrame(step);
+
+  return {
+    finish() {
+      isRunning = false;
+      clearInterval(progressTimer);
+      if (animId) cancelAnimationFrame(animId);
+      if (progressPill) progressPill.textContent = '100%';
+      canvas.removeEventListener('pointermove', onPointerMove);
+      canvas.removeEventListener('pointerdown', onPointerMove);
+      canvas.removeEventListener('pointerleave', onPointerLeave);
+    },
+    updateProgress(pct) {
+      progressPct = pct;
+      if (progressPill) progressPill.textContent = `${pct}%`;
+    }
+  };
+}
+
 function createThinkingLoader(modality, promptText) {
   const container = document.createElement('div');
   let updateProgress = () => {};
   let finish = () => {};
 
   if (modality === 'image') {
-    // 1. IMAGE LOADER: Minimalist Swirling Terracotta Gradient Shape (Default 1:1 or prompt aspect-ratio)
+    // 1. IMAGE LOADER: Authentic HTML5 Canvas Fluid Simulation (Navier-Stokes) with aspect ratio & progress pill
     const aspect = detectImageAspectRatio(promptText);
     container.className = 'image-gen-loader';
-    container.style.aspectRatio = aspect.ratio;
     container.style.width = aspect.maxWidth;
 
     container.innerHTML = `
-      <svg class="gpt-ink-filter-svg" style="position: absolute; width: 0; height: 0; pointer-events: none;" aria-hidden="true">
-        <defs>
-          <filter id="gpt-ink-goo">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur" />
-            <feColorMatrix in="blur" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 28 -9" result="goo" />
-            <feBlend in="SourceGraphic" in2="goo" />
-          </filter>
-        </defs>
-      </svg>
-      <div class="gpt-ink-water-tank">
-        <div class="gpt-ink-bloom"></div>
-        <div class="gpt-ink-fluid-canvas">
-          <div class="gpt-ink-blob gpt-ink-blob-main"></div>
-          <div class="gpt-ink-blob gpt-ink-blob-drop"></div>
-          <div class="gpt-ink-blob gpt-ink-blob-droplet"></div>
-          <div class="gpt-ink-blob gpt-ink-blob-drift"></div>
-        </div>
+      <div class="image-gen-header">
+        <span class="image-gen-title">Creating image</span>
       </div>
-      <div class="gpt-ink-glass-sheen"></div>
+      <div class="image-gen-viewport" style="aspect-ratio: ${aspect.ratio};">
+        <canvas class="image-gen-canvas"></canvas>
+        <div class="image-gen-progress-pill">12%</div>
+      </div>
     `;
+
+    const canvas = container.querySelector('.image-gen-canvas');
+    const pill = container.querySelector('.image-gen-progress-pill');
+    const sim = startCanvasFluidSimulation(canvas, pill);
 
     return {
       el: container,
-      updateProgress,
-      finish,
+      updateProgress(pct) {
+        sim.updateProgress(pct);
+      },
+      finish() {
+        sim.finish();
+      },
     };
 
   } else if (modality === 'video') {

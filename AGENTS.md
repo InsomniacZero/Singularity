@@ -155,9 +155,9 @@ Keep these past failures in mind to avoid repeating them:
     - *Mistake*: Encasing AI-generated images inside bloated cards with extra border outlines and footer caption bars ("Neural Synthesis", redundant prompt text).
     - *Lesson*: Present generated images cleanly with rounded corners (`border-radius: 16px`), no caption footer, and a sleek floating top-right frosted glass overlay containing only **Copy** (with checkmark feedback) and **Download** SVG buttons with tooltips.
 
-15. **Fluid Ink-in-Water Image Generation Loader vs Rigid Spirals**:
-    - *Mistake*: Generating a rotating conic spiral or geometric gradient swirl for image generation loading. The user specifically wanted an organic fluid simulation resembling a drop of `#d97757` terracotta ink dispersing in water, with splitting and rejoining fluids.
-    - *Lesson*: Remove all text, headers, and progress bars. Simulate an organic fluid ink drop in water using an SVG gooey surface tension filter (`feGaussianBlur` + `feColorMatrix`), ambient water bloom, and morphing `#d97757` ink fluid drops that stretch, split into two or more fluids traveling across the volume, and fuse back together naturally until the final image pop-fades in.
+15. **Authentic HTML5 Canvas Fluid Simulation for Image Generation**:
+    - *Mistake*: Attempting to fake fluid dynamics with CSS radial gradient spirals or SVG filters instead of running real Eulerian fluid mechanics (Navier-Stokes) like Jonas Wagner's famous `29a.ch` canvas fluid simulation.
+    - *Lesson*: For image generation loading, render a real-time Navier-Stokes 2D fluid simulation on `<canvas>` with terracotta color mapping (`#d97757` on `#0d0c0b` in dark mode, and terracotta watercolor on `#fbf9f6` in light mode). Simulate authentic hydrodynamic ink drops with initial dipole vortex ring splitting, sequential plumes, interactive pointer stirring (`pointermove`), clean "Creating image" header, dynamic prompt aspect ratio, and a frosted percentage progress pill. On completion, `finish()` stops the loop and the final generated image smoothly pop-fades in.
 
 16. **Dark Mode User Bubbles & Whitened UI Action Controls**:
     - *Mistake*: Dark mode user messages blending into generic dark gray backgrounds, with action buttons and top header settings icons being too dim (`var(--text-muted)` = `#78716c`), causing poor contrast and muddy appearance.
