@@ -198,15 +198,15 @@ Whenever an issue is identified or a user corrects a behavior, log the entry bel
     1. Render the image directly with modern rounded corners (`border-radius: 16px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: 0 4px 24px rgba(0, 0, 0, 0.28);`).
     2. Eliminate redundant caption / prompt footers.
     3. Floating action overlay (top-right) provides dedicated, high-contrast frosted glass buttons for **Copy** and **Download** only (omitting distracting edit/share menus), with tooltips (`data-tooltip`) and immediate visual feedback (e.g. checkmark icon and "Copied!" state).
-- **2026-09-25 (Authentic HTML5 Canvas Fluid Simulation for Image Generation)**:
-  - *Mistake*: Attempting to fake fluid dynamics with CSS radial gradient spirals or SVG filters instead of running real Eulerian fluid mechanics (Navier-Stokes) like Jonas Wagner's famous `29a.ch` canvas fluid simulation.
+- **2026-09-25 (High-Definition WebGL Fluid Simulation & Autonomous Flow)**:
+  - *Mistake*: Rendering fluid on a tiny $42\times 42$ CPU canvas grid causing blocky/pixelated staircase edges, allowing user pointer events to manually control the fluid, and using off-white peach water in light mode instead of a pure white background with terracotta and white fluids merging.
   - *Rule*: For image generation loading:
-    1. Render a real-time Navier-Stokes 2D fluid simulation on an `<canvas>` element with density advection, viscosity diffusion, and divergence-free projection.
-    2. Theme-adaptive terracotta color mapping: in dark mode, luminous `#d97757` terracotta ink billows over dark stone `#0d0c0b` water; in light mode, rich terracotta watercolor washes over clean translucent `#fbf9f6` water.
-    3. Simulates authentic hydrodynamic ink drops: initial drop hits water and splits into two counter-rotating vortex lobes, followed by secondary droplets, plumes, and convection currents that stretch and merge fluids.
-    4. Support interactive pointer stirring (`pointermove`) so users can stir and swirl the terracotta fluid in real-time.
-    5. Clean layout matching ChatGPT UI: "Creating image" header in the top-left, aspect ratio viewport, and frosted glass percentage progress pill ("19%") in the bottom-right corner.
-    6. When inference completes, `finish()` stops the animation loop and the final generated image pop-fades in.
+    1. Render with GPU-accelerated WebGL at native Retina display resolution (`canvas.width = clientWidth * dpr`) to eliminate all blockiness, staircasing, and low-res pixel artifacts.
+    2. Fluid motion must be strictly **autonomous** (no pointer/touch event listeners) like a self-flowing hypnotic motion graphic.
+    3. In Light Mode: Background must be pure white (`#ffffff`). The terracotta `#d97757` fluid billows and organically folds and merges with white fluid streams.
+    4. In Dark Mode: Background is dark obsidian (`#0d0c0b`) with luminous terracotta streams and peach vortex highlights.
+    5. Clean ChatGPT UI framing: "Creating image" header in top-left, aspect ratio container, and frosted glass percentage progress pill ("19%") in bottom-right corner.
+    6. When inference completes, `finish()` cleanly deallocates WebGL shaders and the final image pop-fades in.
 - **2026-09-25 (Dark Mode Theme Accents & High-Contrast Icon Elements)**:
   - *Mistake*: Setting user message bubbles to generic dark gray (`#242424`) and dimming response buttons and top header settings icons to muddy low-contrast gray (`#78716c`), causing poor visual hierarchy and readability on dark backdrops.
   - *Rule*: In dark mode:
