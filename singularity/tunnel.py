@@ -11,8 +11,10 @@ import platform
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
 import urllib.request
+import zipfile
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
@@ -227,7 +229,6 @@ def install_ngrok(force: bool = False, specific_arch: Optional[str] = None) -> D
                 if not found:
                     return {"status": "error", "message": "ngrok binary not found in downloaded archive."}
         elif fmt == "zip":
-            import zipfile
             with zipfile.ZipFile(io.BytesIO(data)) as zf:
                 found = False
                 for name in zf.namelist():
