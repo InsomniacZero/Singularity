@@ -30,20 +30,34 @@ if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ ! -e "$PREFIX/bin/singular" ]; 
 fi
 
 # Phone / Termux Native ngrok setup (Android ARM64/ARM)
-if [ -n "$PREFIX" ] && [ ! -x "$PREFIX/bin/ngrok" ] && [ ! -x "$DIR/singularity/bin/ngrok" ]; then
-    echo "  [📱] Phone/Termux detected: installing native ngrok for remote cloud tunneling..."
-    (
-        ARCH="$(uname -m)"
-        NGROK_URL=""
-        if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
-            NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm64.tgz"
-        elif [[ "$ARCH" == arm* ]]; then
-            NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm.tgz"
-        elif [ "$ARCH" = "x86_64" ]; then
-            NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
+if [ -n "$PREFIX" ]; then
+    # Verify existing ngrok actually runs without Exec format error
+    NGROK_RUNNABLE=0
+    if command -v ngrok >/dev/null 2>&1; then
+        if ngrok version >/dev/null 2>&1; then
+            NGROK_RUNNABLE=1
+        else
+            echo "  [⚠️] Detected broken or architecture-mismatched ngrok in Termux. Removing..."
+            rm -f "$PREFIX/bin/ngrok" "$DIR/singularity/bin/ngrok" 2>/dev/null || true
         fi
+    fi
 
-        if [ -n "$NGROK_URL" ]; then
+    if [ "$NGROK_RUNNABLE" -eq 0 ]; then
+        echo "  [📱] Android/Termux detected: installing verified native ngrok binary..."
+        (
+            # Accurately detect userspace architecture (dpkg) rather than just kernel (uname -m)
+            DPKG_ARCH="$(dpkg --print-architecture 2>/dev/null || uname -m)"
+            NGROK_URL=""
+            if [ "$DPKG_ARCH" = "aarch64" ] || [ "$DPKG_ARCH" = "arm64" ]; then
+                NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm64.tgz"
+            elif [[ "$DPKG_ARCH" == arm* ]]; then
+                NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm.tgz"
+            elif [ "$DPKG_ARCH" = "x86_64" ] || [ "$DPKG_ARCH" = "amd64" ]; then
+                NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz"
+            else
+                NGROK_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm64.tgz"
+            fi
+
             TMP_TGZ="/tmp/ngrok-termux-$$.tgz"
             if command -v curl >/dev/null 2>&1; then
                 curl -sSL "$NGROK_URL" -o "$TMP_TGZ" 2>/dev/null
@@ -57,12 +71,30 @@ if [ -n "$PREFIX" ] && [ ! -x "$PREFIX/bin/ngrok" ] && [ ! -x "$DIR/singularity/
                 rm -f "$TMP_TGZ"
                 if [ -f "$DIR/singularity/bin/ngrok" ]; then
                     chmod +x "$DIR/singularity/bin/ngrok"
-                    [ -d "$PREFIX/bin" ] && cp -f "$DIR/singularity/bin/ngrok" "$PREFIX/bin/ngrok" 2>/dev/null && chmod +x "$PREFIX/bin/ngrok" 2>/dev/null
-                    echo "  [✓] Native ngrok successfully installed for Android ($ARCH)!"
+                    # Test if the binary executes without Exec format error
+                    if ! "$DIR/singularity/bin/ngrok" version >/dev/null 2>&1; then
+                        echo "  [!] Primary binary incompatible with device. Falling back to alternative 32-bit ARM binary..."
+                        ALT_URL="https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-arm.tgz"
+                        if command -v curl >/dev/null 2>&1; then
+                            curl -sSL "$ALT_URL" -o "/tmp/ngrok-alt.tgz" 2>/dev/null
+                        elif command -v wget >/dev/null 2>&1; then
+                            wget -q "$ALT_URL" -O "/tmp/ngrok-alt.tgz" 2>/dev/null
+                        fi
+                        if [ -f "/tmp/ngrok-alt.tgz" ]; then
+                            tar -xzf "/tmp/ngrok-alt.tgz" -C "$DIR/singularity/bin" ngrok 2>/dev/null
+                            chmod +x "$DIR/singularity/bin/ngrok"
+                            rm -f "/tmp/ngrok-alt.tgz"
+                        fi
+                    fi
+
+                    if "$DIR/singularity/bin/ngrok" version >/dev/null 2>&1; then
+                        [ -d "$PREFIX/bin" ] && cp -f "$DIR/singularity/bin/ngrok" "$PREFIX/bin/ngrok" 2>/dev/null && chmod +x "$PREFIX/bin/ngrok" 2>/dev/null
+                        echo "  [✓] Verified native ngrok successfully installed for Android!"
+                    fi
                 fi
             fi
-        fi
-    ) || true
+        ) || true
+    fi
 fi
 
 # Detect Python across Linux, macOS, Termux, and Windows (Git Bash/MSYS2/WSL)

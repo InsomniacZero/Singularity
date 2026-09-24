@@ -2,6 +2,7 @@
 Ngrok Tunnel Manager for Singularity Unified AI Gateway
 Exposes port 9000 securely to the public internet for remote mobile/tablet use.
 Native cross-platform support: Android (Termux), Linux, Windows, and macOS.
+Features auto-architecture validation and [Errno 8] Exec format error self-healing.
 """
 
 import io
@@ -13,7 +14,7 @@ import sys
 import time
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 import httpx
 
@@ -28,64 +29,99 @@ def is_termux() -> bool:
     return "termux" in prefix.lower() or os.path.isdir("/data/data/com.termux")
 
 
+def is_binary_runnable(bin_path: Union[str, Path]) -> bool:
+    """Verify that a binary can actually be executed without [Errno 8] Exec format error or crashing."""
+    try:
+        res = subprocess.run([str(bin_path), "version"], capture_output=True, text=True, timeout=4)
+        return res.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def get_device_arch() -> str:
+    """Accurately detect the exact CPU and userland architecture (64-bit vs 32-bit)."""
+    is_64bit = sys.maxsize > 2**32
+    machine = platform.machine().lower()
+
+    if is_termux():
+        try:
+            res = subprocess.run(["dpkg", "--print-architecture"], capture_output=True, text=True, timeout=2)
+            if res.returncode == 0:
+                darch = res.stdout.strip().lower()
+                if darch in ("arm64", "aarch64"):
+                    return "arm64"
+                elif darch in ("arm", "armhf", "armeabi", "armeabi-v7a"):
+                    return "arm"
+                elif darch in ("amd64", "x86_64"):
+                    return "amd64"
+                elif darch in ("i686", "x86", "i386"):
+                    return "386"
+        except Exception:
+            pass
+
+    if "aarch64" in machine or "arm64" in machine or "armv8" in machine:
+        return "arm64" if is_64bit else "arm"
+    elif "arm" in machine:
+        return "arm"
+    elif "x86_64" in machine or "amd64" in machine:
+        return "amd64" if is_64bit else "386"
+    return "arm64" if (is_64bit and ("arm" in machine or "aarch" in machine)) else machine
+
+
 def get_ngrok_bin_path() -> Optional[str]:
-    """Find the ngrok binary on the system, in Termux, or in local singularity/bin."""
+    """Find a verified, runnable ngrok binary on the system or in local singularity/bin."""
     bin_name = "ngrok.exe" if sys.platform == "win32" else "ngrok"
+    candidates = []
 
     # 1. System PATH
     found = shutil.which("ngrok") or shutil.which("ngrok.exe")
     if found:
-        return found
+        candidates.append(found)
 
     # 2. Termux environment path
     prefix = os.environ.get("PREFIX")
     if prefix:
-        cand = Path(prefix) / "bin" / bin_name
-        if cand.is_file() and os.access(cand, os.X_OK):
-            return str(cand)
+        candidates.append(str(Path(prefix) / "bin" / bin_name))
 
     # 3. Local singularity/bin directory
-    local_bin = SCRIPT_DIR / "bin" / bin_name
-    if local_bin.is_file() and (sys.platform == "win32" or os.access(local_bin, os.X_OK)):
-        p_str = str(local_bin.parent)
-        if p_str not in os.environ.get("PATH", ""):
-            os.environ["PATH"] = p_str + os.pathsep + os.environ.get("PATH", "")
-        return str(local_bin)
+    candidates.append(str(SCRIPT_DIR / "bin" / bin_name))
 
     # 4. Standard user home directories
     home = Path.home()
-    user_cands = [
-        home / ".local" / "bin" / bin_name,
-        home / "bin" / bin_name,
-    ]
+    candidates.append(str(home / ".local" / "bin" / bin_name))
+    candidates.append(str(home / "bin" / bin_name))
+
     if sys.platform == "win32":
         local_app = os.environ.get("LOCALAPPDATA", "")
         app_data = os.environ.get("APPDATA", "")
         if local_app:
-            user_cands.append(Path(local_app) / "ngrok" / bin_name)
-            user_cands.append(Path(local_app) / "Programs" / "ngrok" / bin_name)
+            candidates.append(str(Path(local_app) / "ngrok" / bin_name))
+            candidates.append(str(Path(local_app) / "Programs" / "ngrok" / bin_name))
         if app_data:
-            user_cands.append(Path(app_data) / "ngrok" / bin_name)
+            candidates.append(str(Path(app_data) / "ngrok" / bin_name))
 
-    for cand in user_cands:
-        if cand.is_file() and (sys.platform == "win32" or os.access(cand, os.X_OK)):
-            p_str = str(cand.parent)
-            if p_str not in os.environ.get("PATH", ""):
-                os.environ["PATH"] = p_str + os.pathsep + os.environ.get("PATH", "")
-            return str(cand)
+    # Check candidates: MUST BE RUNNABLE without [Errno 8] Exec format error
+    for cand in candidates:
+        p = Path(cand)
+        if p.is_file() and (sys.platform == "win32" or os.access(p, os.X_OK)):
+            if is_binary_runnable(cand):
+                p_str = str(p.parent)
+                if p_str not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = p_str + os.pathsep + os.environ.get("PATH", "")
+                return str(p)
 
     return None
 
 
 def check_ngrok_installed() -> bool:
-    """Check if the ngrok executable is present."""
+    """Check if a verified, runnable ngrok executable is present."""
     return get_ngrok_bin_path() is not None
 
 
-def get_ngrok_download_info() -> Dict[str, str]:
+def get_ngrok_download_info(arch_override: Optional[str] = None) -> Dict[str, str]:
     """Determine the official Equinox download URL and format for this system architecture."""
     sys_plat = sys.platform
-    machine = platform.machine().lower()
+    machine = arch_override or get_device_arch()
     base = "https://bin.equinox.io/c/bNyj1mQVY4c"
 
     # Android / Termux or Linux
@@ -94,13 +130,13 @@ def get_ngrok_download_info() -> Dict[str, str]:
             return {
                 "url": f"{base}/ngrok-v3-stable-linux-arm64.tgz",
                 "format": "tgz",
-                "arch": "linux-arm64 (Android/Termux)",
+                "arch": "linux-arm64 (64-bit Android/Termux)",
             }
         elif "arm" in machine:
             return {
                 "url": f"{base}/ngrok-v3-stable-linux-arm.tgz",
                 "format": "tgz",
-                "arch": "linux-arm (32-bit)",
+                "arch": "linux-arm (32-bit Android/Termux)",
             }
         else:
             return {
@@ -141,40 +177,43 @@ def get_ngrok_download_info() -> Dict[str, str]:
     }
 
 
-def install_ngrok(force: bool = False) -> Dict[str, Any]:
-    """Download and install the official native ngrok binary for this device."""
+def install_ngrok(force: bool = False, specific_arch: Optional[str] = None) -> Dict[str, Any]:
+    """Download and install the verified native ngrok binary for this device with auto-fallback."""
     existing = get_ngrok_bin_path()
     if existing and not force:
         return {
             "status": "ok",
             "installed": True,
-            "message": f"ngrok is already installed at: {existing}",
+            "message": f"ngrok is already installed and verified at: {existing}",
             "path": existing,
         }
 
-    info = get_ngrok_download_info()
+    info = get_ngrok_download_info(arch_override=specific_arch)
     url = info["url"]
     fmt = info["format"]
-    arch = info["arch"]
+    arch_label = info["arch"]
 
     bin_name = "ngrok.exe" if sys.platform == "win32" else "ngrok"
     prefix = os.environ.get("PREFIX")
     termux_bin = Path(prefix) / "bin" if (prefix and is_termux()) else None
     local_bin = SCRIPT_DIR / "bin"
     local_bin.mkdir(parents=True, exist_ok=True)
-
     dest_bin = local_bin / bin_name
 
+    # Clear any old/broken candidate binary
+    if dest_bin.is_file():
+        try:
+            dest_bin.unlink(missing_ok=True)
+        except Exception:
+            pass
+
     try:
-        headers = {
-            "User-Agent": "Singularity-Gateway/1.0 (Native Installer)",
-        }
+        headers = {"User-Agent": "Singularity-Gateway/1.0 (Native Installer)"}
         req = urllib.request.Request(url, headers=headers)
         with urllib.request.urlopen(req, timeout=45) as resp:
             data = resp.read()
 
         if fmt == "tgz":
-            import tarfile
             with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as tar:
                 found = False
                 for member in tar.getmembers():
@@ -201,28 +240,40 @@ def install_ngrok(force: bool = False) -> Dict[str, Any]:
                 if not found:
                     return {"status": "error", "message": "ngrok executable not found in zip archive."}
 
-        # Set executable permissions
-        try:
-            dest_bin.chmod(0o755)
-        except Exception:
-            pass
+        # Set execution permissions
+        dest_bin.chmod(0o755)
 
-        # If Termux, also link or copy to $PREFIX/bin/ngrok so user can invoke from Termux bash directly
+        # CRITICAL TEST: Verify that the binary runs on this device without [Errno 8] Exec format error
+        if not is_binary_runnable(dest_bin):
+            # Auto-fallback between 64-bit and 32-bit ARM on Android phones
+            current_arch = specific_arch or get_device_arch()
+            if current_arch in ("arm64", "aarch64") and specific_arch is None:
+                return install_ngrok(force=True, specific_arch="arm")
+            elif current_arch == "arm" and specific_arch is None:
+                return install_ngrok(force=True, specific_arch="arm64")
+            else:
+                return {
+                    "status": "error",
+                    "installed": False,
+                    "message": f"Downloaded {arch_label} binary cannot be executed on this kernel/OS (Exec format error).",
+                }
+
+        # If Termux, replace any broken binary in $PREFIX/bin/ngrok with the verified working binary
         if termux_bin and termux_bin.is_dir():
             termux_target = termux_bin / "ngrok"
             try:
+                if termux_target.is_file():
+                    termux_target.unlink(missing_ok=True)
                 shutil.copy2(dest_bin, termux_target)
                 termux_target.chmod(0o755)
                 dest_bin = termux_target
             except Exception:
                 pass
 
-        # Prepend to PATH for current process
         p_str = str(dest_bin.parent)
         if p_str not in os.environ.get("PATH", ""):
             os.environ["PATH"] = p_str + os.pathsep + os.environ.get("PATH", "")
 
-        # Verify execution
         ver_str = "unknown"
         try:
             chk = subprocess.run([str(dest_bin), "version"], capture_output=True, text=True, timeout=5)
@@ -234,17 +285,17 @@ def install_ngrok(force: bool = False) -> Dict[str, Any]:
         return {
             "status": "ok",
             "installed": True,
-            "message": f"Successfully installed native ngrok ({arch}) to {dest_bin}",
+            "message": f"Successfully installed and verified native ngrok ({arch_label})!",
             "path": str(dest_bin),
             "version": ver_str,
-            "arch": arch,
+            "arch": arch_label,
         }
 
     except Exception as e:
         return {
             "status": "error",
             "installed": False,
-            "message": f"Failed to auto-install ngrok for {arch}: {e}",
+            "message": f"Failed to auto-install ngrok for {arch_label}: {e}",
         }
 
 
@@ -344,10 +395,10 @@ def start_tunnel(port: int = DEFAULT_PORT) -> Dict[str, Any]:
     if current.get("status") == "online":
         return current
 
-    # Auto-install ngrok natively if not found
+    # Auto-install or repair ngrok natively if missing or broken
     bin_path = get_ngrok_bin_path()
     if not bin_path:
-        inst_res = install_ngrok()
+        inst_res = install_ngrok(force=True)
         if inst_res.get("status") != "ok":
             return {
                 "status": "error",
@@ -358,7 +409,7 @@ def start_tunnel(port: int = DEFAULT_PORT) -> Dict[str, Any]:
     if not bin_path:
         return {
             "status": "error",
-            "message": "ngrok binary could not be located after installation.",
+            "message": "ngrok binary could not be verified on this device.",
         }
 
     # Launch ngrok process detached from parent across Windows, Termux, and Unix
@@ -421,7 +472,7 @@ def save_authtoken(token: str) -> Dict[str, Any]:
 
     bin_path = get_ngrok_bin_path()
     if not bin_path:
-        inst_res = install_ngrok()
+        inst_res = install_ngrok(force=True)
         if inst_res.get("status") == "ok":
             bin_path = get_ngrok_bin_path()
 
