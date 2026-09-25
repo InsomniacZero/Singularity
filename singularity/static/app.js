@@ -1936,7 +1936,7 @@ function detectQueryModality(modelId, promptText) {
 
   if (
     caps.includes('video') ||
-    /(video|cogvideox|kling|sora|runway)/i.test(m) ||
+    /(video|veo|cogvideox|kling|sora|runway)/i.test(m) ||
     /(\bgenerate\b|\bmake\b|\bcreate\b|\brender\b).*(\bvideo\b|\banimation\b|\bclip\b|\bmp4\b|\bmovie\b)/i.test(text)
   ) {
     return 'video';
@@ -1945,7 +1945,7 @@ function detectQueryModality(modelId, promptText) {
   if (
     caps.includes('image') ||
     caps.includes('image_generation') ||
-    /(image|imagine|dall-e|cogview|flux|imagen|sdxl|wanx)/i.test(m) ||
+    /(image|imagine|dall-e|cogview|flux|imagen|sdxl|wanx|banana)/i.test(m) ||
     /(\bgenerate\b|\bmake\b|\bcreate\b|\bdraw\b|\bpaint\b|\brender\b).*(\bimage\b|\bimg\b|\bpicture\b|\bphoto\b|\billustration\b|\bart\b|\bwallpaper\b|\bposter\b|\bapple\b)/i.test(text)
   ) {
     return 'image';
@@ -2685,6 +2685,12 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
   const extractedImages = [];
   const extractedVideos = [];
 
+  // 0. Extract markdown videos !?[alt](url.mp4) or data:video/
+  content = content.replace(/!?\[(.*?)\]\(((?:https?:\/\/|\/|data:video\/)[^\)]+\.(?:mp4|webm|mov|m3u8)[^\)]*|data:video\/[^\)]+)\)/gi, (match, title, url) => {
+    extractedVideos.push({ src: url.trim(), title: title || 'Generated Video' });
+    return '';
+  });
+
   // 1. Extract markdown images ![alt](url)
   content = content.replace(/!\[(.*?)\]\((data:image\/[^\)]+|https?:\/\/[^\)]+|\/[^\)]+)\)/gi, (match, alt, url) => {
     extractedImages.push({ src: url.trim(), alt: alt || 'Generated Image' });
@@ -2857,51 +2863,74 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
     bubbleEl.appendChild(card);
   });
 
-  // Render Interactive Video Cards
+  // Render Interactive ChatGPT-Style Video Cards
   extractedVideos.forEach((vid, idx) => {
     const card = document.createElement('div');
-    card.className = 'chat-media-card chat-video-card';
-    const filename = `singularity-${state.selectedModel}-${Date.now()}-${idx + 1}.mp4`;
+    card.className = 'gpt-rendered-video-card';
+    const filename = `singularity-${state.selectedModel || 'video'}-${Date.now()}-${idx + 1}.mp4`;
 
     card.innerHTML = `
-      <div class="video-player-container">
-        <video controls autoplay muted loop playsinline preload="auto" class="chat-rendered-video" src="${vid.src}"></video>
-      </div>
-      <div class="media-card-toolbar">
-        <div class="media-meta-tags">
-          <span class="media-badge-tag video-tag">VIDEO</span>
-          <span style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted);">MP4 / 720p</span>
-        </div>
-        <div class="media-actions-group">
-          <button class="btn-media-action btn-copy-link" title="Copy Video Link">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
-            Copy Link
+      <div class="gpt-video-viewport" style="aspect-ratio: 16/9; width: 100%; max-width: 680px;">
+        <video controls autoplay muted loop playsinline preload="auto" class="gpt-video-element" src="${vid.src}"></video>
+        <div class="gpt-image-glass-toolbar">
+          <button class="gpt-glass-action-btn btn-copy" data-tooltip="Copy Link" aria-label="Copy video link">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
           </button>
-          <button class="btn-media-action btn-download-video" title="Download Video">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
-            Download
+          <button class="gpt-glass-action-btn btn-download" data-tooltip="Download" aria-label="Download video">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
           </button>
         </div>
       </div>
     `;
 
     const videoEl = card.querySelector('video');
-    videoEl.addEventListener('error', () => {
-      // If external video fails to load (e.g. 403 Forbidden), fallback to local demo video
-      if (!videoEl.src.includes('demo_video.mp4')) {
-        videoEl.src = '/static/demo_video.mp4';
-        videoEl.load();
-        videoEl.play().catch(() => { });
+    const viewportEl = card.querySelector('.gpt-video-viewport');
+
+    videoEl.addEventListener('loadedmetadata', () => {
+      if (videoEl.videoWidth && videoEl.videoHeight) {
+        const natRatio = `${videoEl.videoWidth} / ${videoEl.videoHeight}`;
+        viewportEl.style.aspectRatio = natRatio;
+        card.style.aspectRatio = natRatio;
       }
     });
 
-    card.querySelector('.btn-copy-link').addEventListener('click', () => {
-      navigator.clipboard.writeText(vid.src).then(() => {
-        showToast('Video link copied to clipboard!', 'success');
-      });
+    const copyBtn = card.querySelector('.btn-copy');
+    copyBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        await navigator.clipboard.writeText(vid.src);
+        copyBtn.setAttribute('data-tooltip', 'Copied!');
+        copyBtn.innerHTML = `
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="color: #10b981;">
+            <polyline points="20 6 9 17 4 12"></polyline>
+          </svg>
+        `;
+        const tip = document.getElementById('singularity-tooltip');
+        if (tip && tip.classList.contains('visible')) {
+          tip.textContent = 'Copied!';
+        }
+        setTimeout(() => {
+          copyBtn.setAttribute('data-tooltip', 'Copy Link');
+          copyBtn.innerHTML = `
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+          `;
+        }, 2000);
+      } catch (err) { }
     });
 
-    card.querySelector('.btn-download-video').addEventListener('click', () => {
+    const downloadBtn = card.querySelector('.btn-download');
+    downloadBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
       downloadMediaFile(vid.src, filename);
     });
 

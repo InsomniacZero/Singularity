@@ -3952,7 +3952,8 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
 /* ===================================================================
    Playground Media Render Cards (ChatGPT Style Image & Video Cards)
    =================================================================== */
-.gpt-rendered-image-card {
+.gpt-rendered-image-card,
+.gpt-rendered-video-card {
   margin-top: 8px;
   margin-bottom: 8px;
   max-width: 100%;
@@ -3964,7 +3965,8 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
   transition: aspect-ratio 0.3s cubic-bezier(0.16, 1, 0.3, 1), width 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.gpt-image-viewport {
+.gpt-image-viewport,
+.gpt-video-viewport {
   position: relative;
   background: #111110;
   display: flex;
@@ -3972,14 +3974,18 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
   justify-content: center;
   border-radius: 16px;
   overflow: hidden;
-  cursor: zoom-in;
   max-width: 100%;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.32);
   border: 1px solid rgba(255, 255, 255, 0.08);
   transition: aspect-ratio 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-[data-theme="light"] .gpt-image-viewport {
+.gpt-image-viewport {
+  cursor: zoom-in;
+}
+
+[data-theme="light"] .gpt-image-viewport,
+[data-theme="light"] .gpt-video-viewport {
   background: #fbf9f6;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
   border: 1px solid rgba(0, 0, 0, 0.08);
@@ -3994,6 +4000,15 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
   opacity: 0;
   transform: scale(0.985);
   transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.gpt-video-element {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  border-radius: 15px;
+  background: #000;
 }
 
 .gpt-image-element.gpt-image-loaded,
@@ -4040,6 +4055,7 @@ body:not([data-theme="dark"]) .chat-md-inline-code {
 }
 
 .gpt-image-viewport:hover .gpt-image-glass-toolbar,
+.gpt-video-viewport:hover .gpt-image-glass-toolbar,
 .gpt-image-glass-toolbar:focus-within {
   opacity: 1;
   transform: translateY(0);

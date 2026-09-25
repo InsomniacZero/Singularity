@@ -97,8 +97,8 @@ async def _get_gemini_session_context(cookie_str: Optional[str]) -> Tuple[str, s
     return snlm0e, bl
 
 
-async def _download_gemini_image(img_url: str, cookie_str: Optional[str]) -> Optional[str]:
-    """Download Google Gemini generated image via authenticated ALR redirection hops."""
+async def _download_gemini_media(media_url: str, cookie_str: Optional[str], is_video: bool = False) -> Optional[str]:
+    """Download Google Gemini generated image or video via authenticated ALR redirection hops."""
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "Referer": "https://gemini.google.com/",
@@ -106,16 +106,23 @@ async def _download_gemini_image(img_url: str, cookie_str: Optional[str]) -> Opt
     if cookie_str:
         headers["Cookie"] = cookie_str
 
-    curr = img_url
-    if "=d-I?alr=yes" not in curr:
+    curr = media_url
+    if "=d-I?alr=yes" not in curr and not is_video:
         curr = curr + "=d-I?alr=yes"
 
     try:
-        async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=httpx.Timeout(45.0, connect=10.0)) as client:
+        async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=httpx.Timeout(60.0, connect=10.0)) as client:
             for _ in range(4):
                 r = await client.get(curr)
-                ct = r.headers.get("content-type", "")
-                if "image/" in ct or len(r.content) > 10000:
+                ct = r.headers.get("content-type", "").lower()
+                if is_video or "video/" in ct or curr.endswith((".mp4", ".webm")):
+                    file_id = f"gemini_vid_{uuid.uuid4().hex[:12]}"
+                    gen_dir = Path(__file__).resolve().parent.parent / "static" / "generated"
+                    gen_dir.mkdir(parents=True, exist_ok=True)
+                    out_path = gen_dir / f"{file_id}.mp4"
+                    out_path.write_bytes(r.content)
+                    return f"/static/generated/{file_id}.mp4"
+                elif "image/" in ct or len(r.content) > 10000:
                     file_id = f"gemini_{uuid.uuid4().hex[:12]}"
                     gen_dir = Path(__file__).resolve().parent.parent / "static" / "generated"
                     gen_dir.mkdir(parents=True, exist_ok=True)
@@ -132,9 +139,12 @@ async def _download_gemini_image(img_url: str, cookie_str: Optional[str]) -> Opt
         pass
     return None
 
+_download_gemini_image = _download_gemini_media
+
 
 def _clean_gemini_text(text: str, strip: bool = True) -> str:
-    """Clean internal Google Gemini artifacts and chips."""
+    """Clean internal Google Gemini artifacts, chips, and internal placeholders."""
+    text = text.replace("video_placeholder", "").replace("image_placeholder", "")
     text = re.sub(
         r'```(?:python|javascript|text)\?code_(?:reference|stdout)&code_event_index=\d+\n.*?```\n?',
         '', text, flags=re.DOTALL
@@ -211,6 +221,7 @@ async def stream_gemini_chat(
         pass
 
     is_image_model = any(k in model.lower() for k in ("nano-banana", "imagen", "image"))
+    is_video_model = any(k in model.lower() for k in ("veo", "omni", "video"))
 
     chosen_cookie = candidates[0] if candidates else ""
     snlm0e = ""
@@ -238,6 +249,15 @@ async def stream_gemini_chat(
         "2. Open DevTools (`F12`), go to the **Network** tab, type any message in Gemini, click on the `StreamGenerate` or `batchexecute` request.\n"
         "3. In the Request Headers, copy the entire **Cookie** header (which includes `__Secure-1PSID`, `__Secure-1PSIDTS`, and `SAPISID`).\n"
         "4. Paste it into Singularity Control Center -> **Cookie Stacker** -> **Gemini** tab and save!"
+    )
+
+    video_help_instruction = (
+        "⚠️ **Google Gemini Video Generation (Veo) Notice**\n\n"
+        "Google returned: *\"I'm here to help, but you'll need to upgrade your subscription first.\"*\n\n"
+        "### 🔍 Why this happens:\n"
+        "1. **Google One AI Premium Requirement**: Google restricts Veo cinematic video generation (`gemini-omni-pro`, `veo-3.1-generate-preview`, etc.) to accounts with an active **Google One AI Premium** subscription.\n"
+        "2. **Session Cookies**: Make sure the active Gemini session cookie in **Cookie Stacker** belongs to a Google account with Google One AI Premium active.\n"
+        "3. **Offline / Sandbox Testing**: If testing without a premium subscription, you can run Singularity in **Simulate Mode** (`./singular simulate on`) to generate cinematic video cards instantly."
     )
 
     chat_id = f"chatcmpl-gemini-{uuid.uuid4().hex[:12]}"
@@ -323,6 +343,7 @@ async def stream_gemini_chat(
     prev_text = ""
     yielded_any = False
     emitted_images = set()
+    emitted_videos = set()
 
     for attempt in range(2):
         params = {"f.req": json.dumps(outer)}
@@ -377,7 +398,7 @@ async def stream_gemini_chat(
                                 full_img_url = f"https://lh3.googleusercontent.com/gg-dl/{file_key}"
                                 if full_img_url not in emitted_images:
                                     emitted_images.add(full_img_url)
-                                    data_uri = await _download_gemini_image(full_img_url, chosen_cookie)
+                                    data_uri = await _download_gemini_media(full_img_url, chosen_cookie, is_video=False)
                                     if data_uri:
                                         yield {
                                             "id": chat_id,
@@ -387,6 +408,26 @@ async def stream_gemini_chat(
                                             "choices": [{
                                                 "index": 0,
                                                 "delta": {"content": f"\n\n![Generated Image]({data_uri})\n\n"},
+                                                "finish_reason": None,
+                                            }],
+                                        }
+                                        yielded_any = True
+
+                            # Detect generated video assets in line
+                            vid_matches = re.findall(r'https?://[^\s"<>]+(?:\.mp4|\.webm|gg-video|video_generation_content)[^\s"<>]*', line)
+                            for full_vid_url in vid_matches:
+                                if full_vid_url not in emitted_videos:
+                                    emitted_videos.add(full_vid_url)
+                                    vid_uri = await _download_gemini_media(full_vid_url, chosen_cookie, is_video=True)
+                                    if vid_uri:
+                                        yield {
+                                            "id": chat_id,
+                                            "object": "chat.completion.chunk",
+                                            "created": created_ts,
+                                            "model": model,
+                                            "choices": [{
+                                                "index": 0,
+                                                "delta": {"content": f"\n\n![Generated Video]({vid_uri})\n\n"},
                                                 "finish_reason": None,
                                             }],
                                         }
@@ -403,23 +444,35 @@ async def stream_gemini_chat(
                                         if isinstance(part, list) and len(part) > 1 and part[1] and isinstance(part[1], list):
                                             for t in part[1]:
                                                 if isinstance(t, str):
-                                                    # Strip raw internal image placeholder url
-                                                    t_cleaned = re.sub(r'http://googleusercontent\.com/image_generation_content/[0-9_]+', '', t)
+                                                    if t.strip() in ("video_placeholder", "image_placeholder"):
+                                                        continue
+                                                    # Strip raw internal image/video placeholder urls
+                                                    t_cleaned = re.sub(r'http://googleusercontent\.com/(?:image|video)_generation_content/[0-9_]+', '', t)
+                                                    t_cleaned = t_cleaned.replace("video_placeholder", "").replace("image_placeholder", "")
+
                                                     if is_image_model and not emitted_images and any(ref in t_cleaned for ref in ("signed out", "can't seem to create", "can't create it right now", "image creation isn't available")):
                                                         t_cleaned = help_instruction
+                                                    elif is_video_model and not emitted_videos and any(ref in t_cleaned.lower() for ref in ("upgrade your subscription", "subscriptions/", "can't create that video", "create that video for you", "google one ai premium")):
+                                                        t_cleaned = video_help_instruction
+
                                                     clean_full = _clean_gemini_text(t_cleaned, strip=False)
                                                     clean_prev = _clean_gemini_text(prev_text, strip=False)
-                                                    if len(clean_full) > len(clean_prev):
+                                                    if clean_full.startswith(clean_prev):
                                                         delta = clean_full[len(clean_prev):]
-                                                        if delta and delta.strip():
-                                                            yield {
-                                                                "id": chat_id,
-                                                                "object": "chat.completion.chunk",
-                                                                "created": created_ts,
-                                                                "model": model,
-                                                                "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
-                                                            }
-                                                            yielded_any = True
+                                                    elif len(clean_full) > len(clean_prev) and clean_prev in clean_full:
+                                                        delta = clean_full[clean_full.index(clean_prev) + len(clean_prev):]
+                                                    else:
+                                                        delta = clean_full
+
+                                                    if delta and delta.strip():
+                                                        yield {
+                                                            "id": chat_id,
+                                                            "object": "chat.completion.chunk",
+                                                            "created": created_ts,
+                                                            "model": model,
+                                                            "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}],
+                                                        }
+                                                        yielded_any = True
                                                     prev_text = t_cleaned
                             except Exception:
                                 pass
@@ -440,6 +493,21 @@ async def stream_gemini_chat(
                     }],
                 }
                 return
+
+    if not yielded_any:
+        fallback_msg = video_help_instruction if is_video_model else (help_instruction if is_image_model else "")
+        if fallback_msg:
+            yield {
+                "id": chat_id,
+                "object": "chat.completion.chunk",
+                "created": created_ts,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": fallback_msg},
+                    "finish_reason": None,
+                }],
+            }
 
     # Final stop chunk
     yield {
