@@ -252,12 +252,14 @@ async def stream_gemini_chat(
     )
 
     video_help_instruction = (
-        "⚠️ **Google Gemini Video Generation (Veo) Notice**\n\n"
+        "⚠️ **Google Gemini Video Generation Notice**\n\n"
         "Google returned: *\"I'm here to help, but you'll need to upgrade your subscription first.\"*\n\n"
-        "### 🔍 Why this happens:\n"
-        "1. **Google One AI Premium Requirement**: Google restricts Veo cinematic video generation (`gemini-omni-pro`, `veo-3.1-generate-preview`, etc.) to accounts with an active **Google One AI Premium** subscription.\n"
-        "2. **Session Cookies**: Make sure the active Gemini session cookie in **Cookie Stacker** belongs to a Google account with Google One AI Premium active.\n"
-        "3. **Offline / Sandbox Testing**: If testing without a premium subscription, you can run Singularity in **Simulate Mode** (`./singular simulate on`) to generate cinematic video cards instantly."
+        "### 🔍 Why Google Returned This:\n"
+        "1. **Google One AI Premium vs Google Storage/Pro**: Google strictly restricts native video & motion generation (Veo) on `gemini.google.com` to accounts with an active **Google One AI Premium** ($19.99/mo) plan with Gemini Advanced enabled. Standard Google One storage plans (100GB, 2TB 'Pro' storage) or basic Workspace tiers do not include Veo video generation.\n"
+        "2. **Session Cookies**: If you do have a Google One AI Premium subscription, verify in browser DevTools that your active session cookies in **Cookie Stacker** are exported from that exact account with 'Gemini Advanced' active in the top-left switcher.\n"
+        "3. **Instant Free Animation Alternative**: If you want an animated dragon without an AI Premium subscription, prompt Gemini for code-based animation:\n"
+        "   > *\"Create an animated SVG of the dragon with flapping wings and glowing lightning effects\"*\n"
+        "   Gemini Omni Flash will natively write and render full animated SVG/Canvas code!"
     )
 
     chat_id = f"chatcmpl-gemini-{uuid.uuid4().hex[:12]}"
