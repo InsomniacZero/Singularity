@@ -32,6 +32,20 @@ MODEL_CONFIGS = {
     "gemini-3.5-flash-lite": {"mode": 6, "think": 4},
     "gemini-3.1-pro": {"mode": 3, "think": 4},
     "gemini-3.1-pro-thinking": {"mode": 3, "think": 0},
+    # Google Omni Family (Any-to-any multimodal & conversational video editing)
+    "gemini-omni-flash": {"mode": 1, "think": 4},
+    "gemini-omni-1.1-flash": {"mode": 1, "think": 4},
+    "gemini-omni-pro": {"mode": 3, "think": 4},
+    "google-omni": {"mode": 1, "think": 4},
+    "google-omni-flash": {"mode": 1, "think": 4},
+    "gemini-omni": {"mode": 1, "think": 4},
+    # Google Veo Family (Cinematic generative video & synced audio)
+    "veo-3.1-generate-preview": {"mode": 1, "think": 4},
+    "veo-3.1-fast-generate-preview": {"mode": 1, "think": 4},
+    "veo-3.1-lite": {"mode": 1, "think": 4},
+    "veo-3.0": {"mode": 1, "think": 4},
+    "veo-2.0-generate-001": {"mode": 1, "think": 4},
+    "veo-2": {"mode": 1, "think": 4},
 }
 
 

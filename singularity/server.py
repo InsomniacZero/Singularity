@@ -193,7 +193,7 @@ def resolve_model_provider(model_name: str) -> str:
     # 2. Explicit prefixes or known names
     if m.startswith("claude") or "fable" in m or "flable" in m or "opus" in m or "sonnet" in m or "haiku" in m:
         return "claude"
-    if m.startswith("gemini") or m.startswith("imagen") or m.startswith("nano-banana"):
+    if m.startswith("gemini") or m.startswith("imagen") or m.startswith("nano-banana") or m.startswith("veo") or m.startswith("google-omni") or m == "omni" or m.startswith("omni-"):
         return "gemini"
     if m.startswith("kimi") or m.startswith("moonshot"):
         return "kimi"
@@ -330,13 +330,13 @@ def _get_simulated_response_payload(model_name: str, provider_id: str, prompt_te
     p_lower = (prompt_text or "").lower()
 
     # Detect Video Modality
-    if any(k in m_lower for k in ("video", "t2v", "wanx-2.1", "cogvideox", "kling", "sora", "runway")) or any(k in p_lower for k in ("video", "movie", "animation", "motion clip")):
+    if any(k in m_lower for k in ("video", "t2v", "wanx-2.1", "cogvideox", "kling", "sora", "runway", "veo")) or any(k in p_lower for k in ("video", "movie", "animation", "motion clip")):
         video_url = "/static/demo_video.mp4"
         return (
             f"🎬 **Singularity Cinematic Video Synthesis** (Simulated Response)\n\n"
             f"• **Model:** `{model_name}`\n"
             f"• **Prompt:** *\"{prompt_text or 'Autonomous dynamic frame sequence'}\"*\n"
-            f"• **Specs:** 720p HD • 24 FPS • H.264 MP4\n\n"
+            f"• **Specs:** 1080p HD • 24 FPS • Synchronized Stereo Audio\n\n"
             f"[Generated Video]({video_url})"
         )
 

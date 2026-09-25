@@ -163,6 +163,10 @@ Keep these past failures in mind to avoid repeating them:
     - *Mistake*: Dark mode user messages blending into generic dark gray backgrounds, with action buttons and top header settings icons being too dim (`var(--text-muted)` = `#78716c`), causing poor contrast and muddy appearance.
     - *Lesson*: In dark mode, style user message bubbles with brand terracotta `#d97757` and crisp white text. Whiten response action buttons (`.response-actions`), user message hover controls (`.user-msg-actions`), and top header settings buttons (`.claude-icon-btn`, `.claude-avatar-btn`) to `rgba(255, 255, 255, 0.85-0.92)` / `#ffffff` on hover, while keeping date timestamps subtly muted (`var(--text-muted)`).
 
+17. **Google Omni Multimodal & Veo Cinematic Video Model Integration**:
+    - *Mistake*: Overlooking Google DeepMind's frontier generative media family beyond text (`Google Omni` and `Veo`), causing video and conversational multimodal queries to miss specialized model routing and capabilities.
+    - *Lesson*: Register the complete **Google Omni** family (`gemini-omni-flash`, `gemini-omni-1.1-flash`, `gemini-omni-pro`, `google-omni`) and **Veo** family (`veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview`, `veo-3.1-lite`, `veo-3.0`, `veo-2.0-generate-001`, `veo-2`) across `MODELS_CATALOG` (`singularity/providers.py`), `resolve_model_provider()` & `_get_simulated_response_payload()` (`singularity/server.py`), `MODEL_CONFIGS` (`singularity/engines/gemini.py`), and `get_all_limits()` with verified video quotas and any-to-any multimodal capabilities.
+
 
 
 

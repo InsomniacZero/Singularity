@@ -215,3 +215,10 @@ Whenever an issue is identified or a user corrects a behavior, log the entry bel
     2. Response action buttons (copy, retry, edit, tts, feedback) in `.response-actions` and user message hover bar `.user-msg-actions` are crisp whitish (`rgba(255, 255, 255, 0.85)` / `#ffffff` on hover).
     3. Top header settings buttons (`.claude-icon-btn`, `.claude-avatar-btn`) are crisp whitish (`rgba(255, 255, 255, 0.88)` / `#ffffff` on hover).
     4. Date timestamps (`.response-date`, `.user-msg-date`) remain subtly muted (`var(--text-muted)`) so they do not compete with interactive controls.
+- **2026-09-25 (Google Omni Multimodal & Veo Cinematic Video Model Integration)**:
+  - *Context*: Google DeepMind's frontier generative media family expands beyond text/code to include **Google Omni** (`gemini-omni-flash`, `gemini-omni-1.1-flash`, `gemini-omni-pro`, `google-omni`) for any-to-any multimodal conversation and conversational video editing, and **Veo** (`veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview`, `veo-3.1-lite`, `veo-3.0`, `veo-2.0-generate-001`, `veo-2`) for cinematic video generation with native synchronized audio.
+  - *Rule*:
+    1. Register all Omni and Veo models with accurate capabilities (`['video', 'audio', 'vision', 'chat']`) and context window specs in `MODELS_CATALOG` (`singularity/providers.py`).
+    2. Add routing prefixes (`veo`, `google-omni`, `omni`) in `resolve_model_provider()` and video modality detection in `_get_simulated_response_payload()` (`singularity/server.py`).
+    3. Register runtime engine mode and thinking configurations in `MODEL_CONFIGS` (`singularity/engines/gemini.py`).
+    4. Accurately reflect video quotas and multimodal features in `get_all_limits()` (`singularity/providers.py`).
