@@ -179,6 +179,10 @@ Keep these past failures in mind to avoid repeating them:
     - *Mistake*: Omitting `__Secure-1PSIDTS` when copying Gemini cookies from browser DevTools, causing Google to treat the session as unauthenticated guest mode and refuse image generation ("Are you signed in? I can search for images, but can't seem to create any for you right now"). Furthermore, hardcoding `accounts[0]` in ascending order prevented newly pasted accounts from taking effect.
     - *Lesson*: Always sort vault accounts `ORDER BY id DESC` so recently pasted credentials take precedence. Require and validate `__Secure-1PSIDTS` alongside `__Secure-1PSID`, dynamically rotate across all accounts to locate an active authenticated `SNlM0e` session, surface UI/CLI warnings when `__Secure-1PSIDTS` is missing, and pre-emptively guide the user with a 30-second fix if an image model is requested while signed out.
 
+21. **Google Gemini `SAPISIDHASH` Authentication & Full Cookie Bundle Support**:
+    - *Mistake*: Assuming `__Secure-1PSID` and `__Secure-1PSIDTS` alone are always sufficient for Google's authenticated image endpoints. Google Web endpoints require the `Authorization: SAPISIDHASH <ts>_<sha1>` header (derived from the `SAPISID` cookie) and validate the complete cookie bundle (`SID`, `__Secure-1PSID`, `__Secure-1PSIDTS`, `SAPISID`, etc.). Prematurely returning an abort notice blocked live execution and auto-healing.
+    - *Lesson*: Do not prematurely abort image requests before sending them to Gemini; allow requests to reach the backend so auto-healing and token recovery can execute. Extract `SAPISID`, `__Secure-1PAPISID`, or `__Secure-3PAPISID` from candidate cookies if present, and dynamically compute and attach the `Authorization: SAPISIDHASH <timestamp>_<sha1>` header for `https://gemini.google.com`. Recommend copying the full `Cookie:` header from the browser's Network tab (`F12` -> Network -> any Gemini request -> Request Headers -> Cookie). Only replace Google's signed-out / location refusal message if no generated images were emitted (`not emitted_images`).
+
 
 
 

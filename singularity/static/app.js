@@ -1356,7 +1356,7 @@ const TOKEN_GUIDES = {
       },
       {
         num: '3',
-        text: 'Copy the values for <code>__Secure-1PSID</code> and <code>__Secure-1PSIDTS</code> and paste formatted as: <code>__Secure-1PSID=...; __Secure-1PSIDTS=...</code>'
+        text: 'Copy the values for <code>__Secure-1PSID</code> and <code>__Secure-1PSIDTS</code> (and optionally <code>SAPISID</code>), or in <strong>Network</strong> tab copy the entire <strong>Cookie</strong> header from any Gemini request.'
       }
     ],
     rules: [

@@ -227,33 +227,20 @@ async def stream_gemini_chat(
             bl = b
 
     help_instruction = (
-        "⚠️ **Google Gemini Image Generation Unavailable (Session Signed Out)**\n\n"
-        "Google Gemini strictly requires an active, signed-in Google session with **both** `__Secure-1PSID` and `__Secure-1PSIDTS` cookies to generate images.\n\n"
-        "Your current Gemini credentials in Singularity are signed out or missing `__Secure-1PSIDTS`.\n\n"
-        "### 🔑 How to Fix in 30 Seconds:\n"
-        "1. Open [gemini.google.com](https://gemini.google.com) in your browser (confirm you are signed into Google).\n"
-        "2. Press `F12` (or Right Click -> Inspect) and go to **Application** -> **Cookies** -> `https://gemini.google.com`.\n"
-        "3. Copy the values of **`__Secure-1PSID`** AND **`__Secure-1PSIDTS`**.\n"
-        "4. Go to Singularity Control Center -> **Cookie Stacker** -> **Gemini** tab, paste:\n"
-        "   ```\n"
-        "   __Secure-1PSID=<your_psid>; __Secure-1PSIDTS=<your_psidts>\n"
-        "   ```\n"
-        "5. Click **Save Gemini Cookies** and rerun your prompt!"
+        "⚠️ **Google Gemini Image Generation Notice**\n\n"
+        "Google Gemini returned: *\"I can search for images, but can't create any for you right now. It's possible you're signed out or image creation isn't available in your location yet.\"*\n\n"
+        "### 🔍 Why this happens:\n"
+        "1. **Full Cookie Requirement**: Google Gemini's image generation (Imagen) requires authentication via `__Secure-1PSID`, `__Secure-1PSIDTS`, AND `SAPISID` (for SAPISIDHASH token verification).\n"
+        "2. **Account / Workspace Restrictions**: School, Google Workspace, or under-18 accounts have Imagen disabled by Google.\n\n"
+        "### 🔑 How to resolve in 30 seconds:\n"
+        "1. Open [gemini.google.com](https://gemini.google.com) in your browser.\n"
+        "2. Open DevTools (`F12`), go to the **Network** tab, type any message in Gemini, click on the `StreamGenerate` or `batchexecute` request.\n"
+        "3. In the Request Headers, copy the entire **Cookie** header (which includes `__Secure-1PSID`, `__Secure-1PSIDTS`, and `SAPISID`).\n"
+        "4. Paste it into Singularity Control Center -> **Cookie Stacker** -> **Gemini** tab and save!"
     )
 
     chat_id = f"chatcmpl-gemini-{uuid.uuid4().hex[:12]}"
     created_ts = int(time.time())
-
-    # Pre-emptively abort with clean guidance if image model requested while signed out
-    if is_image_model and not snlm0e:
-        yield {
-            "id": chat_id,
-            "object": "chat.completion.chunk",
-            "created": created_ts,
-            "model": model,
-            "choices": [{"index": 0, "delta": {"role": "assistant", "content": help_instruction}, "finish_reason": "stop"}],
-        }
-        return
 
     cfg = MODEL_CONFIGS.get(model.lower(), {"mode": 1, "think": 4})
     model_id = cfg["mode"]
@@ -315,6 +302,13 @@ async def stream_gemini_chat(
     }
     if chosen_cookie:
         headers["Cookie"] = chosen_cookie
+        # Compute SAPISIDHASH if SAPISID is available in cookies
+        sapisid_m = re.search(r'(?:SAPISID|__Secure-1PAPISID|__Secure-3PAPISID)=([^;]+)', chosen_cookie)
+        if sapisid_m:
+            sapisid = sapisid_m.group(1).strip()
+            ts = int(time.time())
+            h = hashlib.sha1(f"{ts} {sapisid} https://gemini.google.com".encode()).hexdigest()
+            headers["Authorization"] = f"SAPISIDHASH {ts}_{h}"
 
     # Initial assistant chunk
     yield {
@@ -410,7 +404,7 @@ async def stream_gemini_chat(
                                                 if isinstance(t, str):
                                                     # Strip raw internal image placeholder url
                                                     t_cleaned = re.sub(r'http://googleusercontent\.com/image_generation_content/[0-9_]+', '', t)
-                                                    if is_image_model and any(ref in t_cleaned for ref in ("signed out", "can't seem to create", "can't create it right now", "image creation isn't available")):
+                                                    if is_image_model and not emitted_images and any(ref in t_cleaned for ref in ("signed out", "can't seem to create", "can't create it right now", "image creation isn't available")):
                                                         t_cleaned = help_instruction
                                                     clean_full = _clean_gemini_text(t_cleaned, strip=False)
                                                     clean_prev = _clean_gemini_text(prev_text, strip=False)

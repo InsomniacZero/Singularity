@@ -238,4 +238,10 @@ Whenever an issue is identified or a user corrects a behavior, log the entry bel
     1. Sort database credentials `ORDER BY id DESC` so recently added accounts take immediate priority over stale credentials.
     2. In `singularity/engines/gemini.py`, iterate through all candidate accounts in priority order and test `_get_gemini_session_context` to find an account with a verified `SNlM0e` authenticated session.
     3. Validate `__Secure-1PSIDTS`: flag in `parse_credential`, surface warnings in `save_stacked_cookies`, and display real-time warning toasts in the UI if `__Secure-1PSIDTS` is missing.
-    4. For image generation models (`nano-banana*`, `imagen*`), if no accounts have an active authenticated `SNlM0e` session, pre-emptively yield clear 30-second fix instructions on copying `__Secure-1PSIDTS` from browser DevTools rather than returning confusing upstream guest refusals.
+- **2026-09-25 (Google Gemini `SAPISIDHASH` Authentication & Full Cookie Bundle Support)**:
+  - *Mistake*: Assuming `__Secure-1PSID` and `__Secure-1PSIDTS` alone are sufficient for Google's authenticated image generation endpoints. Google Web endpoints require the `Authorization: SAPISIDHASH <ts>_<sha1>` header (derived from the `SAPISID` cookie) and validate the complete cookie bundle (`SID`, `__Secure-1PSID`, `__Secure-1PSIDTS`, `SAPISID`, etc.). Prematurely returning an abort notice blocked live execution and auto-healing.
+  - *Rule*:
+    1. Do not prematurely abort image requests before sending them to Gemini; allow requests to hit the backend so auto-healing and token recovery can execute.
+    2. Extract `SAPISID`, `__Secure-1PAPISID`, or `__Secure-3PAPISID` from the candidate cookie if present, and dynamically compute and attach the `Authorization: SAPISIDHASH <timestamp>_<sha1>` header for `https://gemini.google.com`.
+    3. Update the Control Center guide and in-stream help notice to recommend copying the full `Cookie:` header from the browser's Network tab (`F12` -> Network -> click any Gemini request -> Request Headers -> Cookie).
+    4. Only replace Google's signed-out / location refusal message if no generated images were emitted (`not emitted_images`), preventing false error states when images are successfully returned.
