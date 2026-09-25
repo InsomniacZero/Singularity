@@ -80,7 +80,7 @@ async def stream_chat(
             except Exception:
                 pass
 
-        async for chunk in stream_gemini_chat(model, messages, cookie_str=cookie_str, stream=stream, **kwargs):
+        async for chunk in stream_gemini_chat(model, messages, cookie_str=cookie_str, accounts=accounts, stream=stream, **kwargs):
             yield chunk
         return
 

@@ -167,6 +167,14 @@ Keep these past failures in mind to avoid repeating them:
     - *Mistake*: Overlooking Google DeepMind's frontier generative media family beyond text (`Google Omni` and `Veo`), causing video and conversational multimodal queries to miss specialized model routing and capabilities.
     - *Lesson*: Register the complete **Google Omni** family (`gemini-omni-flash`, `gemini-omni-1.1-flash`, `gemini-omni-pro`, `google-omni`) and **Veo** family (`veo-3.1-generate-preview`, `veo-3.1-fast-generate-preview`, `veo-3.1-lite`, `veo-3.0`, `veo-2.0-generate-001`, `veo-2`) across `MODELS_CATALOG` (`singularity/providers.py`), `resolve_model_provider()` & `_get_simulated_response_payload()` (`singularity/server.py`), `MODEL_CONFIGS` (`singularity/engines/gemini.py`), and `get_all_limits()` with verified video quotas and any-to-any multimodal capabilities.
 
+18. **Strict Real-Live Testing Rule & Elimination of Fake Simulated Responses**:
+    - *Mistake*: Testing model endpoints and fixes using `--simulate` instead of authentic live upstream requests. The user explicitly forbids fake simulated responses.
+    - *Lesson*: NEVER test with `--simulate`. Always execute real live test queries against the running server/engine using `./singular chat "<prompt>" -m <model>` to verify authentic network calls, cookie authentication, response tokens, and media downloads.
+
+19. **Google Gemini Batchexecute SNlM0e XSRF Token & ALR Image Pipeline**:
+    - *Mistake*: Gemini `StreamGenerate` calls failing with HTTP 400 (`[["er",null,null,null,null,400,null,null,null,3,[{"48448350":["xsrf","..."]}]]]`) and image generation failing with guest mode refusal ("It's possible you're signed out or image creation isn't available").
+    - *Lesson*: Gemini's `StreamGenerate` endpoint strictly requires the `at` parameter (`SNlM0e` XSRF token) and modern `bl` build label. Dynamically extract `SNlM0e` and `bl` from `https://gemini.google.com/app` using active session cookies (`__Secure-1PSID`), auto-heal by extracting the new xsrf token from 400 response bodies if rotation occurs, and resolve generated `https://lh3.googleusercontent.com/gg-dl/...` images through authenticated App Layer Redirection (`=d-I?alr=yes`) hops to download the binary and stream high-definition base64 data URIs.
+
 
 
 

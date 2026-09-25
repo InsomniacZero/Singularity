@@ -222,3 +222,13 @@ Whenever an issue is identified or a user corrects a behavior, log the entry bel
     2. Add routing prefixes (`veo`, `google-omni`, `omni`) in `resolve_model_provider()` and video modality detection in `_get_simulated_response_payload()` (`singularity/server.py`).
     3. Register runtime engine mode and thinking configurations in `MODEL_CONFIGS` (`singularity/engines/gemini.py`).
     4. Accurately reflect video quotas and multimodal features in `get_all_limits()` (`singularity/providers.py`).
+- **2026-09-25 (Strict Real-Live Testing Rule & Elimination of Fake Simulated Responses)**:
+  - *Mistake*: Testing model endpoints and fixes using `--simulate` instead of authentic live upstream requests. The user explicitly forbids fake simulated responses.
+  - *Rule*: NEVER test with `--simulate`. Always execute real live test queries against the running server/engine using `./singular chat "<prompt>" -m <model>` to verify authentic network calls, cookie authentication, response tokens, and media downloads.
+- **2026-09-25 (Google Gemini Batchexecute SNlM0e XSRF Token & ALR Image Pipeline)**:
+  - *Mistake*: Gemini `StreamGenerate` calls failing with HTTP 400 (`[["er",null,null,null,null,400,null,null,null,3,[{"48448350":["xsrf","..."]}]]]`) and image generation failing with guest mode refusal ("It's possible you're signed out or image creation isn't available").
+  - *Rule*:
+    1. Gemini's `StreamGenerate` endpoint strictly requires the `at` parameter (`SNlM0e` XSRF token) and modern `bl` build label.
+    2. Dynamically extract `SNlM0e` and `bl` from `https://gemini.google.com/app` using active session cookies (`__Secure-1PSID`), caching context for 10 minutes.
+    3. If rotation causes HTTP 400, automatically parse `["xsrf", "<new_token>"]` from the response error body, refresh cache, and auto-retry.
+    4. Google generated image links (`https://lh3.googleusercontent.com/gg-dl/...`) return 403 unless resolved through authenticated App Layer Redirection (`=d-I?alr=yes`) hops. Follow ALR hops with session cookies until binary is received, save to `singularity/static/generated/`, and stream as base64 data URI `![Generated Image](data:image/png;base64,...)`.
