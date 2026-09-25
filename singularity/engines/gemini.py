@@ -9,6 +9,7 @@ Supports guest mode (zero cookie) and authenticated mode (__Secure-1PSID).
 
 import asyncio
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
