@@ -68,19 +68,7 @@ async def stream_chat(
 
     # 2. Google Gemini
     if pid in ("gemini", "google"):
-        cookie_str = ""
-        if accounts:
-            cookie_str = accounts[0].get("token", "")
-        if not cookie_str:
-            try:
-                from singularity import db
-                accs = db.get_accounts("gemini")
-                if accs:
-                    cookie_str = accs[0].get("token", "")
-            except Exception:
-                pass
-
-        async for chunk in stream_gemini_chat(model, messages, cookie_str=cookie_str, accounts=accounts, stream=stream, **kwargs):
+        async for chunk in stream_gemini_chat(model, messages, accounts=accounts, stream=stream, **kwargs):
             yield chunk
         return
 

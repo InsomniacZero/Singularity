@@ -1680,6 +1680,11 @@ async function saveCookies() {
     const data = await res.json();
     if (data.status === 'ok') {
       showToast(data.message, 'success');
+      if (data.warning) {
+        setTimeout(() => showToast(data.warning, 'warning', 10000), 600);
+      } else if (p === 'gemini' && content.includes('__Secure-1PSID') && !content.includes('__Secure-1PSIDTS')) {
+        setTimeout(() => showToast('⚠️ Warning: __Secure-1PSIDTS was not found in your pasted cookie! Image generation strictly requires both __Secure-1PSID and __Secure-1PSIDTS.', 'warning', 10000), 600);
+      }
       textarea.value = '';
       await loadCookiesTab();
       // Refresh limits tab so new accounts appear immediately

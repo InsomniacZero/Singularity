@@ -175,6 +175,10 @@ Keep these past failures in mind to avoid repeating them:
     - *Mistake*: Gemini `StreamGenerate` calls failing with HTTP 400 (`[["er",null,null,null,null,400,null,null,null,3,[{"48448350":["xsrf","..."]}]]]`) and image generation failing with guest mode refusal ("It's possible you're signed out or image creation isn't available").
     - *Lesson*: Gemini's `StreamGenerate` endpoint strictly requires the `at` parameter (`SNlM0e` XSRF token) and modern `bl` build label. Dynamically extract `SNlM0e` and `bl` from `https://gemini.google.com/app` using active session cookies (`__Secure-1PSID`), auto-heal by extracting the new xsrf token from 400 response bodies if rotation occurs, and resolve generated `https://lh3.googleusercontent.com/gg-dl/...` images through authenticated App Layer Redirection (`=d-I?alr=yes`) hops to download the binary and stream high-definition base64 data URIs.
 
+20. **Google Gemini `__Secure-1PSIDTS` Cookie Requirement & Multi-Account Rotation**:
+    - *Mistake*: Omitting `__Secure-1PSIDTS` when copying Gemini cookies from browser DevTools, causing Google to treat the session as unauthenticated guest mode and refuse image generation ("Are you signed in? I can search for images, but can't seem to create any for you right now"). Furthermore, hardcoding `accounts[0]` in ascending order prevented newly pasted accounts from taking effect.
+    - *Lesson*: Always sort vault accounts `ORDER BY id DESC` so recently pasted credentials take precedence. Require and validate `__Secure-1PSIDTS` alongside `__Secure-1PSID`, dynamically rotate across all accounts to locate an active authenticated `SNlM0e` session, surface UI/CLI warnings when `__Secure-1PSIDTS` is missing, and pre-emptively guide the user with a 30-second fix if an image model is requested while signed out.
+
 
 
 

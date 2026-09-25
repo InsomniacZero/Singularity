@@ -190,27 +190,70 @@ async def stream_gemini_chat(
     **kwargs,
 ) -> AsyncIterator[Dict[str, Any]]:
     """Stream chat completions from Google Gemini Web API with authentic session & image generation support."""
-    # Resolve cookie from parameters or active SQLite vault accounts
-    if not cookie_str and accounts:
+    # Resolve candidate cookies from parameters or active SQLite vault accounts
+    candidates: List[str] = []
+    if cookie_str:
+        candidates.append(cookie_str)
+    if accounts:
         for acc in accounts:
-            if acc.get("status") == "active" and acc.get("token"):
-                cookie_str = acc["token"]
-                break
-        if not cookie_str and accounts and accounts[0].get("token"):
-            cookie_str = accounts[0]["token"]
+            tok = acc.get("token")
+            if tok and acc.get("status") == "active" and tok not in candidates:
+                candidates.append(tok)
+    try:
+        from singularity import db
+        accs = db.get_accounts("gemini")
+        for acc in accs:
+            tok = acc.get("token")
+            if tok and acc.get("status") == "active" and tok not in candidates:
+                candidates.append(tok)
+    except Exception:
+        pass
 
-    if not cookie_str:
-        try:
-            from singularity import db
-            accs = db.get_accounts("gemini")
-            for acc in accs:
-                if acc.get("status") == "active" and acc.get("token"):
-                    cookie_str = acc["token"]
-                    break
-            if not cookie_str and accs and accs[0].get("token"):
-                cookie_str = accs[0]["token"]
-        except Exception:
-            pass
+    is_image_model = any(k in model.lower() for k in ("nano-banana", "imagen", "image"))
+
+    chosen_cookie = candidates[0] if candidates else ""
+    snlm0e = ""
+    bl = os.getenv("GEMINI_BL", "boq_assistant-bard-web-server_20260923.22_p0")
+
+    # Try candidate cookies in priority order to find an active authenticated session
+    for cand in candidates:
+        s, b = await _get_gemini_session_context(cand)
+        if s:
+            chosen_cookie = cand
+            snlm0e = s
+            bl = b
+            break
+        elif not bl and b:
+            bl = b
+
+    help_instruction = (
+        "⚠️ **Google Gemini Image Generation Unavailable (Session Signed Out)**\n\n"
+        "Google Gemini strictly requires an active, signed-in Google session with **both** `__Secure-1PSID` and `__Secure-1PSIDTS` cookies to generate images.\n\n"
+        "Your current Gemini credentials in Singularity are signed out or missing `__Secure-1PSIDTS`.\n\n"
+        "### 🔑 How to Fix in 30 Seconds:\n"
+        "1. Open [gemini.google.com](https://gemini.google.com) in your browser (confirm you are signed into Google).\n"
+        "2. Press `F12` (or Right Click -> Inspect) and go to **Application** -> **Cookies** -> `https://gemini.google.com`.\n"
+        "3. Copy the values of **`__Secure-1PSID`** AND **`__Secure-1PSIDTS`**.\n"
+        "4. Go to Singularity Control Center -> **Cookie Stacker** -> **Gemini** tab, paste:\n"
+        "   ```\n"
+        "   __Secure-1PSID=<your_psid>; __Secure-1PSIDTS=<your_psidts>\n"
+        "   ```\n"
+        "5. Click **Save Gemini Cookies** and rerun your prompt!"
+    )
+
+    chat_id = f"chatcmpl-gemini-{uuid.uuid4().hex[:12]}"
+    created_ts = int(time.time())
+
+    # Pre-emptively abort with clean guidance if image model requested while signed out
+    if is_image_model and not snlm0e:
+        yield {
+            "id": chat_id,
+            "object": "chat.completion.chunk",
+            "created": created_ts,
+            "model": model,
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": help_instruction}, "finish_reason": "stop"}],
+        }
+        return
 
     cfg = MODEL_CONFIGS.get(model.lower(), {"mode": 1, "think": 4})
     model_id = cfg["mode"]
@@ -242,8 +285,6 @@ async def stream_gemini_chat(
                 model_id = 2
 
     prompt = _format_messages_to_prompt(messages)
-    chat_id = f"chatcmpl-gemini-{uuid.uuid4().hex[:12]}"
-    created_ts = int(time.time())
 
     inner = [None] * 80
     inner[0] = [prompt, 0, None, None, None, None, 0]
@@ -265,9 +306,6 @@ async def stream_gemini_chat(
 
     outer = [None, json.dumps(inner)]
 
-    # Fetch active SNlM0e XSRF token and build label
-    snlm0e, bl = await _get_gemini_session_context(cookie_str)
-
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
         "Origin": "https://gemini.google.com",
@@ -275,8 +313,8 @@ async def stream_gemini_chat(
         "X-Same-Domain": "1",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
     }
-    if cookie_str:
-        headers["Cookie"] = cookie_str
+    if chosen_cookie:
+        headers["Cookie"] = chosen_cookie
 
     # Initial assistant chunk
     yield {
@@ -344,7 +382,7 @@ async def stream_gemini_chat(
                                 full_img_url = f"https://lh3.googleusercontent.com/gg-dl/{file_key}"
                                 if full_img_url not in emitted_images:
                                     emitted_images.add(full_img_url)
-                                    data_uri = await _download_gemini_image(full_img_url, cookie_str)
+                                    data_uri = await _download_gemini_image(full_img_url, chosen_cookie)
                                     if data_uri:
                                         yield {
                                             "id": chat_id,
@@ -372,6 +410,8 @@ async def stream_gemini_chat(
                                                 if isinstance(t, str):
                                                     # Strip raw internal image placeholder url
                                                     t_cleaned = re.sub(r'http://googleusercontent\.com/image_generation_content/[0-9_]+', '', t)
+                                                    if is_image_model and any(ref in t_cleaned for ref in ("signed out", "can't seem to create", "can't create it right now", "image creation isn't available")):
+                                                        t_cleaned = help_instruction
                                                     clean_full = _clean_gemini_text(t_cleaned, strip=False)
                                                     clean_prev = _clean_gemini_text(prev_text, strip=False)
                                                     if len(clean_full) > len(clean_prev):

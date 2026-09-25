@@ -274,7 +274,15 @@ def parse_credential(provider: str, raw: str) -> Optional[Dict[str, Any]]:
     # 5. Gemini
     elif provider == "gemini":
         psid_m = re.search(r"__Secure-1PSID=([^;]+)", raw)
+        psidts_m = re.search(r"__Secure-1PSIDTS=([^;]+)", raw)
         psid = psid_m.group(1).strip() if psid_m else raw[:25]
+        has_psidts = bool(psidts_m)
+        metadata = {
+            "psid": psid,
+            "has_psidts": has_psidts,
+        }
+        if not has_psidts:
+            metadata["warning"] = "Missing __Secure-1PSIDTS cookie. Google requires both __Secure-1PSID and __Secure-1PSIDTS for full authentication & image generation."
         identifier = psid
         return {
             "provider": "gemini",
@@ -283,7 +291,7 @@ def parse_credential(provider: str, raw: str) -> Optional[Dict[str, Any]]:
             "token": raw,
             "plan": "free",
             "status": "active",
-            "metadata": json.dumps({"psid": psid}),
+            "metadata": json.dumps(metadata),
         }
 
     # 6. GLM
@@ -398,12 +406,12 @@ def get_accounts(provider: Optional[str] = None) -> List[Dict[str, Any]]:
     with get_db_connection() as conn:
         if provider:
             rows = conn.execute(
-                "SELECT * FROM credentials WHERE provider = ? ORDER BY id ASC",
+                "SELECT * FROM credentials WHERE provider = ? ORDER BY id DESC",
                 (provider,),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM credentials ORDER BY provider, id ASC"
+                "SELECT * FROM credentials ORDER BY provider, id DESC"
             ).fetchall()
 
         results = []

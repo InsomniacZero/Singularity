@@ -2882,9 +2882,20 @@ def save_stacked_cookies(provider_id: str, accounts: List[str]) -> Dict[str, Any
 
     success, failed = db.save_accounts(provider_id, clean_items)
     total = len(db.get_accounts(provider_id))
+    warning = None
+    if provider_id == "gemini":
+        has_ts = any("__Secure-1PSIDTS=" in itm for itm in clean_items)
+        if not has_ts:
+            warning = "⚠️ Note: '__Secure-1PSIDTS' was not found in your pasted cookie. Google Gemini requires both '__Secure-1PSID' and '__Secure-1PSIDTS' for full features and image generation."
+
+    msg = f"Successfully updated {provider_id.upper()} accounts (+{success}, total in pool: {total})."
+    if warning:
+        msg = f"{msg} {warning}"
+
     return {
         "status": "ok",
-        "message": f"Successfully updated {provider_id.upper()} accounts (+{success}, total in pool: {total}).",
+        "message": msg,
+        "warning": warning,
         "saved": success,
         "failed": failed,
         "total": total,
