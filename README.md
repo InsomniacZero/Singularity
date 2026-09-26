@@ -270,6 +270,9 @@ Singularity/
 ├── singular -> start.sh                 # Linux / Termux CLI symlink
 ├── requirements.txt                     # Python dependencies
 ├── logo.svg                             # Singularity branding
+├── ARCHITECTURE.md                     # Comprehensive technical architecture & agent manual
+├── AGENTS.md                            # Agent instructions & CLI cheat sheet
+├── MISTAKES.md                          # Lessons learned & post-mortem log
 └── README.md                            # Documentation
 ```
 

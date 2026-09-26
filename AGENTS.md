@@ -6,6 +6,7 @@
 3. **PREFER REPO CLI (`./singular` or `./c2a`)**: When checking accounts, verifying quotas/limits, testing models, checking status, or toggling simulation mode, **DO NOT** write multi-line Python scratch scripts or raw curl commands. **Always use the built-in `./singular` (or `./c2a`) CLI tool**.
 4. **NO LEGACY DEPENDENCIES**: The Singularity workspace is 100% self-contained in `singularity/`. Do not import, execute, or read files from `legacy/`.
 5. **ZERO RUST BUILD TOOLCHAINS ON MOBILE**: Singularity runs on pure Python with `StarletteGateway` and `uvicorn`. Never add `pydantic` or `fastapi` to `requirements.txt`. Startup dependency checks must verify pure packages (`starlette, uvicorn, httpx`) so phone installation completes in 3–5 seconds without Cargo/Rust compilation.
+6. **ARCHITECTURE MANUAL**: Consult [ARCHITECTURE.md](file:///home/insomniac/Desktop/UNI/Apps/Gemini%20Web2Api/Singularity/ARCHITECTURE.md) for the full architectural blueprint, request lifecycle, engine protocol specifications, and data flow pipelines.
 
 ---
 
@@ -182,6 +183,14 @@ Keep these past failures in mind to avoid repeating them:
 21. **Google Gemini `SAPISIDHASH` Authentication & Full Cookie Bundle Support**:
     - *Mistake*: Assuming `__Secure-1PSID` and `__Secure-1PSIDTS` alone are always sufficient for Google's authenticated image endpoints. Google Web endpoints require the `Authorization: SAPISIDHASH <ts>_<sha1>` header (derived from the `SAPISID` cookie) and validate the complete cookie bundle (`SID`, `__Secure-1PSID`, `__Secure-1PSIDTS`, `SAPISID`, etc.). Prematurely returning an abort notice blocked live execution and auto-healing.
     - *Lesson*: Do not prematurely abort image requests before sending them to Gemini; allow requests to reach the backend so auto-healing and token recovery can execute. Extract `SAPISID`, `__Secure-1PAPISID`, or `__Secure-3PAPISID` from candidate cookies if present, and dynamically compute and attach the `Authorization: SAPISIDHASH <timestamp>_<sha1>` header for `https://gemini.google.com`. Recommend copying the full `Cookie:` header from the browser's Network tab (`F12` -> Network -> any Gemini request -> Request Headers -> Cookie). Only replace Google's signed-out / location refusal message if no generated images were emitted (`not emitted_images`).
+
+22. **Unclosed Modal Parent Container & Global Delegation for Icon Buttons**:
+    - *Mistake*: Clicking the top-right gear icon (`#btn-open-settings`) failed to show the Claude Settings Modal. A missing `</div>` on the preceding `#playground-lightbox` container caused `#claude-settings-modal` to be parsed as a child of `.lightbox-modal`, inheriting its closed state (`opacity: 0; pointer-events: none;`). Additionally, `initUserProfile` was not hoisted, and clicks on the inner SVG/path tags weren't delegating cleanly.
+    - *Lesson*: Run strict tag balancing verification on HTML documents containing modal backdrops. Ensure all fixed modals are direct top-level siblings. Declare hoisted wrapper functions (`function initUserProfile() { return initClaudeSettings(); }`), invoke `initClaudeSettings()` directly in `DOMContentLoaded`, and attach global event delegation with `e.target.closest('#btn-open-settings, .claude-settings-gear-btn')` so clicks on child SVG icons and paths open modals reliably.
+
+23. **Custom Model Selector Lifecycle Re-rendering & Segmented Theme Capsule Geometry**:
+    - *Mistake*: The chat playground model switcher popover displayed an empty box below the search input because `renderCustomSelectOptions()` was only called once at startup without a re-render trigger on click, leaving it blank if `/api/models` completed asynchronously. Additionally, the popover stuck right to the button with an awkward offset, and the theme segmented control in Settings lacked explicit width, collapsing the indicator into a squished vertical oval.
+    - *Lesson*: Always re-render custom dropdown contents (`renderCustomSelectOptions()`) upon opening the trigger, provide fallback loading states if catalogs are in flight, add checkmark indicators and provider chips for active models, offset popovers with clean 12px breathing room (`bottom: calc(100% + 12px)`), and enforce fixed minimum geometry (`width: 132px; height: 38px;`) on segmented controls so capsule indicators glide horizontally with correct aspect ratio.
 
 
 

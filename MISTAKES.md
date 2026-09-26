@@ -245,3 +245,19 @@ Whenever an issue is identified or a user corrects a behavior, log the entry bel
     2. Extract `SAPISID`, `__Secure-1PAPISID`, or `__Secure-3PAPISID` from the candidate cookie if present, and dynamically compute and attach the `Authorization: SAPISIDHASH <timestamp>_<sha1>` header for `https://gemini.google.com`.
     3. Update the Control Center guide and in-stream help notice to recommend copying the full `Cookie:` header from the browser's Network tab (`F12` -> Network -> click any Gemini request -> Request Headers -> Cookie).
     4. Only replace Google's signed-out / location refusal message if no generated images were emitted (`not emitted_images`), preventing false error states when images are successfully returned.
+- **2026-09-26 (Unclosed Modal Parent Container & Global Delegation for Icon Buttons)**:
+  - *Mistake*: Clicking the top-right header gear icon (`#btn-open-settings`) failed to show the Claude Settings Modal ("when i click on gear icon, nothing comes up"). A missing `</div>` on the preceding `#playground-lightbox` container caused `#claude-settings-modal` to be parsed inside `.lightbox-modal`, which had `opacity: 0; pointer-events: none;`, making the opened modal totally invisible ($1 \times 0 = 0$). Furthermore, `initUserProfile` was not hoisted, and clicking on SVG paths inside `#btn-open-settings` lacked global delegated event capturing.
+  - *Rule*:
+    1. **Strict HTML Tag Balancing**: Run programmatic tag validation whenever adding or editing modal backdrops. Ensure all fixed modal windows are top-level siblings placed outside deeply nested UI layouts.
+    2. **Proper Function Hoisting**: Always declare functions with standard `function <name>()` syntax (`function initUserProfile() { return initClaudeSettings(); }`) if they are referenced anywhere during page initialization.
+    3. **Explicit Lifecycle Calling**: Explicitly call modal and feature initializers (e.g. `initClaudeSettings()`) directly in `DOMContentLoaded`.
+    4. **Robust Event Delegation**: Attach global delegation on `document` with `e.target.closest('#btn-open-settings, .claude-settings-gear-btn')` so clicks on child SVG icons and paths open modals reliably.
+- **2026-09-26 (Custom Model Selector Lifecycle Re-rendering & Segmented Theme Capsule Geometry)**:
+  - *Mistake*: The chat playground model switcher popover displayed an empty box below the search input because `renderCustomSelectOptions()` was only called once at startup without a re-render trigger on click, leaving it blank if `/api/models` completed asynchronously. Additionally, the popover stuck right to the button with an awkward offset, and the theme segmented control in Settings lacked explicit width, collapsing the indicator into a squished vertical oval.
+  - *Rule*:
+    1. **Dynamic Dropdown Lifecycle**: Always trigger `renderCustomSelectOptions()` whenever the dropdown trigger is clicked, provide fallback loading states if catalogs are in flight, and auto-fetch if `state.models` is empty.
+    2. **Refined Popover Spacing & Ergonomics**: Offset popovers with 12px breathing room (`bottom: calc(100% + 12px)`), clean 14px border-radius, and smooth spring transitions so popovers don't cling awkwardly to input buttons.
+    3. **Item Feedback & Selection State**: Add visual checkmark icons (`✓`) and provider tags for selected items, and update labels immediately.
+    4. **Segmented Control Minimum Sizing**: Always declare fixed minimum container geometry (`width: 132px; height: 38px;`) on segmented controls so capsule indicators glide horizontally with correct aspect ratio.
+
+
