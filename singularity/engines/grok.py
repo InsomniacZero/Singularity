@@ -30,7 +30,7 @@ def _format_messages_to_prompt(messages: List[Dict[str, Any]]) -> str:
             for item in content:
                 if isinstance(item, dict) and item.get("type") == "text":
                     sub_txt.append(item.get("text", ""))
-                elif isinstance(sub, str):
+                elif isinstance(item, str):
                     sub_txt.append(item)
             content = " ".join(sub_txt)
         content_str = str(content).strip()

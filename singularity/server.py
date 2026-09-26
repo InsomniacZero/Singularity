@@ -740,7 +740,9 @@ async def chat_completions(request: Request):
                                 finish_reason = choices[0].get("finish_reason")
                                 if "content" in delta:
                                     new_c = rewriter.process(delta["content"])
-                                    if new_c:
+                                    if finish_reason:
+                                        new_c += rewriter.finish()
+                                    if new_c or finish_reason:
                                         delta["content"] = new_c
                                         yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
                                     continue
