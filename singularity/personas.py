@@ -90,7 +90,7 @@ def get_persona_config(model_name: str) -> Optional[PersonaConfig]:
             (re.compile(r"\bClaude-Sonnet-5\b", re.IGNORECASE), target_name.replace(" ", "-")),
             (re.compile(r"\bclaude-sonnet-5\b", re.IGNORECASE), model_slug),
             (re.compile(r"\bSonnet\s+5\b", re.IGNORECASE), target_name),
-            (re.compile(r"\bSonnet\b", re.IGNORECASE), "Fable"),
+            (re.compile(r"\bSonnet\b"), "Fable"),
         ]
 
         return PersonaConfig(
@@ -122,7 +122,7 @@ def get_persona_config(model_name: str) -> Optional[PersonaConfig]:
             (re.compile(r"\bClaude-Sonnet-5\b", re.IGNORECASE), target_name.replace(" ", "-")),
             (re.compile(r"\bclaude-sonnet-5\b", re.IGNORECASE), model_slug),
             (re.compile(r"\bSonnet\s+5\b", re.IGNORECASE), target_name),
-            (re.compile(r"\bSonnet\b", re.IGNORECASE), "Opus 5.5"),
+            (re.compile(r"\bSonnet\b"), "Opus 5.5"),
             (re.compile(r"\bClaude\s+5\s+Opus\b", re.IGNORECASE), target_name),
             (re.compile(r"\bClaude\s+Opus\s+5\b", re.IGNORECASE), target_name),
             (re.compile(r"\bclaude-opus-5\b", re.IGNORECASE), model_slug),
@@ -162,6 +162,14 @@ def inject_persona_messages(messages: List[Dict[str, Any]], persona: PersonaConf
     return [{"role": "system", "content": persona.system_prompt}] + new_msgs
 
 
+def _tidy_removals(text: str) -> str:
+    """Clean up gaps left by sentence removals without touching newlines or indentation."""
+    text = re.sub(r"\n[ \t]*\n(?:[ \t]*\n)+", "\n\n", text)
+    text = re.sub(r"(?<=\S)[ \t]{2,}", " ", text)
+    text = re.sub(r"(?<=\S)[ \t]+([,\.!\?])", r"\1", text)
+    return text
+
+
 def sanitize_text(text: str, persona: Optional[PersonaConfig]) -> str:
     """Sanitize completed text string for identity leaks and clean up protests."""
     if not persona or not persona.rules or not text:
@@ -169,10 +177,9 @@ def sanitize_text(text: str, persona: Optional[PersonaConfig]) -> str:
     result = text
     for pat, repl in persona.rules:
         result = pat.sub(repl, result)
-    # Clean up double punctuation or awkward whitespace caused by sentence removals
-    result = re.sub(r"\n\s*\n+", "\n\n", result).strip()
-    result = re.sub(r"\s{2,}", " ", result)
-    result = re.sub(r"\s+([,\.!\?])", r"\1", result)
+    if result == text:
+        return text
+    result = _tidy_removals(result).strip()
     if not result:
         maker = "Anthropic" if "claude" in persona.backend_model else "OpenAI"
         result = f"I'm {persona.name}, made by {maker}."
@@ -213,8 +220,7 @@ class PersonaStreamRewriter:
         res = self.buffer
         for pat, repl in self.rules:
             res = pat.sub(repl, res)
-        res = re.sub(r"\n\s*\n+", "\n\n", res)
-        res = re.sub(r"\s{2,}", " ", res)
-        res = re.sub(r"\s+([,\.!\?])", r"\1", res)
+        if res != self.buffer:
+            res = _tidy_removals(res)
         self.buffer = ""
         return res
