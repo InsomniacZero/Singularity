@@ -37,4 +37,6 @@ singularity/static/generated/*
 *.zip
 singularity/bin/*
 !singularity/bin/.gitkeep
-
+# Local workspace projects
+Laya/
+laya/
