@@ -2832,35 +2832,18 @@ def get_stored_cookies() -> Dict[str, Any]:
             ident = acc["identifier"]
             name = acc["name"]
 
+            # Never return full tokens to the browser: a short mask is enough to tell accounts apart.
+            masked = f"{tok[:6]}…{tok[-4:]}" if len(tok) > 16 else "••••"
+            entry = {"id": acc["id"], "masked": masked, "identifier": ident, "name": name}
             if p == "chatgpt":
-                masked = tok[:15] + "..." + tok[-10:] if len(tok) > 25 else (ident or "Active")
-                formatted.append({
-                    "id": acc["id"],
+                entry.update({
                     "email": ident,
-                    "name": name,
                     "plan": acc["plan"],
                     "status": "Active" if acc["status"] == "active" else "Disabled",
-                    "masked": masked,
-                    "identifier": ident,
                 })
-            elif p == "claude":
-                masked = tok[:16] + "..." + tok[-10:] if len(tok) > 30 else tok
-                formatted.append({"id": acc["id"], "sessionKey": tok, "masked": masked, "identifier": ident, "name": name})
-            elif p == "kimi":
-                masked = tok[:15] + "..." + tok[-10:] if len(tok) > 30 else tok
-                formatted.append({"id": acc["id"], "token": tok, "masked": masked, "identifier": ident, "name": name})
             elif p == "grok":
-                masked = f"{name} ({ident[:12]}...)"
-                formatted.append({"id": acc["id"], "raw": tok, "masked": masked, "identifier": ident, "name": name})
-            elif p == "gemini":
-                masked = tok[:15] + "..." + tok[-10:] if len(tok) > 30 else tok
-                formatted.append({"id": acc["id"], "raw": tok, "masked": masked, "identifier": ident, "name": name})
-            elif p == "glm":
-                masked = tok[:12] + "..." + tok[-8:] if len(tok) > 24 else tok
-                formatted.append({"id": acc["id"], "token": tok, "masked": masked, "identifier": ident, "name": name})
-            elif p in ("deepseek", "qwen"):
-                masked = tok[:15] + "..." + tok[-10:] if len(tok) > 25 else (ident or "Active")
-                formatted.append({"id": acc["id"], "token": tok, "masked": masked, "identifier": ident, "name": name})
+                entry["masked"] = f"{name} ({ident[:12]}...)"
+            formatted.append(entry)
 
         result[p] = {
             "type": ctype,

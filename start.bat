@@ -111,20 +111,30 @@ if "%ARG1%"=="chat" goto :RUN_CLI
 if "%ARG1%"=="thinking" goto :RUN_CLI
 if "%ARG1%"=="service" goto :RUN_CLI
 if "%ARG1%"=="tunnel" goto :RUN_CLI
+if "%ARG1%"=="key" goto :RUN_CLI
 if "%ARG1%"=="-h" goto :RUN_CLI
 if "%ARG1%"=="--help" goto :RUN_CLI
 if "%ARG1%"=="help" goto :RUN_CLI
 
 :: Launch Gateway Server
+:: --lan listens on all interfaces so phones / other PCs can connect with the gateway key.
+:: Default is this machine only.
+set "SINGULARITY_LAN="
+for %%A in (%*) do if /I "%%~A"=="--lan" set "SINGULARITY_LAN=1"
+set "API_HOST=127.0.0.1"
+if defined SINGULARITY_LAN set "API_HOST=0.0.0.0"
+set "RP_ALLOWED_ORIGINS="
+
 cls
 echo ======================================================================
-echo   SINGULARITY UNIFIED AI GATEWAY ^& TAVERN (Windows)
+echo   SINGULARITY UNIFIED AI GATEWAY ^& TAVERN [Windows]
 echo ======================================================================
 echo   Dashboard:       http://localhost:9000
 echo   Tavern Studio:   http://localhost:5173
 echo   API Base:        http://localhost:9000/v1
-echo   Phone / Remote:  http://^<YOUR_PC_IP^>:5173 [Check Wi-Fi IP]
-echo   NOTE: Do NOT type 0.0.0.0 on phones - always use your PC's LAN IP!
+if defined SINGULARITY_LAN echo   Phone / Remote:  http://^<YOUR_PC_IP^>:9000 - log in with: start.bat key
+if defined SINGULARITY_LAN echo   NOTE: Do NOT type 0.0.0.0 on phones - always use your PC's LAN IP!
+if not defined SINGULARITY_LAN echo   Phone / Remote:  run start.bat --lan to allow other devices
 echo ======================================================================
 echo.
 
@@ -142,7 +152,7 @@ if defined TAV_DIR (
             if exist "!TAV_DIR!\run_tavern.bat" (
                 start "Tavern Web Studio" cmd /c "call "!TAV_DIR!\run_tavern.bat""
             ) else (
-                start "Tavern Web Studio" cmd /c "cd /d "!TAV_DIR!" && set API_HOST=0.0.0.0&& set RP_ALLOWED_ORIGINS=*&& call npm run dev"
+                start "Tavern Web Studio" cmd /c "cd /d "!TAV_DIR!" && call npm run dev"
             )
         )
     )

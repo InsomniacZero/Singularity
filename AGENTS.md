@@ -133,12 +133,12 @@ Keep these past failures in mind to avoid repeating them:
    - *Lesson*: Never use raw parentheses inside `if (...)` blocks in `.bat` files. Use square brackets `[v22+]` or escape them `^)`. Always escape ampersands `^&` in echo statements.
 
 9. **Universal GenUI Interception (`※genui※`) & Artifact Sandboxing**:
-   - *Mistake*: ChatGPT web canvas outputs raw `※genui※{"app_block":...}※` JSON payloads directly into chat bubbles, and iframe sandboxes without `allow-same-origin` or proper error boundary coordinates break React apps and push errors below the fold.
-   - *Lesson*: Always route GenUI blocks through `singularity/artifacts.py` to auto-convert to `<antArtifact>`, use programmatic Babel compilation instead of DOM scanner scripts, and fix error boundaries at `top: 16px; z-index: 999999` with `allow-same-origin` on `about:srcdoc`.
+   - *Mistake*: ChatGPT web canvas outputs raw `※genui※{"app_block":...}※` JSON payloads directly into chat bubbles, and error boundaries placed below the fold hide React failures.
+   - *Lesson*: Always route GenUI blocks through `singularity/artifacts.py` to auto-convert to `<antArtifact>`, use programmatic Babel compilation instead of DOM scanner scripts, and fix error boundaries at `top: 16px; z-index: 999999`. The artifact iframe must **never** get `allow-same-origin` (see lesson 24): keep `<base href>` + absolute `/static/vendor/*` paths with CDN fallbacks, and route every artifact type through `withSandboxShims()` so storage APIs work in the opaque origin.
 
 10. **Canonical Dual-Launcher Invariant (`start.sh` and `start.bat`)**:
     - *Mistake*: Creating multiple ad-hoc startup scripts (`start_singularity.sh`, `singular.bat`) when users request running from arbitrary directories.
-    - *Lesson*: Singularity maintains strictly two canonical launchers: `start.sh` (symlinked as `singular` for Unix/Termux) and `start.bat` for Windows. Both handle co-startup of Singularity and optional Tavern, auto-detect dependencies, and clean up child processes on exit.
+    - *Lesson*: Singularity maintains strictly two canonical launchers: `start.sh` (symlinked as `singular` for Unix/Termux) and `start.bat` for Windows. Both handle co-startup of Singularity and optional Tavern, auto-detect dependencies, and clean up child processes on exit. `start.command` is only a macOS double-click shim that `cd`s to the repo and `exec`s `start.sh`; never put launcher logic in it.
 
 11. **Module-Level Imports for Archive Extraction Handlers (`tarfile`, `zipfile`)**:
     - *Mistake*: Calling `tarfile.open()` inside an installer helper without `import tarfile` at the top of the file, causing runtime crashes (`name 'tarfile' is not defined`) when unpacking `.tgz` binaries on Android/Linux.
@@ -192,6 +192,6 @@ Keep these past failures in mind to avoid repeating them:
     - *Mistake*: The chat playground model switcher popover displayed an empty box below the search input because `renderCustomSelectOptions()` was only called once at startup without a re-render trigger on click, leaving it blank if `/api/models` completed asynchronously. Additionally, the popover stuck right to the button with an awkward offset, and the theme segmented control in Settings lacked explicit width, collapsing the indicator into a squished vertical oval.
     - *Lesson*: Always re-render custom dropdown contents (`renderCustomSelectOptions()`) upon opening the trigger, provide fallback loading states if catalogs are in flight, add checkmark indicators and provider chips for active models, offset popovers with clean 12px breathing room (`bottom: calc(100% + 12px)`), and enforce fixed minimum geometry (`width: 132px; height: 38px;`) on segmented controls so capsule indicators glide horizontally with correct aspect ratio.
 
-
-
-
+24. **Gateway Security Invariants (Full Audit, 2026-09-26)**:
+    - *Mistake*: Every `/api/*` route (including `/api/cookies/export`) was unauthenticated with `CORS *`, the gateway bound `0.0.0.0`, the ngrok tunnel had no auth, the artifact iframe had no sandbox (and `allow-same-origin` was mandated), Gemini sent Google cookies to any `.mp4` URL in model output, and tokens/session keys sat in plaintext (including in the `identifier` column). Any website, LAN peer, or prompt-injected artifact could steal every stored session.
+    - *Lesson*: Keep `singularity/security.py` as the single access policy (loopback-trusted, gateway key or session cookie otherwise, foreign `Origin`/`Sec-Fetch-Site: cross-site` refused) and never add `CORSMiddleware(allow_origins=["*"])` back. Default binds are `127.0.0.1`; LAN is opt-in via `--lan`. Store secrets only through `db.save_account()` / `db.set_setting()` (which encrypt via `singularity/vault.py`); never write a secret-derived value into `identifier`. Artifacts render only inside the opaque-origin sandbox, never via `innerHTML` in the dashboard. Engines must allowlist hosts before attaching provider cookies to any URL taken from a response. `POST /api/config` only accepts keys in `API_WRITABLE_SETTINGS`.

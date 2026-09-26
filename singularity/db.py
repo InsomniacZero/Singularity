@@ -9,18 +9,46 @@ effortless cross-device portability (PC, Android Termux, laptops).
 """
 
 import base64
+import hashlib
 import json
 import os
 import re
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+try:
+    from singularity import vault
+except ImportError:
+    import vault
 
 MODULE_DIR = Path(__file__).resolve().parent
 DATA_DIR = MODULE_DIR / "data"
 DB_PATH = DATA_DIR / "singularity.db"
 ROOT_DIR = MODULE_DIR.parent
+
+# Settings whose values are secrets: stored encrypted, never returned by get_all_settings().
+SECRET_SETTINGS = {"gateway_key"}
+
+_INIT_DONE = False
+_INIT_LOCK = threading.Lock()
+
+
+def _restrict_permissions() -> None:
+    """Keep the vault readable by the owning user only (no-op where chmod is unsupported)."""
+    try:
+        os.chmod(DATA_DIR, 0o700)
+    except OSError:
+        pass
+    for suffix in ("", "-wal", "-shm", "-journal"):
+        p = Path(str(DB_PATH) + suffix)
+        if p.exists():
+            try:
+                os.chmod(p, 0o600)
+            except OSError:
+                pass
 
 
 def get_db_connection() -> sqlite3.Connection:
@@ -31,8 +59,119 @@ def get_db_connection() -> sqlite3.Connection:
     return conn
 
 
+# ==============================================================================
+# Encryption at rest
+# ==============================================================================
+
+def _vault_has_encrypted_data(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM credentials WHERE token LIKE 'enc:%' OR metadata LIKE 'enc:%' LIMIT 1"
+    ).fetchone()
+    if row:
+        return True
+    row = conn.execute("SELECT 1 FROM settings WHERE value LIKE 'enc:%' LIMIT 1").fetchone()
+    return row is not None
+
+
+def _master_key() -> bytes:
+    if vault._MASTER_KEY is not None:
+        return vault._MASTER_KEY
+    with get_db_connection() as conn:
+        return vault.get_master_key(_vault_has_encrypted_data(conn))
+
+
+def encrypt_value(plaintext: Optional[str]) -> Optional[str]:
+    if plaintext is None or vault.is_encrypted(plaintext):
+        return plaintext
+    return vault.encrypt(plaintext, _master_key())
+
+
+def decrypt_value(value: Optional[str]) -> Optional[str]:
+    if not vault.is_encrypted(value):
+        return value
+    return vault.decrypt(value, _master_key())
+
+
+def _fingerprint_identifier(provider: str, identifier: str) -> str:
+    return f"{provider}_{hashlib.sha256(identifier.encode('utf-8')).hexdigest()[:16]}"
+
+
+def _redact_identifier(provider: str, identifier: str, token: str, metadata_json: Optional[str]) -> str:
+    """Replace identifiers derived from secrets (session keys, token prefixes) with a stable fingerprint.
+
+    The identifier column stays plaintext for de-duplication, so it must never hold secret material.
+    Emails and user IDs that don't appear inside the credential are kept as-is.
+    """
+    if not identifier or "@" in identifier:
+        return identifier
+    if identifier.startswith(f"{provider}_") and len(identifier) == len(provider) + 17:
+        return identifier
+    bare = identifier
+    for prefix in ("user_", "chatgpt_", "kimi_", "ds_", "qwen_"):
+        if bare.startswith(prefix):
+            bare = bare[len(prefix):]
+            break
+    haystacks = [token or "", metadata_json or ""]
+    if len(bare) >= 8 and any(bare in h or bare.lower() in h.lower() for h in haystacks):
+        return _fingerprint_identifier(provider, identifier)
+    return identifier
+
+
+def _migrate_plaintext_rows(conn: sqlite3.Connection) -> None:
+    """Encrypt legacy plaintext tokens/metadata and redact secret identifiers in place."""
+    rows = conn.execute(
+        "SELECT id, provider, identifier, token, metadata FROM credentials "
+        "WHERE token NOT LIKE 'enc:%' OR (metadata IS NOT NULL AND metadata NOT LIKE 'enc:%')"
+    ).fetchall()
+    secret_settings = conn.execute(
+        f"SELECT key, value FROM settings WHERE key IN ({','.join('?' * len(SECRET_SETTINGS))}) AND value NOT LIKE 'enc:%'",
+        tuple(SECRET_SETTINGS),
+    ).fetchall()
+    if not rows and not secret_settings:
+        return
+    key = vault.get_master_key(_vault_has_encrypted_data(conn))
+    for r in rows:
+        token = r["token"]
+        metadata = r["metadata"]
+        plain_token = vault.decrypt(token, key) if vault.is_encrypted(token) else token
+        plain_meta = vault.decrypt(metadata, key) if vault.is_encrypted(metadata) else metadata
+        new_ident = _redact_identifier(r["provider"], r["identifier"], plain_token, plain_meta)
+        clash = conn.execute(
+            "SELECT id FROM credentials WHERE provider = ? AND identifier = ? AND id != ?",
+            (r["provider"], new_ident, r["id"]),
+        ).fetchone()
+        if clash:
+            new_ident = f"{new_ident}_{r['id']}"
+        conn.execute(
+            "UPDATE credentials SET identifier = ?, token = ?, metadata = ? WHERE id = ?",
+            (
+                new_ident,
+                token if vault.is_encrypted(token) else vault.encrypt(token, key),
+                metadata if (metadata is None or vault.is_encrypted(metadata)) else vault.encrypt(metadata, key),
+                r["id"],
+            ),
+        )
+    for s in secret_settings:
+        conn.execute("UPDATE settings SET value = ? WHERE key = ?", (vault.encrypt(s["value"], key), s["key"]))
+    conn.commit()
+
+
 def init_db() -> None:
-    """Initialize database tables and indexes."""
+    """Initialize database tables, then encrypt any legacy plaintext secrets (once per process)."""
+    global _INIT_DONE
+    if _INIT_DONE:
+        return
+    with _INIT_LOCK:
+        if _INIT_DONE:
+            return
+        _create_tables()
+        with get_db_connection() as conn:
+            _migrate_plaintext_rows(conn)
+        _restrict_permissions()
+        _INIT_DONE = True
+
+
+def _create_tables() -> None:
     with get_db_connection() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS credentials (
@@ -416,15 +555,16 @@ def get_accounts(provider: Optional[str] = None) -> List[Dict[str, Any]]:
 
         results = []
         for r in rows:
+            metadata = decrypt_value(r["metadata"])
             results.append({
                 "id": r["id"],
                 "provider": r["provider"],
                 "identifier": r["identifier"],
                 "name": r["name"] or r["identifier"],
-                "token": r["token"],
+                "token": decrypt_value(r["token"]),
                 "plan": r["plan"] or "free",
                 "status": r["status"] or "active",
-                "metadata": json.loads(r["metadata"]) if r["metadata"] else {},
+                "metadata": json.loads(metadata) if metadata else {},
                 "created_at": r["created_at"],
                 "updated_at": r["updated_at"],
             })
@@ -444,11 +584,11 @@ def save_account(
     if not parsed:
         return False, "Failed to parse credential"
 
-    identifier = parsed["identifier"]
+    identifier = _redact_identifier(provider, parsed["identifier"], parsed["token"], parsed["metadata"])
     final_name = name or parsed["name"]
     final_plan = plan or parsed["plan"]
-    token = parsed["token"]
-    metadata = parsed["metadata"]
+    token = encrypt_value(parsed["token"])
+    metadata = encrypt_value(parsed["metadata"])
 
     with get_db_connection() as conn:
         conn.execute("""
@@ -497,9 +637,15 @@ def remove_account(provider: str, identifier: Optional[str] = None, account_id: 
             ident_clean = identifier.strip()
             num_id = int(ident_clean) if ident_clean.isdigit() else -1
             cur = conn.execute(
-                "DELETE FROM credentials WHERE provider = ? AND (identifier = ? OR token = ? OR id = ?)",
-                (provider, ident_clean, ident_clean, num_id),
+                "DELETE FROM credentials WHERE provider = ? AND (identifier = ? OR identifier = ? OR id = ?)",
+                (provider, ident_clean, _fingerprint_identifier(provider, ident_clean), num_id),
             )
+            if cur.rowcount == 0:
+                # Tokens are encrypted, so matching by raw token has to happen after decryption.
+                for r in conn.execute("SELECT id, token FROM credentials WHERE provider = ?", (provider,)).fetchall():
+                    if decrypt_value(r["token"]) == ident_clean:
+                        cur = conn.execute("DELETE FROM credentials WHERE id = ?", (r["id"],))
+                        break
         else:
             return False
 
@@ -532,7 +678,7 @@ def get_next_token(provider: str) -> Optional[str]:
         if not rows:
             return None
         idx = _ROTATION_INDEX.get(provider, 0) % len(rows)
-        token = rows[idx]["token"]
+        token = decrypt_value(rows[idx]["token"])
         _ROTATION_INDEX[provider] = (idx + 1) % len(rows)
         return token
 
@@ -645,12 +791,15 @@ def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
     init_db()
     with get_db_connection() as conn:
         row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
-        return row["value"] if row else default
+    if not row:
+        return default
+    return decrypt_value(row["value"]) if key in SECRET_SETTINGS else row["value"]
 
 
 def set_setting(key: str, value: str) -> None:
     """Insert or update a configuration value in settings table."""
     init_db()
+    value = encrypt_value(str(value)) if key in SECRET_SETTINGS else str(value)
     with get_db_connection() as conn:
         conn.execute("""
             INSERT INTO settings (key, value, updated_at)
@@ -658,7 +807,7 @@ def set_setting(key: str, value: str) -> None:
             ON CONFLICT(key) DO UPDATE SET
                 value = excluded.value,
                 updated_at = CURRENT_TIMESTAMP
-        """, (key, str(value)))
+        """, (key, value))
         conn.commit()
 
 
@@ -667,7 +816,7 @@ def get_all_settings() -> Dict[str, str]:
     init_db()
     with get_db_connection() as conn:
         rows = conn.execute("SELECT key, value FROM settings").fetchall()
-        return {r["key"]: r["value"] for r in rows}
+        return {r["key"]: r["value"] for r in rows if r["key"] not in SECRET_SETTINGS}
 
 
 def get_model_settings(model: str) -> Dict[str, Any]:

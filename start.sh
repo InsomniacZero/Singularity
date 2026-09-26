@@ -139,13 +139,43 @@ cd "$DIR/singularity" || exit 1
 
 # Check basic dependencies (starlette, uvicorn, httpx)
 if ! "$PYTHON_BIN" -c "import starlette, uvicorn, httpx" 2>/dev/null; then
+    # Homebrew and Debian/Ubuntu Pythons refuse global pip installs (PEP 668), so install into a
+    # private virtualenv like start.bat does. Falls back to the plain interpreter if venv is unavailable.
+    VENV_DIR="$DIR/singularity/.venv"
+    if [ ! -x "$VENV_DIR/bin/python3" ] && [ ! -x "$VENV_DIR/Scripts/python.exe" ]; then
+        echo "  [*] Creating virtual environment in singularity/.venv..."
+        "$PYTHON_BIN" -m venv "$VENV_DIR" >/dev/null 2>&1 || rm -rf "$VENV_DIR"
+    fi
+    if [ -x "$VENV_DIR/bin/python3" ]; then
+        PYTHON_BIN="$VENV_DIR/bin/python3"
+    elif [ -x "$VENV_DIR/Scripts/python.exe" ]; then
+        PYTHON_BIN="$VENV_DIR/Scripts/python.exe"
+    fi
+
     echo "  [*] Installing required dependencies from requirements.txt..."
     "$PYTHON_BIN" -m pip install -r "$DIR/requirements.txt" || true
+    if ! "$PYTHON_BIN" -c "import starlette, uvicorn, httpx" 2>/dev/null; then
+        echo "  [ERROR] Could not install Singularity's Python dependencies."
+        echo "          Try manually: $PYTHON_BIN -m pip install -r \"$DIR/requirements.txt\""
+        exit 1
+    fi
 fi
+
+# --lan: listen on all interfaces so phones / other PCs can connect (they log in with the gateway key).
+# Default is this machine only.
+ARGS=()
+for arg in "$@"; do
+    if [ "$arg" = "--lan" ]; then
+        export SINGULARITY_LAN=1
+    else
+        ARGS+=("$arg")
+    fi
+done
+set -- ${ARGS[@]+"${ARGS[@]}"}
 
 # Route CLI commands vs server launch
 case "$1" in
-    status|limits|accounts|import|export|simulate|host|chat|thinking|service|tunnel|-h|--help)
+    status|limits|accounts|import|export|simulate|host|chat|thinking|service|tunnel|key|-h|--help)
         exec "$PYTHON_BIN" cli.py "$@"
         ;;
     server|"")
@@ -171,8 +201,13 @@ case "$1" in
                         [ -d "$nvm_node" ] && export PATH="$nvm_node:$PATH"
                     done
                     [ -d "$HOME/.local/share/fnm/current/bin" ] && export PATH="$HOME/.local/share/fnm/current/bin:$PATH"
-                    export API_HOST="0.0.0.0"
-                    export RP_ALLOWED_ORIGINS="*"
+                    # Tavern's API has no login: loopback only unless --lan was given.
+                    if [ "${SINGULARITY_LAN:-}" = "1" ]; then
+                        export API_HOST="0.0.0.0"
+                    else
+                        export API_HOST="127.0.0.1"
+                    fi
+                    unset RP_ALLOWED_ORIGINS
 
                     # Check for node or bun
                     RUNNER=""

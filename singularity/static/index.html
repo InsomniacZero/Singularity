@@ -651,8 +651,11 @@
                 <div class="workbench-body">
                   <!-- Preview View Pane -->
                   <div class="workbench-pane active" id="artifact-preview-pane">
-                    <!-- Sandboxed iframe for React & HTML Apps -->
-                    <iframe id="artifact-sandbox-frame" class="artifact-iframe" title="Artifact Sandbox"></iframe>
+                    <!-- Sandboxed iframe for React, HTML, CSS, SVG & Mermaid artifacts.
+                         No allow-same-origin: artifact code runs in an opaque origin and can't reach the
+                         gateway API, cookies or this page's storage. -->
+                    <iframe id="artifact-sandbox-frame" class="artifact-iframe" title="Artifact Sandbox"
+                            sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
                     <!-- SVG Display Container -->
                     <div id="artifact-svg-container" class="artifact-svg-stage hidden"></div>
                     <!-- Mermaid Display Container -->

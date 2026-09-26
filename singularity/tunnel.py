@@ -8,6 +8,7 @@ Features auto-architecture validation and [Errno 8] Exec format error self-heali
 import io
 import os
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -470,6 +471,9 @@ def save_authtoken(token: str) -> Dict[str, Any]:
     clean_token = (token or "").strip()
     if not clean_token:
         return {"status": "error", "message": "Authtoken cannot be empty."}
+    # ngrok authtokens are [A-Za-z0-9_-]; anything else (newlines, quotes, colons) could inject ngrok config.
+    if not re.fullmatch(r"[A-Za-z0-9_\-]{20,200}", clean_token):
+        return {"status": "error", "message": "That doesn't look like an ngrok authtoken (letters, digits, '_' and '-' only)."}
 
     bin_path = get_ngrok_bin_path()
     if not bin_path:
@@ -499,8 +503,15 @@ def save_authtoken(token: str) -> Dict[str, Any]:
     try:
         cfg = get_ngrok_config_path()
         cfg.parent.mkdir(parents=True, exist_ok=True)
-        content = f"version: \"2\"\nauthtoken: {clean_token}\n"
-        cfg.write_text(content, encoding="utf-8")
+        # Keep the rest of an existing ngrok.yml; only replace (or add) the authtoken line.
+        lines = cfg.read_text(encoding="utf-8").splitlines() if cfg.exists() else ['version: "2"']
+        lines = [ln for ln in lines if not ln.lstrip().startswith("authtoken:")]
+        lines.append(f"authtoken: {clean_token}")
+        cfg.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        try:
+            os.chmod(cfg, 0o600)
+        except OSError:
+            pass
         return {
             "status": "ok",
             "message": "ngrok authtoken saved directly to configuration file!",

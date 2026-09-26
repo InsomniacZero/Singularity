@@ -172,6 +172,8 @@ Singularity/
 │   ├── artifacts.py             <-- GenUI interception, <antArtifact> injector & Babel sandboxer
 │   ├── personas.py              <-- Dynamic model persona mapping (Astra, Fable) & stream rewriters
 │   ├── tunnel.py                <-- Native ngrok daemon manager with 32/64-bit Termux self-healing
+│   ├── security.py              <-- Access policy: loopback trust, gateway key, session cookie, origin checks, CORS
+│   ├── vault.py                 <-- Stdlib-only vault encryption + OS keychain / key-file master key storage
 │   │
 │   ├── engines/                 <-- STRICT ONE-FILE PER PROVIDER INFERENCE DRIVERS
 │   │   ├── __init__.py          <-- stream_chat() & generate_chat() universal dispatchers
@@ -338,6 +340,12 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 ```
 
+### Encryption at Rest (`singularity/vault.py`)
+- `token`, `metadata` and secret settings (`gateway_key`) are stored as `enc:v1:` values: keyed-BLAKE2b CTR keystream + HMAC-SHA256 (encrypt-then-MAC), standard library only so Termux installs stay pure-Python.
+- The master key comes from `SINGULARITY_VAULT_KEY`, else the macOS Keychain / Linux Secret Service / Windows DPAPI, else `singularity/data/vault.key` (`0600`). A new key is only created for a vault with no encrypted data, so a locked keychain can never orphan tokens.
+- `identifier` stays plaintext for de-duplication; `_redact_identifier()` replaces any secret-derived identifier (session keys, token prefixes) with a `<provider>_<sha256[:16]>` fingerprint.
+- Legacy plaintext rows are migrated in place on first `init_db()`. The DB file is `0600`, the data dir `0700`.
+
 ### Stacking & Rotation Rules
 - **Stacking**: Users can paste multiple accounts per provider.
 - **Priority**: Database queries retrieve accounts with `ORDER BY id DESC`. Newly pasted credentials automatically take precedence.
@@ -394,6 +402,14 @@ To deliver access to unreleased frontier models while maintaining authentic beha
 ---
 
 ## 10. Cloud Tunneling & Native Mobile Access (`singularity/tunnel.py`)
+
+### Access Control (`singularity/security.py`)
+`SecurityMiddleware` wraps every gateway route and the workers use the same policy:
+1. A foreign `Origin` (including `null` from sandboxed artifacts) or `Sec-Fetch-Site: cross-site` is refused with 403. Loopback origins and the gateway's own host on another port (Tavern) are allowed, plus `SINGULARITY_ALLOWED_ORIGINS`.
+2. Otherwise the request needs one of: `Authorization: Bearer <gateway key>`, the HttpOnly `singularity_session` cookie from `POST /api/auth/login`, or a trusted-local connection (loopback peer, loopback `Host`, no forwarding headers). Tunnel traffic carries the ngrok `Host` and `X-Forwarded-For`, so it always needs the key.
+3. The UI shell (`/`, `/static/*` except `/static/generated/*`) and the auth endpoints are public.
+
+The gateway binds `127.0.0.1` unless started with `--lan` / `SINGULARITY_LAN=1` (or an explicit `HOST`). Tavern follows the same flag.
 
 Singularity allows developers to access their desktop server from anywhere on a phone or tablet through an integrated ngrok tunnel manager.
 

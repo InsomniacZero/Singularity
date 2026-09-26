@@ -97,6 +97,21 @@ async def _get_gemini_session_context(cookie_str: Optional[str]) -> Tuple[str, s
     return snlm0e, bl
 
 
+# Generated media is only ever fetched from Google-operated hosts over HTTPS. The Google cookie
+# bundle rides along on every hop, so a URL outside this list (e.g. one quoted in the model's
+# reply) must never be requested.
+_GOOGLE_MEDIA_SUFFIXES = (".google.com", ".googleusercontent.com", ".googlevideo.com", ".gstatic.com", ".ggpht.com")
+
+
+def _is_google_media_url(url: str) -> bool:
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return False
+    host = (parts.hostname or "").lower()
+    return parts.scheme == "https" and any(host == sfx[1:] or host.endswith(sfx) for sfx in _GOOGLE_MEDIA_SUFFIXES)
+
+
 async def _download_gemini_media(media_url: str, cookie_str: Optional[str], is_video: bool = False) -> Optional[str]:
     """Download Google Gemini generated image or video via authenticated ALR redirection hops."""
     headers = {
@@ -111,9 +126,15 @@ async def _download_gemini_media(media_url: str, cookie_str: Optional[str], is_v
         curr = curr + "=d-I?alr=yes"
 
     try:
-        async with httpx.AsyncClient(headers=headers, follow_redirects=True, timeout=httpx.Timeout(60.0, connect=10.0)) as client:
-            for _ in range(4):
+        # Redirects are followed by hand so every hop is checked against the Google allowlist.
+        async with httpx.AsyncClient(headers=headers, follow_redirects=False, timeout=httpx.Timeout(60.0, connect=10.0)) as client:
+            for _ in range(8):
+                if not _is_google_media_url(curr):
+                    return None
                 r = await client.get(curr)
+                if r.is_redirect and r.headers.get("location"):
+                    curr = urllib.parse.urljoin(curr, r.headers["location"])
+                    continue
                 ct = r.headers.get("content-type", "").lower()
                 if is_video or "video/" in ct or curr.endswith((".mp4", ".webm")):
                     file_id = f"gemini_vid_{uuid.uuid4().hex[:12]}"
