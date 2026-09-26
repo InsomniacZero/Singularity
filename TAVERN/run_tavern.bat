@@ -3,8 +3,8 @@ setlocal enabledelayedexpansion
 title Tavern Web Studio
 cd /d "%~dp0"
 
-set API_HOST=0.0.0.0
-set RP_ALLOWED_ORIGINS=*
+:: Tavern's API has no login: loopback only unless the caller set API_HOST [start.bat --lan does].
+if not defined API_HOST set "API_HOST=127.0.0.1"
 
 :: Check if Node or Bun is installed
 where bun >nul 2>&1

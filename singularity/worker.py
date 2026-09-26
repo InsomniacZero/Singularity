@@ -39,10 +39,12 @@ try:
     from singularity import db
     from singularity.providers import PROVIDERS_CONFIG, MODELS_CATALOG
     from singularity import engines
+    from singularity import security
 except ImportError:
     import db
     from providers import PROVIDERS_CONFIG, MODELS_CATALOG
     import engines
+    import security
 
 
 # ==============================================================================
@@ -73,19 +75,42 @@ class WorkerHTTPHandler(http.server.BaseHTTPRequestHandler):
         })
 
     def send_cors_headers(self):
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "*")
+        # Workers are internal backends for the gateway: no CORS headers, so browsers can never
+        # read their responses. Kept as a hook so every response path stays uniform.
+        self.send_header("X-Content-Type-Options", "nosniff")
+
+    def reject_unauthorized(self) -> bool:
+        """Send 401/403 and return True unless the request is from a trusted local client or has the key."""
+        headers = {k.lower(): v for k, v in self.headers.items()}
+        client_ip = self.client_address[0] if self.client_address else None
+        if "origin" in headers or headers.get("sec-fetch-site") == "cross-site":
+            status, msg = 403, "Browser requests are not accepted by Singularity workers"
+        elif security.is_authenticated(client_ip, headers):
+            return False
+        else:
+            status, msg = 401, "Singularity gateway key required"
+        try:
+            payload = json.dumps({"error": {"message": msg, "code": status}}).encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            pass
+        return True
 
     def do_OPTIONS(self):
         try:
-            self.send_response(204)
-            self.send_cors_headers()
+            self.send_response(403)
+            self.send_header("Content-Length", "0")
             self.end_headers()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
             pass
 
     def do_GET(self):
+        if self.reject_unauthorized():
+            return
         try:
             path = self.path.split("?")[0]
             pid = self.provider_id
@@ -159,6 +184,8 @@ class WorkerHTTPHandler(http.server.BaseHTTPRequestHandler):
             pass
 
     def do_POST(self):
+        if self.reject_unauthorized():
+            return
         try:
             path = self.path.split("?")[0]
             pid = self.provider_id

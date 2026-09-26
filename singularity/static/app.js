@@ -69,6 +69,94 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
+// Media URLs pulled out of model output: allow only web, generated-file and inline media sources.
+// Callers still escapeHtml() the result before putting it in an attribute.
+function safeMediaUrl(url) {
+  const u = String(url || '').trim();
+  if (/^https?:\/\//i.test(u) || /^\/static\//.test(u) || /^blob:/i.test(u)) return u;
+  if (/^data:(?:image\/(?:png|jpe?g|gif|webp|svg\+xml)|video\/(?:mp4|webm));base64,[A-Za-z0-9+/=]+$/i.test(u)) return u;
+  return '';
+}
+
+// ===================================================================
+// Gateway Login (off-machine browsers only: phone, LAN, ngrok tunnel)
+// ===================================================================
+// On the machine running Singularity the gateway trusts loopback requests, so this never shows.
+// Anywhere else, the gateway answers 401 until the browser logs in with the gateway key and
+// receives an HttpOnly session cookie.
+
+const nativeFetch = window.fetch.bind(window);
+let gatewayLoginShown = false;
+
+function showGatewayLogin() {
+  if (gatewayLoginShown || !document.body) return;
+  gatewayLoginShown = true;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'gateway-login-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-labelledby', 'gateway-login-title');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;padding:16px;background:var(--bg-primary);';
+  overlay.innerHTML = `
+    <form style="width:100%;max-width:380px;display:flex;flex-direction:column;gap:12px;padding:24px;border-radius:var(--radius-xl);border:1px solid var(--border-medium);background:var(--bg-elevated);box-shadow:var(--shadow-lg);color:var(--text-primary);font-family:var(--font-sans);">
+      <div id="gateway-login-title" style="font-family:var(--font-serif);font-size:var(--font-size-xl);">Enter gateway key</div>
+      <div style="font-size:var(--font-size-sm);color:var(--text-muted);line-height:1.5;">
+        This device isn't the one running Singularity. On that machine, run
+        <code style="font-family:var(--font-mono);">./singular key</code> and paste the key here.
+      </div>
+      <input type="password" name="key" autocomplete="current-password" placeholder="sk-sing-…" required
+             style="padding:10px 12px;border-radius:var(--radius-md);border:1px solid var(--border-medium);background:var(--bg-input);color:var(--text-primary);font-family:var(--font-mono);font-size:var(--font-size-sm);" />
+      <div class="gateway-login-error" role="alert" style="font-size:var(--font-size-xs);color:var(--color-error);min-height:16px;"></div>
+      <button type="submit" style="padding:10px 12px;border:none;border-radius:var(--radius-md);background:var(--brand-primary);color:#fff;font-weight:600;font-size:var(--font-size-sm);cursor:pointer;">Unlock</button>
+    </form>`;
+  document.body.appendChild(overlay);
+
+  const form = overlay.querySelector('form');
+  const input = overlay.querySelector('input');
+  const errorEl = overlay.querySelector('.gateway-login-error');
+  input.focus();
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errorEl.textContent = '';
+    try {
+      const res = await nativeFetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: input.value.trim() }),
+      });
+      if (res.ok) {
+        window.location.reload();
+        return;
+      }
+      errorEl.textContent = 'That key was not accepted.';
+    } catch (err) {
+      errorEl.textContent = `Could not reach Singularity: ${err.message}`;
+    }
+    input.select();
+  });
+}
+
+window.fetch = async (input, init) => {
+  const res = await nativeFetch(input, init);
+  if (res.status === 401) {
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    if (url.startsWith('/') || url.startsWith(window.location.origin)) showGatewayLogin();
+  }
+  return res;
+};
+
+nativeFetch('/api/auth/status')
+  .then((r) => r.json())
+  .then((s) => {
+    if (s && s.authenticated === false) {
+      if (document.body) showGatewayLogin();
+      else document.addEventListener('DOMContentLoaded', showGatewayLogin);
+    }
+  })
+  .catch(() => {});
+
 // ===================================================================
 // ===================================================================
 // Theme Toggle (Shifted to User Profile)
@@ -1594,7 +1682,6 @@ async function loadCookiesTab() {
   listContainer.innerHTML = accounts.map((acc, idx) => {
     const label = acc.email || acc.name || acc.masked || `Account #${idx + 1}`;
     const sub = acc.plan ? `Plan: ${acc.plan.toUpperCase()} • Status: ${acc.status || 'Active'}` : (acc.masked || 'Active Session');
-    const ident = acc.identifier || acc.email || acc.sessionKey || acc.token || acc.raw || '';
 
     return `
       <div class="account-card">
@@ -1604,7 +1691,7 @@ async function loadCookiesTab() {
         </div>
         <div class="account-card-actions">
           <span class="lock-badge unlocked">STACKED</span>
-          <button class="btn-remove-acc" onclick="removeStackedAccount('${p}', ${acc.id != null ? acc.id : idx}, '${escapeHtml(ident)}')" title="Remove this account">
+          <button class="btn-remove-acc" onclick="removeStackedAccount('${escapeHtml(p)}', ${Number(acc.id != null ? acc.id : idx)})" title="Remove this account">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="3 6 5 6 21 6"></polyline>
               <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -1886,7 +1973,7 @@ function openMediaLightbox(src, type = 'image', caption = '') {
   if (!modal || !box) return;
 
   currentLightboxSrc = src;
-  box.innerHTML = `<img src="${src}" alt="${escapeHtml(caption || 'Generated Media')}" />`;
+  box.innerHTML = `<img src="${escapeHtml(safeMediaUrl(src))}" alt="${escapeHtml(caption || 'Generated Media')}" />`;
   modal.classList.add('open');
 }
 
@@ -1897,8 +1984,10 @@ function closeMediaLightbox() {
 }
 
 function downloadMediaFile(src, filename) {
+  const safeSrc = safeMediaUrl(src);
+  if (!safeSrc) return;
   const link = document.createElement('a');
-  link.href = src;
+  link.href = safeSrc;
   link.download = filename || 'download';
   document.body.appendChild(link);
   link.click();
@@ -2793,7 +2882,7 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
 
     card.innerHTML = `
       <div class="gpt-image-viewport" style="aspect-ratio: ${aspect.ratio}; width: 100%; height: 100%;">
-        <img src="${img.src}" alt="${escapeHtml(img.alt || promptText || 'Generated Image')}" class="gpt-image-element gpt-image-fadein" loading="eager" />
+        <img src="${escapeHtml(safeMediaUrl(img.src))}" alt="${escapeHtml(img.alt || promptText || 'Generated Image')}" class="gpt-image-element gpt-image-fadein" loading="eager" />
         <div class="gpt-image-glass-toolbar">
           <button class="gpt-glass-action-btn btn-copy" data-tooltip="Copy" aria-label="Copy image">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -2871,7 +2960,7 @@ function parseAndRenderMediaContent(assistantMsgEl, bubbleEl, rawContent, reason
 
     card.innerHTML = `
       <div class="gpt-video-viewport" style="aspect-ratio: 16/9; width: 100%; max-width: 680px;">
-        <video controls autoplay muted loop playsinline preload="auto" class="gpt-video-element" src="${vid.src}"></video>
+        <video controls autoplay muted loop playsinline preload="auto" class="gpt-video-element" src="${escapeHtml(safeMediaUrl(vid.src))}"></video>
         <div class="gpt-image-glass-toolbar">
           <button class="gpt-glass-action-btn btn-copy" data-tooltip="Copy Link" aria-label="Copy video link">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -3438,35 +3527,20 @@ function renderArtifactContent(art, versionNum) {
   const isCss = art.type === 'text/css' ||
     (art.type === 'application/vnd.ant.code' && (art.language === 'css' || (content && (content.includes('@keyframes') || content.includes('backdrop-filter') || content.includes('.glass') || content.includes('background:')) && !content.includes('import ') && !content.includes('function ') && !content.includes('<html'))));
 
-  if (art.type === 'application/vnd.ant.react') {
+  // Every executable or markup artifact renders inside the sandboxed iframe, never in this page's DOM.
+  const sandboxDoc =
+    art.type === 'application/vnd.ant.react' ? buildReactSandboxHtml(content) :
+    art.type === 'text/html' ? buildHtmlSandboxDoc(content) :
+    isCss ? buildCssSandboxDoc(content) :
+    art.type === 'image/svg+xml' ? buildSvgSandboxDoc(content) :
+    art.type === 'application/vnd.ant.mermaid' ? buildMermaidSandboxDoc(content) :
+    null;
+
+  if (sandboxDoc !== null) {
     if (iframe) {
       iframe.style.display = 'block';
       iframe.classList.remove('hidden');
-      iframe.srcdoc = buildReactSandboxHtml(content);
-    }
-  } else if (art.type === 'text/html') {
-    if (iframe) {
-      iframe.style.display = 'block';
-      iframe.classList.remove('hidden');
-      iframe.srcdoc = buildHtmlSandboxDoc(content);
-    }
-  } else if (isCss) {
-    if (iframe) {
-      iframe.style.display = 'block';
-      iframe.classList.remove('hidden');
-      iframe.srcdoc = buildCssSandboxDoc(content);
-    }
-  } else if (art.type === 'image/svg+xml') {
-    if (svgBox) {
-      svgBox.style.display = 'flex';
-      svgBox.classList.remove('hidden');
-      svgBox.innerHTML = content.includes('<svg') ? content : `<svg viewBox="0 0 100 100">${content}</svg>`;
-    }
-  } else if (art.type === 'application/vnd.ant.mermaid') {
-    if (mmdBox) {
-      mmdBox.style.display = 'flex';
-      mmdBox.classList.remove('hidden');
-      renderMermaidDiagram(mmdBox, content);
+      iframe.srcdoc = withSandboxShims(sandboxDoc);
     }
   } else if (art.type === 'text/markdown') {
     if (mdBox) {
@@ -3771,9 +3845,11 @@ function buildReactSandboxHtml(jsxCode) {
     function waitForDependencies(callback, maxAttempts = 300) {
       let attempts = 0;
       function check() {
-        if (!window.React && window.parent && window.parent.React) window.React = window.parent.React;
-        if (!window.ReactDOM && window.parent && window.parent.ReactDOM) window.ReactDOM = window.parent.ReactDOM;
-        if (!window.Babel && window.parent && window.parent.Babel) window.Babel = window.parent.Babel;
+        try {
+          if (!window.React && window.parent && window.parent.React) window.React = window.parent.React;
+          if (!window.ReactDOM && window.parent && window.parent.ReactDOM) window.ReactDOM = window.parent.ReactDOM;
+          if (!window.Babel && window.parent && window.parent.Babel) window.Babel = window.parent.Babel;
+        } catch (_) { /* sandboxed: parent is cross-origin, load our own copies */ }
 
         if (window.React && window.ReactDOM && window.Babel && window.ReactDOM.createRoot) {
           callback();
@@ -4078,30 +4154,62 @@ function buildHtmlSandboxDoc(html) {
 </html>`;
 }
 
-async function renderMermaidDiagram(container, code) {
-  container.innerHTML = '<div style="color:var(--text-muted); font-size:12px; font-family:var(--font-mono);">Rendering diagram...</div>';
-  try {
-    if (!window.mermaid) {
-      await new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
-        script.onload = resolve;
-        script.onerror = reject;
-        document.head.appendChild(script);
-      });
-      window.mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
-    }
-    const id = 'mermaid-svg-' + Date.now();
-    const { svg } = await window.mermaid.render(id, code.trim());
-    container.innerHTML = svg;
-  } catch (err) {
-    container.innerHTML = `
-      <div style="padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 8px; color: #fca5a5; font-family: var(--font-mono); font-size: 12px;">
-        <strong>Mermaid Syntax / Render Notice:</strong><br>${escapeHtml(err.message || 'Syntax error')}<br><br>
-        <pre style="color: #cbd5e1; background: #0f172a; padding: 10px; border-radius: 6px; overflow: auto;">${escapeHtml(code)}</pre>
-      </div>
-    `;
-  }
+// Runs first inside every sandbox document. The iframe has an opaque origin, so the real
+// localStorage/sessionStorage throw; artifacts get per-render in-memory stand-ins instead.
+const SANDBOX_SHIM = `<script>(function(){function mk(){var d=Object.create(null);return{getItem:function(k){k=String(k);return k in d?d[k]:null},setItem:function(k,v){d[String(k)]=String(v)},removeItem:function(k){delete d[String(k)]},clear:function(){d=Object.create(null)},key:function(i){return Object.keys(d)[i]||null},get length(){return Object.keys(d).length}}}['localStorage','sessionStorage'].forEach(function(n){try{window[n].getItem('x')}catch(e){try{Object.defineProperty(window,n,{value:mk(),configurable:true})}catch(_){}}});})();</script>`;
+
+function withSandboxShims(doc) {
+  if (/<head[^>]*>/i.test(doc)) return doc.replace(/<head[^>]*>/i, (m) => m + SANDBOX_SHIM);
+  return SANDBOX_SHIM + doc;
+}
+
+function buildSvgSandboxDoc(content) {
+  const svg = (content || '').includes('<svg') ? content : `<svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">${content || ''}</svg>`;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    body { display: flex; align-items: center; justify-content: center; background: transparent; }
+    body > svg { max-width: 100%; max-height: 100%; }
+  </style>
+</head>
+<body>${svg}</body>
+</html>`;
+}
+
+function buildMermaidSandboxDoc(code) {
+  // JSON-encode and escape '<' so diagram text can't close the script tag.
+  const source = JSON.stringify((code || '').trim()).replace(/</g, '\\u003c');
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <style>
+    body { margin: 0; padding: 16px; background: #0b0f19; color: #f1f5f9; display: flex; justify-content: center; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+    .notice { padding: 16px; background: rgba(239, 68, 68, 0.1); border: 1px solid #ef4444; border-radius: 8px; color: #fca5a5; white-space: pre-wrap; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+</head>
+<body>
+  <div id="out">Rendering diagram...</div>
+  <script>
+    (async function () {
+      const out = document.getElementById('out');
+      const code = ${source};
+      try {
+        mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'strict' });
+        const { svg } = await mermaid.render('mermaid-svg-' + Date.now(), code);
+        out.innerHTML = svg;
+      } catch (err) {
+        out.className = 'notice';
+        out.textContent = 'Mermaid Syntax / Render Notice: ' + ((err && err.message) || 'Syntax error') + '\\n\\n' + code;
+      }
+    })();
+  </script>
+</body>
+</html>`;
 }
 
 function handleStreamingArtifact(content, isFinished = false) {
@@ -5496,7 +5604,7 @@ async function toggleTunnel() {
     if (data.status === 'error') {
       showToast(data.message || 'Tunnel operation failed', 'error');
     } else if (data.status === 'online') {
-      showToast(`Tunnel active: ${data.public_url}`, 'success');
+      showToast(`Tunnel active: ${data.public_url} (log in there with the key from ./singular key)`, 'success');
     } else if (data.status === 'offline') {
       showToast('ngrok tunnel stopped successfully', 'info');
     }

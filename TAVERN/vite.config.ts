@@ -78,10 +78,12 @@ export default defineConfig({
     minify: 'esbuild',
   },
   server: {
-    host: '0.0.0.0',
+    // Same exposure as the API server: loopback unless launched with --lan (API_HOST=0.0.0.0).
+    host: process.env.API_HOST || '127.0.0.1',
     port: Number(process.env.PORT) || 5173,
-    cors: true,
-    allowedHosts: true,
+    // Vite's defaults already accept localhost and IP addresses; '.local' adds mDNS names for
+    // LAN use. Anything else is refused, which blocks DNS-rebinding against the dev server.
+    allowedHosts: ['.local'],
     // Directories that are not app source and that another process writes to while Vite is up —
     // Vite's file watcher crashes the whole dev client with EBUSY the moment one of those files is
     // briefly locked (seen with `presets/`, and again when the sprite generator in `tools/comfy/`

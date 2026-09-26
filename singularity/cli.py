@@ -24,6 +24,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 import db
 import providers
+import security
 
 
 # ==============================================================================
@@ -366,10 +367,30 @@ def cmd_export(args):
     formatted = json.dumps(data, indent=2)
     if args.output:
         out_path = Path(args.output)
-        out_path.write_text(formatted, encoding="utf-8")
+        # The export holds decrypted session tokens: create it owner-read/write only.
+        fd = os.open(str(out_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(formatted)
+        try:
+            os.chmod(out_path, 0o600)
+        except OSError:
+            pass
         print(f"[+] Successfully exported {data['total_accounts']} accounts to {out_path}")
+        print("[!] This file contains UNENCRYPTED session tokens. Store it somewhere private and delete it after importing.")
     else:
         print(formatted)
+
+
+def cmd_key(args):
+    """Show or rotate the gateway key used for LAN, phone and tunnel access."""
+    if args.action == "rotate":
+        key = security.rotate_gateway_key()
+        print("[+] Gateway key rotated. Restart Singularity; other devices must log in again.")
+    else:
+        key = security.get_gateway_key()
+    print(f"    Gateway key : {key}")
+    print("    Use it as the API key in OpenAI clients, or paste it on the login screen")
+    print("    when opening Singularity from another device.")
 
 
 def cmd_simulate(args):
@@ -656,6 +677,7 @@ def cmd_tunnel(args):
             print("[✓] Tunnel is LIVE!")
             print(f"    Public URL   : {res.get('public_url')}")
             print(f"    API Endpoint : {res.get('api_url')}")
+            print("    Access       : requires the gateway key (run './singular key')")
         else:
             print(f"[!] Failed to start tunnel: {res.get('message')}")
 
@@ -752,6 +774,10 @@ def main():
     p_tun.add_argument("token_val", nargs="?", default=None, help="Authtoken value when using 'token'")
     p_tun.add_argument("--json", action="store_true", help="Output compact JSON")
 
+    # key
+    p_key = subparsers.add_parser("key", help="Show or rotate the gateway key for LAN/phone/tunnel access")
+    p_key.add_argument("action", nargs="?", choices=["show", "rotate"], default="show")
+
     args = parser.parse_args()
 
     if not args.subcommand or args.subcommand == "status":
@@ -776,6 +802,8 @@ def main():
         cmd_service(args)
     elif args.subcommand == "tunnel":
         cmd_tunnel(args)
+    elif args.subcommand == "key":
+        cmd_key(args)
 
 
 if __name__ == "__main__":

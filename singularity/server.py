@@ -19,25 +19,16 @@ try:
     if os.getenv("NO_FASTAPI", "").strip() in ("1", "true", "yes"):
         raise ImportError("FastAPI disabled by NO_FASTAPI env var")
     from fastapi import FastAPI, HTTPException, Request, Response, status
-    from fastapi.middleware.cors import CORSMiddleware
     from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
     from fastapi.staticfiles import StaticFiles
 
     app = FastAPI(title="Singularity Unified AI Gateway", version="1.0.0")
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 except Exception:
     # Lightweight pure-Python fallback for Termux / mobile (no Rust / Pydantic build needed!)
     from starlette.applications import Starlette
     from starlette.exceptions import HTTPException
     from starlette.requests import Request
     from starlette.responses import FileResponse, JSONResponse, Response, StreamingResponse
-    from starlette.middleware.cors import CORSMiddleware
     from starlette.staticfiles import StaticFiles
     from starlette.routing import Route, Mount
 
@@ -73,13 +64,6 @@ except Exception:
             super().__init__(
                 exception_handlers={HTTPException: _http_exception_handler},
                 lifespan=_gateway_lifespan,
-            )
-            self.add_middleware(
-                CORSMiddleware,
-                allow_origins=["*"],
-                allow_credentials=True,
-                allow_methods=["*"],
-                allow_headers=["*"],
             )
 
         def _route_decorator(self, path: str, methods: list):
@@ -148,6 +132,7 @@ import uvicorn
 import tunnel
 import db
 import providers
+import security
 try:
     from singularity import worker
 except ImportError:
@@ -179,6 +164,9 @@ from providers import (
     stop_all_services,
     stop_provider,
 )
+
+# Authentication, origin checks and CORS for every route (see security.py for the policy).
+app.add_middleware(security.SecurityMiddleware)
 
 
 def resolve_model_provider(model_name: str) -> str:
@@ -1019,6 +1007,52 @@ async def health():
     return {"status": "ok", "app": "Singularity", "version": "1.0.0", "port": 9000}
 
 
+# -------------------------------------------------------------------
+# Gateway Authentication (browser session login for off-machine access)
+# -------------------------------------------------------------------
+
+@app.get("/api/auth/status")
+async def api_auth_status(request: Request):
+    headers = dict(request.headers)
+    client_ip = request.client.host if request.client else None
+    return {
+        "authenticated": security.is_authenticated(client_ip, headers),
+        "local": security.is_trusted_local(client_ip, headers),
+        "lan_mode": security.is_lan_mode(),
+    }
+
+
+@app.post("/api/auth/login")
+async def api_auth_login(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    key = str(body.get("key", "")) if isinstance(body, dict) else ""
+    if not security.check_key(key):
+        await asyncio.sleep(0.5)
+        return JSONResponse({"status": "error", "message": "Invalid gateway key"}, status_code=401)
+    secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    resp = JSONResponse({"status": "ok"})
+    resp.set_cookie(
+        security.SESSION_COOKIE,
+        security.session_token(),
+        max_age=60 * 60 * 24 * 365,
+        httponly=True,
+        samesite="strict",
+        secure=secure,
+        path="/",
+    )
+    return resp
+
+
+@app.post("/api/auth/logout")
+async def api_auth_logout():
+    resp = JSONResponse({"status": "ok"})
+    resp.delete_cookie(security.SESSION_COOKIE, path="/")
+    return resp
+
+
 @app.get("/api/services")
 async def api_get_services():
     services = await get_all_services_status()
@@ -1141,8 +1175,9 @@ async def api_tavern_start(request: Request = None):
         return {"status": "error", "error": "Tavern directory not found"}
 
     env = dict(os.environ)
-    env["API_HOST"] = "0.0.0.0"
-    env["RP_ALLOWED_ORIGINS"] = "*"
+    # Tavern's API has no login: keep it on loopback unless the user opted into LAN mode.
+    env["API_HOST"] = "0.0.0.0" if security.is_lan_mode() else "127.0.0.1"
+    env.pop("RP_ALLOWED_ORIGINS", None)
 
     # Detect modern Node.js or Bun across nvm, fnm, local paths
     extra_paths = []
@@ -1345,12 +1380,22 @@ async def api_get_config():
     }
 
 
+# Settings the HTTP API may change. Everything else (provider PIDs, provider hosts, the gateway key)
+# is written only by Singularity itself or the local CLI.
+API_WRITABLE_SETTINGS = {"simulation_mode"}
+
+
 @app.post("/api/config")
 async def api_set_config(request: Request):
     try:
         body = await request.json()
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Expected a JSON object")
+    rejected = sorted(k for k in body if k not in API_WRITABLE_SETTINGS)
+    if rejected:
+        raise HTTPException(status_code=400, detail=f"Settings not writable via API: {', '.join(rejected)}")
     for k, v in body.items():
         db.set_setting(k, str(v))
     return {
@@ -1551,19 +1596,12 @@ app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 def _ensure_packages():
-    """Silently ensure optional packages like curl_cffi are present for TLS impersonation."""
+    """Warn when optional packages like curl_cffi (TLS impersonation) are missing."""
     try:
-        import curl_cffi
+        import curl_cffi  # noqa: F401
     except ImportError:
-        try:
-            import subprocess
-            subprocess.Popen(
-                [sys.executable, "-m", "pip", "install", "curl_cffi>=0.16.0"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception:
-            pass
+        print("  [!] curl_cffi is not installed; ChatGPT/DeepSeek may be blocked. "
+              "Run: python -m pip install -r requirements.txt", flush=True)
 
 
 @app.on_event("startup")
@@ -1586,20 +1624,38 @@ async def on_startup():
 
 
 def main():
-    host = os.getenv("HOST", "0.0.0.0")
+    if "--lan" in sys.argv[1:]:
+        os.environ["SINGULARITY_LAN"] = "1"
+    lan_mode = security.is_lan_mode()
+    host = os.getenv("HOST") or ("0.0.0.0" if lan_mode else "127.0.0.1")
     port = int(os.getenv("PORT", "9000"))
-    lan_ip = get_lan_ip()
+
+    try:
+        db.init_db()
+        gateway_key = security.get_gateway_key()
+    except Exception as e:
+        print(f"\n  [!] Could not open the credential vault: {e}\n", flush=True)
+        sys.exit(1)
+
     print("\n" + "=" * 66, flush=True)
     print("  🚀 SINGULARITY UNIFIED AI GATEWAY & TAVERN WEB STUDIO", flush=True)
     print("=" * 66, flush=True)
     print(f"  📍 Localhost Dashboard:  http://localhost:{port}", flush=True)
     print(f"  📍 Localhost Tavern:     http://localhost:5173", flush=True)
     print("  " + "-" * 62, flush=True)
-    print("  📱 PHONE / TABLET / LAN ACCESS (Connect to same Wi-Fi):", flush=True)
-    print(f"  📲 Mobile Dashboard:     http://{lan_ip}:{port}", flush=True)
-    print(f"  📲 Mobile Tavern:        http://{lan_ip}:5173", flush=True)
-    print("  ⚠️  NOTE FOR PHONES: Do NOT type '0.0.0.0' on your mobile browser!", flush=True)
-    print(f"     Always use the LAN IP: http://{lan_ip}:5173", flush=True)
+    if host in ("127.0.0.1", "localhost", "::1"):
+        print("  🔒 Listening on this machine only. For phone / LAN access run:", flush=True)
+        print("     ./start.sh --lan        (Windows: start.bat --lan)", flush=True)
+    else:
+        lan_ip = get_lan_ip()
+        print("  📱 PHONE / TABLET / LAN ACCESS (Connect to same Wi-Fi):", flush=True)
+        print(f"  📲 Mobile Dashboard:     http://{lan_ip}:{port}", flush=True)
+        print(f"  📲 Mobile Tavern:        http://{lan_ip}:5173", flush=True)
+        print("  ⚠️  NOTE FOR PHONES: Do NOT type '0.0.0.0' on your mobile browser!", flush=True)
+        print(f"     Always use the LAN IP: http://{lan_ip}:5173", flush=True)
+        print("  🔑 Other devices must log in with the gateway key:", flush=True)
+        print(f"     {gateway_key}", flush=True)
+        print("  ⚠️  Tavern Studio has no login; anyone on this network can open it.", flush=True)
     print("=" * 66 + "\n", flush=True)
 
     try:

@@ -151,7 +151,7 @@ Once running, point any OpenAI-compatible client to:
 | Setting | Value |
 |---|---|
 | **Base URL** | `http://localhost:9000/v1` |
-| **API Key** | `sk-singularity-local` (or any string) |
+| **API Key** | Any string on this machine. From another device, the gateway key from `./singular key` |
 
 ### SillyTavern / Third-Party Frontends
 - **API Type:** Chat Completion (OpenAI)
@@ -197,6 +197,20 @@ curl http://localhost:9000/v1/chat/completions \
 
 ---
 
+## 🔒 Security & Remote Access
+
+Your vault holds live sessions for every provider, so Singularity is locked down by default:
+
+- **Localhost only.** The gateway (`:9000`), Tavern (`:5173` / `:3001`) and the provider workers listen on `127.0.0.1`. Start with `./start.sh --lan` (Windows: `start.bat --lan`) to let phones and other PCs connect.
+- **Gateway key for everything off-machine.** Requests from this machine are trusted. Requests from the LAN or through the ngrok tunnel need the gateway key, either as `Authorization: Bearer <key>` or by logging in on the dashboard's key screen (sets an HttpOnly, SameSite=Strict cookie). Show it with `./singular key`, replace it with `./singular key rotate`.
+- **Websites can't reach it.** Requests from other origins are refused, so a page open in your browser can't read or change the vault. Loopback origins and the gateway's own host on another port (Tavern) are allowed; add more with `SINGULARITY_ALLOWED_ORIGINS=https://a.example,https://b.example`.
+- **Encrypted vault.** Tokens, cookies and account metadata are encrypted at rest. The key lives in the macOS Keychain, Windows DPAPI or the Linux Secret Service, falling back to `singularity/data/vault.key` (mode `0600`) on Termux and headless machines. Set `SINGULARITY_VAULT_KEY` (64 hex characters) to supply it yourself. Keep that key if you back up the folder: the vault can't be decrypted without it.
+- **Sandboxed artifacts.** React, HTML, SVG and Mermaid artifacts run in an opaque-origin iframe with no access to the dashboard, its cookies or the API.
+- **Exports are plaintext.** `./singular export backup.json` writes decrypted tokens (file mode `0600`). Delete the file once you've imported it elsewhere.
+- **Tavern has no login.** With `--lan`, anyone on your network can open Tavern Studio. Only use `--lan` on networks you trust.
+
+---
+
 ## 🛠️ CLI Cheatsheet (`./singular` / `start.bat`)
 
 Singularity features a unified CLI engine accessible via `./singular` (Linux/macOS) or `start.bat` (Windows):
@@ -224,6 +238,11 @@ Singularity features a unified CLI engine accessible via `./singular` (Linux/mac
 ./singular chat "Hello" -m claude-3-7-sonnet          # Quick terminal streaming completion
 ./singular chat "Write code" -m deepseek-v4           # Test DeepSeek
 ./singular chat "Hello" --simulate                    # Force simulated completion
+
+# 6. Remote Access
+./start.sh --lan                     # Allow phones / other PCs on your network
+./singular key                       # Show the gateway key for other devices & tunnel
+./singular key rotate                # Replace the key (logs every device out)
 ```
 
 ---

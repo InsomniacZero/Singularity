@@ -56,8 +56,6 @@ def _parse_grok_creds(cookie_str: str) -> Dict[str, str]:
         uid = uid_m.group(1).strip()
     if not sso and len(cookie_str) > 20 and ";" not in cookie_str:
         sso = cookie_str.strip()
-    if not uid:
-        uid = "b9e803ff-94ed-46c1-88bd-4baf02c5ccfe"
     return {"sso": sso, "uid": uid}
 
 
@@ -89,6 +87,15 @@ async def stream_grok_chat(
             "created": int(time.time()),
             "model": model,
             "choices": [{"index": 0, "delta": {"content": "Error: No Grok SSO cookie found in vault."}, "finish_reason": "error"}],
+        }
+        return
+    if not uid:
+        yield {
+            "id": f"chatcmpl-grok-err",
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [{"index": 0, "delta": {"content": "Error: Grok cookie is missing 'x-userid'. Paste the full Cookie header from grok.com (it includes sso=...; x-userid=...)."}, "finish_reason": "error"}],
         }
         return
 
